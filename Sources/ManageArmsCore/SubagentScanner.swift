@@ -138,3 +138,49 @@ public enum SubagentManager {
         try registry.save(env: env)
     }
 }
+
+extension SubagentManager {
+    /// Subagent の取り込み。Skills と同じく**実体は動かさない**（DESIGN.md 8 章）。
+    /// 実体が置き場にあるものだけが対象で、symlink を 2 本張り直す。
+    public static func adopt(_ name: String, env: Environment, registry: inout Registry) throws {
+        guard registry.entry(named: name) == nil else {
+            throw SkillManager.Failure.alreadyExists(name)
+        }
+        guard FileManager.default.fileExists(
+            atPath: storeURL(name, env: env).path(percentEncoded: false))
+        else { throw SkillManager.Failure.notFound(name) }
+
+        registry.upsert(Registry.Entry(name: name, kind: .subagent))
+        do {
+            try enable(name, env: env, registry: &registry)
+        } catch {
+            registry.resources.removeAll { $0.name == name }
+            throw error
+        }
+    }
+
+    /// symlink（Claude / Cursor の 2 本）を外し、実体をゴミ箱へ移して registry から外す。
+    /// SkillManager.remove と同じ方針 — **完全削除しない**（DESIGN.md 8 章）。
+    @discardableResult
+    public static func remove(_ name: String, env: Environment, registry: inout Registry) throws -> URL? {
+        let fm = FileManager.default
+        for link in linkURLs(name, env: env) where WriteGuard.isSymlink(link) {
+            try WriteGuard.assertMutable(link, env: env, registry: registry)
+            try fm.removeItem(at: link)
+        }
+
+        var trashed: URL?
+        for url in [storeURL(name, env: env), parkedURL(name, env: env)]
+        where fm.fileExists(atPath: url.path(percentEncoded: false)) {
+            try WriteGuard.assertMutable(url, env: env, registry: registry)
+            var result: NSURL?
+            try fm.trashItem(at: url, resultingItemURL: &result)
+            trashed = result as URL?
+        }
+        guard trashed != nil else { throw SkillManager.Failure.notFound(name) }
+
+        registry.resources.removeAll { $0.name == name }
+        try registry.save(env: env)
+        return trashed
+    }
+}

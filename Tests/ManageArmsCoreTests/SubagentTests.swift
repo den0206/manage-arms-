@@ -277,3 +277,30 @@ struct SubagentIdentifyTests {
         #expect(registry.entry(named: "reviewer")?.repo == "o/r")
     }
 }
+
+/// DESIGN.md 8 章 — Subagent の削除。symlink は 2 本ある。
+@Suite("Subagent の削除")
+struct SubagentRemoveTests {
+
+    @Test("削除で symlink 2 本・実体・registry が消える")
+    func removes() throws {
+        let f = try SubagentScannerTests.Fixture()
+        let store = f.env.agentStore.appending(path: "demo.md")
+        try f.fm.createDirectory(at: f.env.agentStore, withIntermediateDirectories: true)
+        try SubagentScannerTests.real.write(to: store, atomically: true, encoding: .utf8)
+
+        var registry = Registry()
+        registry.upsert(Registry.Entry(name: "demo", kind: .subagent))
+        try SubagentManager.enable("demo", env: f.env, registry: &registry)
+
+        let trashed = try SubagentManager.remove("demo", env: f.env, registry: &registry)
+        for link in [".claude/agents/demo.md", ".cursor/agents/demo.md"] {
+            #expect(!f.fm.fileExists(atPath: f.env.home.appending(path: link)
+                                                .path(percentEncoded: false)))
+            #expect(!WriteGuard.isSymlink(f.env.home.appending(path: link)))
+        }
+        #expect(!f.fm.fileExists(atPath: store.path(percentEncoded: false)))
+        #expect(registry.entry(named: "demo") == nil)
+        try trashed.map { try f.fm.removeItem(at: $0) }
+    }
+}

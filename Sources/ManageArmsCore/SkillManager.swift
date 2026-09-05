@@ -86,3 +86,57 @@ public enum SkillManager {
         try fm.createSymbolicLink(at: link, withDestinationURL: target)
     }
 }
+
+extension SkillManager {
+    /// ユーザーが自分で入れたスキルを、このアプリの管理下に取り込む（DESIGN.md 8 章）。
+    ///
+    /// **ファイルは 1 バイトも動かさない。** 実体は既に `~/.agents/skills/` にあるので、
+    /// registry に 1 行足して Claude 用の symlink を張るだけ。
+    /// 取り込むと有効/無効の切り替えと削除ができるようになる（`WriteGuard` が通る）。
+    /// 取得元が分からないので**更新はできない**（`repo` が nil = `.unknown`）。
+    public static func adopt(_ name: String, env: Environment, registry: inout Registry) throws {
+        guard registry.entry(named: name) == nil else { throw Failure.alreadyExists(name) }
+        guard FileManager.default.fileExists(
+            atPath: env.skillStore.appending(path: name).path(percentEncoded: false))
+        else { throw Failure.notFound(name) }
+
+        registry.upsert(Registry.Entry(name: name, kind: .skill))
+        do {
+            // 他ツールが張った symlink が居座っていれば WriteGuard が弾く。
+            // その場合は取り込まない（横取りしない）。
+            try linkForClaude(name, env: env, registry: registry)
+        } catch {
+            registry.resources.removeAll { $0.name == name }
+            throw error
+        }
+        try registry.save(env: env)
+    }
+
+    /// 実体をゴミ箱へ移し、registry から外す。**完全削除しない** —
+    /// 初心者が誤って消しても Finder から戻せる状態を残す（DESIGN.md 8 章）。
+    /// 戻り値はゴミ箱に入った実体の位置（テストの後片付けに使う）。
+    @discardableResult
+    public static func remove(_ name: String, env: Environment, registry: inout Registry) throws -> URL? {
+        let fm = FileManager.default
+        let link = env.claudeSkills.appending(path: name)
+        if WriteGuard.isSymlink(link) {
+            try WriteGuard.assertMutable(link, env: env, registry: registry)
+            try fm.removeItem(at: link)
+        }
+
+        // 有効なら実体置き場、無効なら退避先にある。どちらか片方だけが存在する。
+        var trashed: URL?
+        for url in [env.skillStore.appending(path: name), env.disabledStore.appending(path: name)]
+        where fm.fileExists(atPath: url.path(percentEncoded: false)) {
+            try WriteGuard.assertMutable(url, env: env, registry: registry)
+            var result: NSURL?
+            try fm.trashItem(at: url, resultingItemURL: &result)
+            trashed = result as URL?
+        }
+        guard trashed != nil else { throw Failure.notFound(name) }
+
+        registry.resources.removeAll { $0.name == name }
+        try registry.save(env: env)
+        return trashed
+    }
+}
