@@ -33,14 +33,6 @@
 "スキル・サブエージェントを追加する" = "Add a skill or subagent";
 "使いたいスキルの GitHub ページを開き、その URL をそのまま貼り付けてください。" = "Open the skill's page on GitHub and paste its URL here.";
 "中身を確認するまで何も入りません。追加したものは Claude Code / Cursor / Codex の全部から使えます。" = "Nothing is installed until you review the contents. Whatever you add works in Claude Code, Cursor and Codex.";
-"MCP サーバーとプラグインの追加は各 CLI が行います（claude mcp add / claude plugin install）。このアプリでは一覧と整理ができます。" = "MCP servers and plugins are added by each CLI (claude mcp add / claude plugin install). This app lists and tidies them.";
-"どこで見つける？" = "Where to find skills";
-"anthropics/skills — Anthropic 公式のスキル集" = "anthropics/skills — Anthropic's official collection";
-"GitHub の claude-skills トピック" = "The claude-skills topic on GitHub";
-"開いたページのフォルダの URL をコピーして、上のボックスに貼り付けます。" = "Copy the URL of the folder you opened and paste it into the box above.";
-"まだありません。上のボックスから追加できます。" = "Nothing yet. Add something with the box above.";
-"あなたが入れたもの" = "Installed by you";
-"%lld 件。うち %lld 件はこのアプリから切り替え・削除できます（左のエージェントを選ぶ）" = "%1$lld items, %2$lld of which this app can enable, disable or delete — pick an agent on the left";
 "エージェントの検出状況" = "Detected agents";
 "~/%@（CLI なし・設定を直接読む）" = "~/%@ (no CLI — the config is read directly)";
 "~/%@ はあるが CLI が見つからない" = "~/%@ exists, but the CLI was not found";
@@ -186,3 +178,5 @@
 "設定のみ" = "Config only";
 "使用状況 %@" = "Usage %@";
 "確認するまで何も入りません" = "Nothing is installed until you confirm";
+"探す:" = "Find skills:";
+"読み込めないものが %lld 件あります（左のエージェントを選ぶと確認できます）" = "%lld items cannot be loaded — pick an agent on the left to see them";

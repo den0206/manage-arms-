@@ -11,7 +11,6 @@ import ManageArmsCore
 /// 装飾で情報を作ろうとすると、macOS のどのアプリにも似ていない画面になる。
 enum Theme {
     /// 4 の倍数だけを使う。中間の値が要ると感じたら、たいてい階層の作り方が間違っている。
-    static let tight: CGFloat = 4
     static let gap: CGFloat = 8
     static let pad: CGFloat = 16
     static let block: CGFloat = 24
@@ -177,37 +176,6 @@ struct BusyBar: View {
         shift = false
         withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
             shift = true
-        }
-    }
-}
-
-/// 折り返す横並び。件数が環境しだいで増えるチップ（自分で入れたもの・実測 18 件）に使う。
-/// `HStack` だと画面外へ消え、`Text` の連結だと 1 つ 1 つが読み取れない。
-struct WrapLayout: Layout {
-    var spacing: CGFloat = 6
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? .infinity
-        var (x, y, lineHeight) = (CGFloat.zero, CGFloat.zero, CGFloat.zero)
-        for size in subviews.map({ $0.sizeThatFits(.unspecified) }) {
-            if x > 0, x + size.width > width { x = 0; y += lineHeight + spacing; lineHeight = 0 }
-            x += size.width + spacing
-            lineHeight = max(lineHeight, size.height)
-        }
-        return CGSize(width: proposal.width ?? x, height: y + lineHeight)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize,
-                       subviews: Subviews, cache: inout ()) {
-        var (x, y, lineHeight) = (bounds.minX, bounds.minY, CGFloat.zero)
-        for view in subviews {
-            let size = view.sizeThatFits(.unspecified)
-            if x > bounds.minX, x + size.width > bounds.maxX {
-                x = bounds.minX; y += lineHeight + spacing; lineHeight = 0
-            }
-            view.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
-            x += size.width + spacing
-            lineHeight = max(lineHeight, size.height)
         }
     }
 }

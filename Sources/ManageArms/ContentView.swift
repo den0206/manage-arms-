@@ -235,17 +235,14 @@ struct HomeView: View {
 
     /// 自分で入れたもの全部（このアプリ経由に限らない）。同梱は数えない。
     private var mine: [ResourceRow] { model.inventory.rows.filter { $0.origin != .bundled } }
-    private var managed: [ResourceRow] { model.inventory.rows.filter(\.isManaged) }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.block) {
                 hero
                 addCard
-                statRow
-                agentGrid
-                mineCard
-                findCard
+                summary
+                agentList
             }
             .padding(28)
             .frame(maxWidth: Theme.readable, alignment: .leading)
@@ -288,15 +285,22 @@ struct HomeView: View {
                 interpretation
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
-            VStack(alignment: .leading, spacing: 4) {
-                Label("中身を確認するまで何も入りません。追加したものは Claude Code / Cursor / Codex の全部から使えます。",
-                      systemImage: "info.circle")
-                // MCP とプラグインの追加は各 CLI に委譲している（DESIGN.md 3.1）。
-                // 「未対応」ではなく「どこでやるか」を書く。
-                Label("MCP サーバーとプラグインの追加は各 CLI が行います（claude mcp add / claude plugin install）。このアプリでは一覧と整理ができます。",
-                      systemImage: "terminal")
+            // **貼る URL の入手先は、貼る場所と同じ箱に置く。**
+            // 「どうやって入れるのか分からない」が最大の詰まり所（6 章）なので、
+            // 探し先まで含めて 1 か所で完結させる。節に切り出すと追加導線から離れる。
+            HStack(spacing: 6) {
+                Text("探す:")
+                Link(destination: URL(string: "https://github.com/anthropics/skills")!) {
+                    Text(verbatim: "anthropics/skills")
+                }
+                Text(verbatim: "·")
+                Link(destination: URL(string: "https://github.com/topics/claude-skills")!) {
+                    Text(verbatim: "github.com/topics/claude-skills")
+                }
             }
-            .font(.caption).foregroundStyle(.tertiary)
+            .font(.caption)
+            Text("中身を確認するまで何も入りません。追加したものは Claude Code / Cursor / Codex の全部から使えます。")
+                .font(.caption).foregroundStyle(.tertiary)
         }
         .card()
         .animation(Motion.pop, value: add.text.isEmpty)
@@ -322,6 +326,23 @@ struct HomeView: View {
         showAdd = true
     }
 
+    /// 持ち物の要約。**名前は並べない** — 18 個のチップを敷き詰めても押せないし、
+    /// 同じ一覧は各エージェント画面にあって、そちらでは切り替えと削除ができる。
+    /// ここに要るのは規模（何が何件か）と、異常があるという事実だけ。
+    private var summary: some View {
+        VStack(alignment: .leading, spacing: Theme.gap) {
+            statRow
+            // 正常なら何も出ない。読み込めないものは各画面に散るので気づけない（5.3）。
+            if broken > 0 {
+                Label("読み込めないものが \(broken) 件あります（左のエージェントを選ぶと確認できます）",
+                      systemImage: "exclamationmark.circle")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+        }
+    }
+
+    private var broken: Int { mine.count(where: \.isUnusable) }
+
     /// 種別ごとの件数。**同梱は数えない** — 自分で入れたものの規模が知りたい。
     /// 4 枚のカードに散らさず、1 本の帯を縦罫で仕切る（合計が 1 つの事実だと分かる）。
     private var statRow: some View {
@@ -346,134 +367,68 @@ struct HomeView: View {
 
     /// 旧「エージェント」画面の中身（DESIGN.md 8 章）。専用画面を持つほどの情報量が無い。
     /// **押せばそのエージェントの画面へ行く** — 検出状況を見た次にやることはそれ。
-    private var agentGrid: some View {
+    /// 囲みは 1 枚。4 枚のカードに分けると、4 行の表と同じ情報に 4 倍の縁が付く。
+    private var agentList: some View {
         VStack(alignment: .leading, spacing: Theme.gap) {
             Text("エージェントの検出状況").font(.headline)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: Theme.gap)],
-                      spacing: Theme.gap) {
+            VStack(spacing: 0) {
                 ForEach(Agent.allCases) { agent in
-                    let detection = model.inventory.agents[agent] ?? .undetected
-                    Button {
+                    if agent != Agent.allCases.first { Divider() }
+                    AgentRow(agent: agent,
+                             detection: model.inventory.agents[agent] ?? .undetected,
+                             count: model.inventory.rows(for: agent)
+                                 .filter { $0.origin != .bundled }.count) {
                         withAnimation(Motion.gentle) { screen = .agent(agent) }
-                    } label: {
-                        AgentCard(agent: agent, detection: detection,
-                                  count: model.inventory.rows(for: agent)
-                                      .filter { $0.origin != .bundled }.count)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(detection == .undetected)
-                }
-            }
-        }
-    }
-
-    private var mineCard: some View {
-        VStack(alignment: .leading, spacing: Theme.gap) {
-            Text("あなたが入れたもの").font(.headline)
-            if mine.isEmpty {
-                Text("まだありません。上のボックスから追加できます。")
-                    .font(.callout).foregroundStyle(.secondary)
-            } else {
-                Text("\(mine.count) 件。うち \(managed.count) 件はこのアプリから切り替え・削除できます（左のエージェントを選ぶ）")
-                    .font(.callout).foregroundStyle(.secondary)
-                WrapLayout(spacing: 5) {
-                    ForEach(mine) { row in
-                        // 管理下かどうかは**印**で示す。18 個のチップを色で塗り分けると、
-                        // 名前を読む前に色の群れが目に入る。色は異常（読み込めない）だけ。
-                        Pill(text: row.name,
-                             tint: row.isUnusable ? .orange : nil,
-                             icon: row.isManaged ? "checkmark" : nil)
                     }
                 }
             }
-        }
-    }
-
-    private var findCard: some View {
-        VStack(alignment: .leading, spacing: Theme.tight) {
-            Text("どこで見つける？").font(.headline)
-            // 行の当たり判定は見出しより外へはみ出させ、**文字の左端は見出しと揃える**。
-            // ホバーの下敷きの分だけ字下げされていると、節の中で 1 か所だけ列がずれる。
-            VStack(alignment: .leading, spacing: 0) {
-                LinkRow(title: "anthropics/skills — Anthropic 公式のスキル集",
-                        url: URL(string: "https://github.com/anthropics/skills")!)
-                LinkRow(title: "GitHub の claude-skills トピック",
-                        url: URL(string: "https://github.com/topics/claude-skills")!)
-            }
-            .padding(.horizontal, -8)
-            Text("開いたページのフォルダの URL をコピーして、上のボックスに貼り付けます。")
-                .font(.caption).foregroundStyle(.tertiary)
-                .padding(.top, 2)
+            // 行の下敷きは四角なので、角丸で切り抜く。先頭と末尾の行にホバーすると
+            // 囲みの角からはみ出す。
+            .clipShape(RoundedRectangle(cornerRadius: Theme.radiusM))
+            .card(padding: 0)
         }
     }
 }
 
-struct LinkRow: View {
-    let title: LocalizedStringKey
-    let url: URL
-    @State private var hovering = false
-
-    var body: some View {
-        Button { NSWorkspace.shared.open(url) } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "link").foregroundStyle(.tint)
-                Text(title)
-                Spacer(minLength: 0)
-                Image(systemName: "arrow.up.forward")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .opacity(hovering ? 1 : 0)
-                    .offset(x: hovering ? 0 : -4)
-            }
-            .padding(.horizontal, 8).padding(.vertical, 6)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .background(hovering ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear),
-                    in: RoundedRectangle(cornerRadius: Theme.radiusS))
-        .animation(Motion.gentle, value: hovering)
-        .onHover { hovering = $0 }
-        .help(url.absoluteString)
-    }
-}
-
-/// ホームのエージェント 1 枚。検出状況（3.7 の 4 状態）を色と文で両方出す。
-struct AgentCard: View {
+/// ホームのエージェント 1 行。検出状況（3.7 の 4 状態）を色と文で両方出す。
+/// **1 行に収める** — 名前・状態・バージョン・件数は、縦に積まなくても横に並ぶ。
+struct AgentRow: View {
     let agent: Agent
     let detection: Detection
     let count: Int
+    let open: () -> Void
     @State private var hovering = false
 
+    private var enabled: Bool { detection != .undetected }
+
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            AgentIcon(agent: agent, size: 26)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(agent.displayName).font(.callout.weight(.semibold))
-                    StatusDot(detection: detection)
-                    Spacer(minLength: 0)
-                    if count > 0, detection != .undetected {
-                        Text(count.formatted())
-                            .font(.callout).monospacedDigit().foregroundStyle(.secondary)
-                    }
-                }
+        Button(action: open) {
+            HStack(spacing: 8) {
+                AgentIcon(agent: agent, size: 18)
+                Text(agent.displayName).font(.callout.weight(.medium))
+                StatusDot(detection: detection)
                 detail
-                    .font(.caption2).foregroundStyle(.secondary)
-                    .lineLimit(2).multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .font(.caption).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 8)
+                if count > 0, enabled {
+                    Text(count.formatted())
+                        .font(.callout).monospacedDigit().foregroundStyle(.secondary)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.caption2).foregroundStyle(.tertiary)
+                    .opacity(enabled ? 1 : 0)
             }
+            .padding(.horizontal, 12).padding(.vertical, 9)
+            .contentShape(Rectangle())
         }
-        .card(padding: 12, radius: Theme.radiusM)
-        // ホバーで拡大しない。並んだカードが 1 枚だけ動くと、位置が揺れて読みにくい。
-        // 押せることは、地色がわずかに変わるだけで足りる。
-        .overlay {
-            RoundedRectangle(cornerRadius: Theme.radiusM)
-                .fill(.quaternary.opacity(hovering && detection != .undetected ? 0.4 : 0))
-                .allowsHitTesting(false)
-        }
-        .opacity(detection == .undetected ? 0.55 : 1)
+        .buttonStyle(.plain)
+        .background(hovering && enabled ? AnyShapeStyle(.quaternary.opacity(0.4))
+                                        : AnyShapeStyle(.clear))
+        .opacity(enabled ? 1 : 0.55)
         .animation(Motion.gentle, value: hovering)
         .onHover { hovering = $0 }
+        .disabled(!enabled)
     }
 
     @ViewBuilder
@@ -485,6 +440,7 @@ struct AgentCard: View {
                 Text("~/\(agent.configDir)（CLI なし・設定を直接読む）")
             } else {
                 Text(verbatim: [version, path].compactMap { $0 }.joined(separator: "  "))
+                    .help(path ?? "")
             }
         case .configOnly:
             Text("~/\(agent.configDir) はあるが CLI が見つからない")

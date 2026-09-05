@@ -75,6 +75,11 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 - Toned the interface down to match the rest of macOS: no gradients, no drop shadows and
   no per-kind colour coding. Colour is now reserved for meaning — green for running, orange
   for attention, red for destructive actions.
+- Simplified the home screen. The wall of chips listing every item you installed is gone —
+  it could not be acted on, grows with your setup and duplicates the agent screens; the
+  per-kind counts stay, plus a single line when something cannot be loaded. Where to find
+  skills is now a footnote inside the add box rather than a section of its own, and the
+  four agent cards are one table.
 - The permissions list no longer repeats what the filter already says. The
   "machine-specific" and "duplicated" markers are hidden in the filter that selects for
   them, and `allow` is no longer tinted, so the rarer `deny` and `ask` stand out.
