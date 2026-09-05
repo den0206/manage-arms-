@@ -185,3 +185,4 @@
 "検出済み" = "Detected";
 "設定のみ" = "Config only";
 "使用状況 %@" = "Usage %@";
+"確認するまで何も入りません" = "Nothing is installed until you confirm";

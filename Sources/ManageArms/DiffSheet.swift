@@ -12,33 +12,64 @@ struct DiffSheet: View {
     let model: AppModel
     @SwiftUI.Environment(\.dismiss) private var dismiss
 
+    private var added: Int { preview.diff.count { $0.kind == .added } }
+    private var removed: Int { preview.diff.count { $0.kind != .added } }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("\(preview.name) を更新").font(.title3.weight(.semibold))
-            Text(versions).font(.caption).foregroundStyle(.secondary)
+            SheetHeader(title: "\(preview.name) を更新", subtitle: versions,
+                        symbol: "arrow.triangle.2.circlepath", tint: .accentColor)
 
-            Divider()
             if preview.hasChanges {
-                Text("SKILL.md").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 1) {
-                        ForEach(Array(preview.diff.enumerated()), id: \.offset) { _, line in
-                            // verbatim: 差分の中身は SKILL.md の本文。翻訳対象ではないし、
-                            // "%@ %@" というキーを作らせない。
-                            Text(verbatim: "\(line.kind == .added ? "+" : "-") \(line.text)")
-                                .font(.system(.caption, design: .monospaced))
-                                .foregroundStyle(line.kind == .added ? Color.green : Color.red)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .textSelection(.enabled)
-                        }
-                    }
-                    .padding(8)
+                HStack(spacing: 6) {
+                    Text("SKILL.md").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Spacer()
+                    Pill(text: "+\(added)", tint: .green)
+                    Pill(text: "−\(removed)", tint: .red)
                 }
-                .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 6))
+                diff
             } else {
                 ContentUnavailableView("内容に差分はありません", systemImage: "equal.circle")
             }
+        }
+        .padding(20)
+        .safeAreaInset(edge: .bottom, spacing: 0) { footer }
+        .frame(width: 660, height: 500)
+    }
 
+    /// 差分は**行の色ではなく、行そのものの地色**で分ける。
+    /// 記号（+ / −）だけだと、等幅でも折り返しの多い散文では追えない。
+    private var diff: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(preview.diff.enumerated()), id: \.offset) { _, line in
+                    let plus = line.kind == .added
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(verbatim: plus ? "+" : "−")
+                            .foregroundStyle(plus ? Color.green : Color.red)
+                            .frame(width: 10, alignment: .leading)
+                        // verbatim: 差分の中身は SKILL.md の本文。翻訳対象ではないし、
+                        // "%@ %@" というキーを作らせない。
+                        Text(verbatim: line.text)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                    .font(.system(.caption, design: .monospaced))
+                    .padding(.horizontal, 8).padding(.vertical, 2)
+                    .background(plus ? Color.green.opacity(0.12) : Color.red.opacity(0.12))
+                }
+            }
+        }
+        .background(.quinary, in: RoundedRectangle(cornerRadius: Theme.radiusS))
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.radiusS)
+                .strokeBorder(.separator.opacity(0.5), lineWidth: 1)
+        }
+    }
+
+    private var footer: some View {
+        VStack(spacing: 0) {
+            Divider()
             HStack {
                 Button("このバージョンで固定") {
                     model.discardPreview()
@@ -48,12 +79,13 @@ struct DiffSheet: View {
                 Spacer()
                 Button("閉じる") { model.discardPreview(); dismiss() }
                 Button("更新する") { model.applyPreview(); dismiss() }
+                    .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
                     .disabled(!preview.hasChanges)
             }
+            .padding(.horizontal, 20).padding(.vertical, 14)
         }
-        .padding(20)
-        .frame(width: 620, height: 480)
+        .background(.bar)
     }
 
     private var versions: String {

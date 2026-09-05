@@ -65,5 +65,12 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 ### Changed
 
 - ManageArms now requires macOS 26 or later.
+- Reworked the visual design across every screen. The home screen leads with the add box
+  and summarises what you have installed as counts per kind, and each agent is a card you
+  can click to open its screen. Rows highlight under the pointer, scope tabs slide their
+  selection, counts animate when they change, a running MCP server pulses, and loading
+  shows as a thin bar at the top instead of a spinner over the list. Spacing, corner radii
+  and motion now come from one shared vocabulary, and every animation is disabled when
+  "Reduce motion" is on.
 
 [Unreleased]: https://github.com/den0206/manage-arms/compare/Ver_0.0.1...HEAD

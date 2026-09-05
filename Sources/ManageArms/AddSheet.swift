@@ -71,9 +71,11 @@ struct AddSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("スキル・サブエージェントを追加").font(.title3.weight(.semibold))
+            SheetHeader(title: "スキル・サブエージェントを追加",
+                        subtitle: String(localized: "確認するまで何も入りません"),
+                        symbol: "plus.circle", tint: .accentColor)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 TextField("GitHub の URL / MCP の JSON / npx コマンドを貼り付け",
                           text: $add.text, axis: .vertical)
                     .lineLimit(2...5)
@@ -88,28 +90,42 @@ struct AddSheet: View {
             Divider()
             result
             Spacer(minLength: 0)
-
-            HStack {
-                Spacer()
-                Button("閉じる") { add.discard(); dismiss() }
-                Button(add.isBusy ? "取得中…" : "取得") { add.fetch() }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(add.source == nil || add.isBusy)
-            }
         }
         .padding(20)
-        .frame(width: 560, height: 460)
+        .safeAreaInset(edge: .bottom, spacing: 0) { footer }
+        .frame(width: 580, height: 480)
+        .animation(Motion.pop, value: add.staged?.candidates.count ?? 0)
         .alert("失敗しました", isPresented: .init(get: { add.error != nil },
                                             set: { if !$0 { add.error = nil } })) {
             Button("OK") { add.error = nil }
         } message: { Text(add.error ?? "") }
     }
 
+    private var footer: some View {
+        VStack(spacing: 0) {
+            Divider()
+            HStack {
+                if add.isBusy {
+                    ProgressView().controlSize(.small)
+                    Text("取得しています…").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("閉じる") { add.discard(); dismiss() }
+                Button(add.isBusy ? "取得中…" : "取得") { add.fetch() }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(add.source == nil || add.isBusy)
+            }
+            .padding(.horizontal, 20).padding(.vertical, 14)
+        }
+        .background(.bar)
+    }
+
     @ViewBuilder
     private var interpretation: some View {
         switch add.interpretation {
         case .github:
-            Label("GitHub リポジトリとして解釈しました", systemImage: "checkmark.circle")
+            Label("GitHub リポジトリとして解釈しました", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green).font(.caption)
         case .mcpJSON:
             Label("MCP の設定です。追加は claude mcp add で行います", systemImage: "terminal")
@@ -148,6 +164,8 @@ struct AddSheet: View {
                 }
             }
         }
+        .padding(12)
+        .background(.quinary, in: RoundedRectangle(cornerRadius: Theme.radiusS))
     }
 
     @ViewBuilder
@@ -160,35 +178,51 @@ struct AddSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(staged.candidates, id: \.name) { candidate in
-                        HStack(alignment: .top) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack(spacing: 6) {
-                                    Text(candidate.name).font(.body.weight(.medium))
-                                    Text(candidate.kind.rawValue.uppercased())
-                                        .font(.caption2.weight(.semibold))
-                                        .padding(.horizontal, 5).padding(.vertical, 1)
-                                        .background(.quaternary, in: Capsule())
-                                }
-                                Text(candidate.description ?? String(localized: "（説明なし）"))
-                                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                                // Skills は全エージェント一括（3.2）。導入先は選べない。
-                                Text(candidate.kind == .subagent ? "Claude Code / Cursor に導入されます"
-                                                 : "Claude Code / Cursor / Codex に導入されます")
-                                    .font(.caption2).foregroundStyle(.tertiary)
-                            }
-                            Spacer()
-                            Button("追加") {
-                                add.install(candidate) { onInstalled() }
-                            }
-                            .disabled(candidate.kind != .skill && candidate.kind != .subagent)
+                        CandidateRow(candidate: candidate) {
+                            add.install(candidate) { onInstalled() }
                         }
-                        Divider()
                     }
                 }
+                .padding(.vertical, 2)
             }
         } else {
             Text("「取得」を押すと中身を確認できます。確認するまで何も入りません。")
                 .font(.caption).foregroundStyle(.tertiary)
         }
+    }
+}
+
+/// 取得した候補 1 件。**押す前に、何がどこへ入るのかを 1 枚で見せる**（DESIGN.md 6 章）。
+struct CandidateRow: View {
+    let candidate: Candidate
+    let install: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            KindIcon(kind: candidate.kind, size: 20)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(candidate.name).font(.body.weight(.medium))
+                Text(candidate.description ?? String(localized: "（説明なし）"))
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                // Skills は全エージェント一括（3.2）。導入先は選べない。
+                Label(candidate.kind == .subagent ? "Claude Code / Cursor に導入されます"
+                                                  : "Claude Code / Cursor / Codex に導入されます",
+                      systemImage: "arrow.down.circle")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
+            Spacer(minLength: 8)
+            Button("追加", action: install)
+                .disabled(candidate.kind != .skill && candidate.kind != .subagent)
+        }
+        .padding(10)
+        .background(hovering ? AnyShapeStyle(.quaternary.opacity(0.6)) : AnyShapeStyle(.quinary),
+                    in: RoundedRectangle(cornerRadius: Theme.radiusS))
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.radiusS)
+                .strokeBorder(.separator.opacity(0.5), lineWidth: 1)
+        }
+        .animation(Motion.gentle, value: hovering)
+        .onHover { hovering = $0 }
     }
 }

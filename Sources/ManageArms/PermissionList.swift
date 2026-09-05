@@ -52,10 +52,11 @@ struct PermissionList: View {
             Divider()
             footer
         }
+        .navigationTitle("権限")
     }
 
     private var toolbar: some View {
-        HStack {
+        HStack(spacing: 10) {
             Picker("", selection: $filter) {
                 ForEach(Filter.allCases) { Text($0.title).tag($0) }
             }
@@ -71,18 +72,22 @@ struct PermissionList: View {
                 selection.removeAll()
             } label: {
                 Label("選択した \(chosen.count) 件を削除", systemImage: "trash")
+                    .contentTransition(.numericText())
             }
+            .buttonStyle(.bordered)
+            .tint(.red)
+            .animation(Motion.count, value: chosen.count)
             .disabled(chosen.isEmpty || model.isEditingPermissions)
         }
         .padding(12)
+        .background(.bar)
     }
 
     private func row(_ entry: PermissionEntry) -> some View {
         HStack(spacing: 10) {
-            Text(entry.bucket.rawValue)
-                .font(.caption2.weight(.semibold))
-                .padding(.horizontal, 5).padding(.vertical, 1)
-                .background(.quaternary, in: Capsule())
+            // allow / deny / ask は意味が正反対。色を分けて取り違えを防ぐ。
+            Pill(text: entry.bucket.rawValue, tint: tint(entry.bucket))
+                .frame(width: 46, alignment: .leading)
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.value).font(.system(.caption, design: .monospaced)).lineLimit(2)
                 HStack(spacing: 6) {
@@ -99,14 +104,27 @@ struct PermissionList: View {
             }
             Spacer()
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 3)
         .tag(entry.id)
+    }
+
+    private func tint(_ bucket: PermissionEntry.Bucket) -> Color {
+        switch bucket {
+        case .allow: .green
+        case .deny:  .red
+        case .ask:   .orange
+        }
     }
 
     private var footer: some View {
         HStack(spacing: 16) {
             Text("\(model.permissions.count) 件中 \(entries.count) 件を表示")
-            if model.isEditingPermissions { Text("削除中…") }
+            if model.isEditingPermissions {
+                HStack(spacing: 5) {
+                    ProgressView().controlSize(.small)
+                    Text("削除中…")
+                }
+            }
             Spacer()
             // 他人の設定ファイルを書き換える唯一の場所。戻せることを明示する（9 章）。
             Text("削除前の内容は Application Support にバックアップされます")
