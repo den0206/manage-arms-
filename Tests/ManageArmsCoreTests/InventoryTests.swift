@@ -476,3 +476,44 @@ struct RemovalCommandTests {
                     origin: .bundled).removalCommand(agent: .cursor) == nil)
     }
 }
+
+/// DESIGN.md 5.2 — プロジェクトからの一括削除。
+/// **ユーザーのリポジトリの中身はアプリから消さない。**
+@Suite("一括削除の計画")
+struct CleanupPlanTests {
+
+    func row(_ name: String, kind: Kind, reach: ResourceRow.Reach) -> ResourceRow {
+        ResourceRow(name: name, kind: kind, summary: nil, detail: "",
+                    state: [:], origin: .user, isDisabled: false, reach: reach)
+    }
+
+    @Test("実行してよいのは CLI が自分の領域に持っている登録だけ")
+    func executability() {
+        let plugin = row("ponytail@ponytail", kind: .plugin, reach: .projects(["/w/a"]))
+        #expect(plugin.isRemovalExecutable(mcpScope: nil))
+        let mcp = row("chrome-devtools", kind: .mcp, reach: .projects(["/w/a"]))
+        #expect(mcp.isRemovalExecutable(mcpScope: "local"))
+        // <proj>/.mcp.json は git 共有のファイル。消したことが他の人にも及ぶ。
+        #expect(!mcp.isRemovalExecutable(mcpScope: "project"))
+        #expect(!row("x", kind: .skill, reach: .projects(["/w/a"])).isRemovalExecutable(mcpScope: nil))
+        #expect(!row("y", kind: .subagent, reach: .projects(["/w/a"])).isRemovalExecutable(mcpScope: nil))
+    }
+
+    @Test("計画にはスコープ付きのコマンドが入り、実行可否で分かれる")
+    func plan() {
+        var inventory = Inventory(agents: [:], rows: [])
+        var scan = ProjectScan()
+        scan.mcpScopes["/w/a"] = ["shared": "project"]
+        inventory.projectScan = scan
+
+        let rows = [row("ponytail@ponytail", kind: .plugin, reach: .projects(["/w/a"])),
+                    row("shared", kind: .mcp, reach: .projects(["/w/a"])),
+                    row("repo-rules", kind: .skill, reach: .projects(["/w/a"]))]
+        let items = inventory.cleanupItems(rows, agent: .claude, project: "/w/a")
+
+        #expect(items.map(\.executable) == [true, false, false])
+        #expect(items[0].command == "cd '/w/a' && claude plugin remove ponytail@ponytail -s local")
+        #expect(items[1].command == "cd '/w/a' && claude mcp remove shared -s project")
+        #expect(items[2].command == "rm -rf '/w/a/.claude/skills/repo-rules'")
+    }
+}
