@@ -85,18 +85,21 @@ struct PermissionList: View {
 
     private func row(_ entry: PermissionEntry) -> some View {
         HStack(spacing: 10) {
-            // allow / deny / ask は意味が正反対。色を分けて取り違えを防ぐ。
+            // allow / deny / ask は意味が正反対。取り違えないよう幅を揃えて先頭に置く。
             Pill(text: entry.bucket.rawValue, tint: tint(entry.bucket))
                 .frame(width: 46, alignment: .leading)
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.value).font(.system(.caption, design: .monospaced)).lineLimit(2)
+                // **絞り込みが既に言っていることを、行ごとに繰り返さない。**
+                // 「使い捨て」表示では全行がマシン固有なので、印を出すと一覧が橙に染まり、
+                // 目印として機能しなくなる。
                 HStack(spacing: 6) {
                     Text(entry.scopeName).font(.caption2).foregroundStyle(.secondary)
-                    if entry.isMachineSpecific {
+                    if entry.isMachineSpecific, filter != .disposable {
                         Label("マシン固有", systemImage: "exclamationmark.triangle")
                             .font(.caption2).foregroundStyle(.orange)
                     }
-                    if let count = model.duplicateCounts[entry.value] {
+                    if let count = model.duplicateCounts[entry.value], filter != .duplicated {
                         Text("\(count) プロジェクトに重複")
                             .font(.caption2).foregroundStyle(.orange)
                     }
@@ -108,9 +111,11 @@ struct PermissionList: View {
         .tag(entry.id)
     }
 
-    private func tint(_ bucket: PermissionEntry.Bucket) -> Color {
+    /// allow は大多数なので無彩色にする。**色を付けるのは少数派の deny / ask だけ** —
+    /// 全行が緑だと、意味が正反対の 2 件が緑の中に埋もれる。
+    private func tint(_ bucket: PermissionEntry.Bucket) -> Color? {
         switch bucket {
-        case .allow: .green
+        case .allow: nil
         case .deny:  .red
         case .ask:   .orange
         }
