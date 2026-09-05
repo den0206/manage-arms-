@@ -1,0 +1,72 @@
+name: CI
+
+# main への Pull Request で、変更が壊れていないかを検証する（マージ前ゲート）。
+# 内容は「完了の定義」と同一:
+#   1. swift build              … 全ターゲットがコンパイルできる
+#   2. swift test               … 単体テスト
+#   3. check-invariants.sh      … 書き込み / 削除経路の限定・ローカライズのキー一致
+#   4. CHANGELOG                … 英語のみ・見出し語彙 + 切り出しロジックの自己テスト
+#   5. .app 組み立て            … バンドルが組める（Info.plist / .lproj / アイコンの解決）
+#
+# 依存ゼロの原則はパイプラインにも及ぶため、Marketplace のサードパーティ Action は使わない。
+# 許可は GitHub 公式の actions/checkout のみ。あとは Swift と macOS 標準ツールだけ。
+#
+# 3〜5 はすべて Scripts/ の同じスクリプトを呼ぶ。CI 専用の隠れロジックを持たせない
+# （持たせると「手元では通るのに CI で落ちる／その逆」が起きる）。
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+# 同一 PR に追い push があったら、古い実行を打ち切る。
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    # Package.swift は swift-tools-version 6.0 なので Swift 6 ツールチェーン（Xcode 16 以降）が要る。
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select latest stable Xcode
+        # ランナー既定の Xcode が古いと Swift 6 のビルドが不安定になるため、
+        # インストール済みの最新安定版を選ぶ（release.yml と揃える）。
+        run: |
+          XCODE="$(ls -d /Applications/Xcode_*.app 2>/dev/null | grep -viE 'beta|rc' | sort -V | tail -1)"
+          [ -n "$XCODE" ] || XCODE=/Applications/Xcode.app
+          echo "Selecting $XCODE"
+          sudo xcode-select -s "$XCODE"
+          swiftc --version
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test
+
+      - name: Check invariants
+        # 書き込み経路 / 削除経路の限定（DESIGN.md 3.1・9 章）と ja/en のキー一致。
+        run: ./Scripts/check-invariants.sh
+
+      - name: Lint CHANGELOG
+        # 公開 Release の本文になるので英語のみ・Keep a Changelog の見出し語彙に揃える。
+        # 併せて切り出しロジックの自己テストも回す。
+        run: |
+          ./Scripts/release-changelog.sh --check
+          ./Scripts/test-release-changelog.sh
+
+      - name: Assemble .app bundle
+        # 配布はしないが「バンドルが組めること」を確認する
+        # （アドホック署名・ネイティブ arch で高速。debug なので署名必須の対象外）。
+        env:
+          CONFIG: debug
+          UNIVERSAL: '0'
+        run: ./Scripts/build-app.sh
