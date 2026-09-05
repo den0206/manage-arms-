@@ -1,0 +1,274 @@
+name: Release
+
+# release/Ver_X.Y.Z ブランチが push されたら、ユニバーサル .app をビルドして DMG を作り、
+# GitHub Release（タグ Ver_X.Y.Z）として公開する。
+#
+# 依存ゼロの原則はパイプラインにも及ぶ。Marketplace のサードパーティ Action は使わない。
+# 許可は GitHub 公式の actions/checkout のみ。あとは gh と macOS / Swift 標準ツールだけ。
+#
+# 公開済みリリースは不変。同じ Ver_X.Y.Z が既にあれば**上書きせずジョブを落とす**
+# （やり直したいときは新しいパッチ版として出す）。
+#
+# **署名・公証は必須**。シークレットが 1 つでも欠けていたら、ビルドもせずに最初のステップで止める。
+# 未署名／アドホックの DMG は Gatekeeper に「開発元を確認できません」と弾かれる配布物にしかならず、
+# 出回ってしまうと回収できないため、作らせない（Scripts/build-app.sh 側にも同じガードがある）。
+# セットアップ手順は docs/signing.md。
+#
+# 署名 — 以下 4 つすべて必須:
+#   MACOS_CERT_P12         Developer ID Application 証明書（.p12）を base64 化した文字列
+#   MACOS_CERT_PASSWORD    その .p12 のパスワード
+#   MACOS_SIGN_IDENTITY    署名 ID 文字列（例: "Developer ID Application: 名前 (TEAMID)"）
+#   KEYCHAIN_PASSWORD      CI 用一時キーチェーンのパスワード（任意の非空値）
+# 公証 — 以下 3 つも必須:
+#   NOTARY_APPLE_ID        Apple ID（メール）
+#   NOTARY_TEAM_ID         Team ID
+#   NOTARY_PASSWORD        アプリ用パスワード（app-specific password）
+
+on:
+  push:
+    branches:
+      - 'release/Ver_*'
+
+# Release とタグの作成、および公開後の main への CHANGELOG 反映に要る。
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # Package.swift は swift-tools-version 6.0 なので Swift 6 ツールチェーン（Xcode 16 以降）が要る。
+    runs-on: macos-15
+
+    steps:
+      - name: Require signing secrets
+        # 署名・公証なしの配布物は作らない。ビルドに入る前にここで落とす。
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+        run: |
+          MISSING=""
+          for name in MACOS_CERT_P12 MACOS_CERT_PASSWORD MACOS_SIGN_IDENTITY KEYCHAIN_PASSWORD \
+                      NOTARY_APPLE_ID NOTARY_TEAM_ID NOTARY_PASSWORD; do
+            if [ -z "${!name}" ]; then MISSING="$MISSING $name"; fi
+          done
+          if [ -n "$MISSING" ]; then
+            echo "::error::署名・公証に必要なシークレットが未設定です:$MISSING"
+            echo "::error::未署名の DMG は作りません。設定手順は docs/signing.md を参照してください。"
+            exit 1
+          fi
+          echo "✓ 署名・公証のシークレットが揃っています"
+
+      - uses: actions/checkout@v4
+        with:
+          # タグの照合（既存版の検出）と main への CHANGELOG 反映に全履歴が要る。
+          fetch-depth: 0
+
+      - name: Select latest stable Xcode
+        # ランナー既定の Xcode が古いと Swift 6 のビルドが不安定になるため、
+        # インストール済みの最新安定版を選ぶ。
+        run: |
+          XCODE="$(ls -d /Applications/Xcode_*.app 2>/dev/null | grep -viE 'beta|rc' | sort -V | tail -1)"
+          [ -n "$XCODE" ] || XCODE=/Applications/Xcode.app
+          echo "Selecting $XCODE"
+          sudo xcode-select -s "$XCODE"
+          swiftc --version
+
+      - name: Resolve version from branch
+        id: meta
+        run: |
+          BRANCH="${GITHUB_REF_NAME}"          # 例: release/Ver_1.2.3
+          VERSION="${BRANCH##*/Ver_}"          # -> 1.2.3
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::branch '$BRANCH' が release/Ver_X.Y.Z 形式ではありません"
+            exit 1
+          fi
+
+          # 公開済みリリースは不変にする。既にあるタグは上書きしない。
+          if git ls-remote --exit-code --tags origin "refs/tags/Ver_$VERSION" >/dev/null 2>&1; then
+            echo "::error::Ver_$VERSION は既に公開されています。公開済みリリースは上書きしません。新しいパッチ版（release/Ver_X.Y.Z+1 相当）で出してください"
+            exit 1
+          fi
+
+          {
+            echo "version=$VERSION"
+            echo "tag=Ver_$VERSION"
+            echo "dmg=ManageArms-$VERSION.dmg"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Verify tests
+        run: swift test
+
+      - name: Import Developer ID certificate
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/app-signing.keychain-db"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          printf '%s' "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          echo "SIGN_IDENTITY=$MACOS_SIGN_IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Build universal ManageArms.app
+        env:
+          MARKETING_VERSION: ${{ steps.meta.outputs.version }}
+          FULL_VERSION: ${{ steps.meta.outputs.version }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: ./Scripts/build-app.sh
+
+      - name: Notarize & staple ManageArms.app
+        # DMG に詰める**前**に .app 単体を公証してチケットを貼る。
+        # DMG 側のチケットだけだと、ユーザーが /Applications へドラッグしたアプリには
+        # チケットが無く、初回起動が Apple へのオンライン照会に依存する（オフラインだと弾かれ得る）。
+        # ステープルは Contents/CodeResources にチケットを置くだけで署名は有効なまま。
+        env:
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+        run: |
+          # notarytool は .app ディレクトリを直接受け取れないので zip で包んで提出する
+          # （チケットは中身の CDHash に紐づくので、staple は元の .app に対して行う）。
+          ditto -c -k --keepParent --sequesterRsrc ".build/release/ManageArms.app" "$RUNNER_TEMP/ManageArms.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/ManageArms.zip" \
+            --apple-id "$NOTARY_APPLE_ID" \
+            --team-id "$NOTARY_TEAM_ID" \
+            --password "$NOTARY_PASSWORD" \
+            --wait
+          xcrun stapler staple ".build/release/ManageArms.app"
+          codesign --verify --strict --verbose=2 ".build/release/ManageArms.app"
+
+      - name: Create DMG
+        # ステープル済みの .app を詰める（上のステップが走った場合）。
+        run: |
+          ./Scripts/make-dmg.sh \
+            ".build/release/ManageArms.app" \
+            "${{ steps.meta.outputs.dmg }}" \
+            "ManageArms ${{ steps.meta.outputs.version }}"
+
+      - name: Sign DMG
+        # DMG 自体にも Developer ID 署名を付ける。未署名 DMG は Gatekeeper の
+        # primary-signature 評価で "no usable signature" になり、中身の改竄も検出できない。
+        run: |
+          codesign --force --timestamp --sign "$SIGN_IDENTITY" "${{ steps.meta.outputs.dmg }}"
+
+      - name: Notarize & staple DMG
+        env:
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+        run: |
+          xcrun notarytool submit "${{ steps.meta.outputs.dmg }}" \
+            --apple-id "$NOTARY_APPLE_ID" \
+            --team-id "$NOTARY_TEAM_ID" \
+            --password "$NOTARY_PASSWORD" \
+            --wait
+          xcrun stapler staple "${{ steps.meta.outputs.dmg }}"
+
+      - name: Verify Gatekeeper acceptance
+        # 配布物が実際に無警告で開けることを公開前に確認する。
+        # チケットの有無（stapler validate）は決定的なので fatal。spctl の評価はランナーの
+        # Gatekeeper 設定に左右され得るので warning に留める。
+        env:
+          DMG: ${{ steps.meta.outputs.dmg }}
+        run: |
+          xcrun stapler validate "$DMG"
+          spctl -a -t open --context context:primary-signature -vv "$DMG" \
+            || echo "::warning::spctl が DMG を accepted と判定しませんでした（ランナー環境の可能性あり）"
+
+          # DMG 内の .app も確認する（ユーザーが実際に起動するのはこちら）。
+          MNT="$RUNNER_TEMP/dmg-verify"
+          if hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MNT"; then
+            trap 'hdiutil detach "$MNT" >/dev/null 2>&1 || true' EXIT
+            xcrun stapler validate "$MNT/ManageArms.app"
+            spctl -a -vv "$MNT/ManageArms.app" \
+              || echo "::warning::spctl が .app を accepted と判定しませんでした（ランナー環境の可能性あり）"
+          else
+            echo "::warning::DMG をマウントできず .app の検証をスキップしました"
+          fi
+
+      - name: Cut CHANGELOG
+        # [Unreleased] を `## [X.Y.Z] — YYYY-MM-DD` へ移す。Release 本文はこの節を使う。
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: ./Scripts/release-changelog.sh "$VERSION" "$(date -u +%F)"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          DMG: ${{ steps.meta.outputs.dmg }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          # Release 本文は CHANGELOG.md の当該版の節（直前のステップが切り出したもの）。
+          # 節が無い = [Unreleased] が空のままリリースした場合だけ gh の自動生成へ落ちる。
+          NOTES="$RUNNER_TEMP/notes-${VERSION}.md"
+          if ./Scripts/release-changelog.sh --section "$VERSION" > "$NOTES"; then
+            echo "::notice::CHANGELOG.md の [$VERSION] を Release 本文に使用します"
+            NOTES_ARGS=(--notes-file "$NOTES")
+          else
+            echo "::warning::CHANGELOG.md に [$VERSION] の節がありません（[Unreleased] が空だった可能性）。gh の --generate-notes にフォールバックします"
+            NOTES_ARGS=(--generate-notes)
+          fi
+          # タグはこのビルド元コミットに対して作る。空きタグであることは確認済み。
+          gh release create "$TAG" "$DMG" \
+            --target "$GITHUB_SHA" \
+            --title "ManageArms ${VERSION}" \
+            "${NOTES_ARGS[@]}"
+
+      - name: Sync CHANGELOG to main
+        # 切り出しは release ブランチ上で起きるので、main の [Unreleased] は埋まったまま。
+        # 放置すると次のリリースで同じ項目をもう一度切ってしまうため main にも反映する。
+        # 作業ツリーは持ち運ばず main の最新から切り直す（リリース中に main へ入った
+        # 別の編集を巻き戻さないため）。
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin main
+
+          UNMERGED="$(git log --oneline "origin/main..$GITHUB_SHA" -- . ':!CHANGELOG.md')"
+          if [ -n "$UNMERGED" ]; then
+            echo "::warning::release ブランチに main 未取り込みのコミットがあります。手動で main に取り込んでください:"
+            echo "$UNMERGED"
+          fi
+
+          # fetch と push の間に main が進むと push は弾かれる。ここで諦めると main の
+          # [Unreleased] が埋まったままになり次のリリースで同じ項目を二重に切るので、
+          # 取り直してやり直す（切り出しは冪等なので繰り返して安全）。
+          for attempt in 1 2 3; do
+            git fetch origin main
+            git switch -f -C main origin/main
+            ./Scripts/release-changelog.sh "$VERSION" "$(date -u +%F)"
+
+            git add CHANGELOG.md
+            if git diff --cached --quiet; then
+              echo "::notice::main の CHANGELOG は既に最新です（切り出し済み）"
+              exit 0
+            fi
+            # [skip ci] がこの push による CI 再実行を防ぐ
+            git commit -m "chore: $TAG の CHANGELOG を切り出す [skip ci]"
+            if git push origin main; then
+              echo "::notice::main の CHANGELOG を更新しました"
+              exit 0
+            fi
+            echo "::warning::main への push に失敗しました（試行 $attempt/3）。取り直して再試行します"
+            sleep 5
+          done
+          echo "::error::main への CHANGELOG 反映に失敗しました。Release と DMG は公開済みです。main で 'Scripts/release-changelog.sh $VERSION' を手動実行して push してください（main がブランチ保護されている場合は github-actions をバイパスに追加）"
+          exit 1
