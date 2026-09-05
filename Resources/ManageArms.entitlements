@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- App Sandbox は使わない。~/.claude ~/.cursor ~/.codex ~/.agents を読み書きし、
+         claude / codex / gemini CLI を Process で起動するため（DESIGN.md 3.1 / 3.4）。
+         → Mac App Store は選択肢にならない。Developer ID 署名 + 公証で直配布する。 -->
+    <key>com.apple.security.app-sandbox</key>
+    <false/>
+</dict>
+</plist>

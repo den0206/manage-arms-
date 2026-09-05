@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>ManageArms</string>
+    <key>CFBundleDisplayName</key>
+    <string>ManageArms</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.yuukisakai.manage-arms</string>
+    <!-- Package.swift の executableTarget 名と一致させること。 -->
+    <key>CFBundleExecutable</key>
+    <string>ManageArms</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.0.1</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <!-- 再ビルド番号込みの完全版（例 1.2.3+1）。CFBundleShortVersionString は Apple の
+         形式要件で数値 3 成分のみのため別キーに持つ。将来アップデート確認を作るとき、
+         同一 X.Y.Z の再ビルドを新版として配るにはこのキーが要る。今は使わないが、
+         後から Info.plist だけ足しても既に配った版は読めないので最初から置く。
+         build-app.sh が FULL_VERSION で上書きする（未指定なら既定のまま）。 -->
+    <key>MAFullVersion</key>
+    <string>0.0.1</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <!-- 開発言語 = 日本語。Localizable.strings のキーは日本語文字列そのもので、
+         ja.lproj は恒等写像、en.lproj を翻訳として持つ。 -->
+    <key>CFBundleDevelopmentRegion</key>
+    <string>ja</string>
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>ja</string>
+        <string>en</string>
+    </array>
+    <!-- Package.swift の platforms: [.macOS(.v14)] と揃える。 -->
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <!-- 通常のウィンドウアプリ。Dock に出す（LSUIElement は書かない = false）。 -->
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSHumanReadableCopyright</key>
+    <string>© 2026 ManageArms</string>
+</dict>
+</plist>
