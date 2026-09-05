@@ -1,10 +1,12 @@
 /* ManageArms — English localization. Keys are the Japanese (development language) strings.
    Interpolated strings with 2+ arguments use positional specifiers (%1$@, %2$lld …). */
 
+
 /* Navigation & shared */
-"リソース" = "Resources";
 "権限" = "Permissions";
 "エージェント" = "Agents";
+"ホーム" = "Home";
+"そのほか" = "Other";
 "OK" = "OK";
 "閉じる" = "Close";
 "追加" = "Add";
@@ -12,36 +14,58 @@
 "—" = "—";
 "操作できませんでした" = "The operation failed";
 "再読み込み" = "Reload";
-
-/* Resource list */
-"リソースがありません" = "No resources";
-"スコープ" = "Scope";
+"未検出" = "Not detected";
+"削除" = "Delete";
+"キャンセル" = "Cancel";
 "ユーザー全体" = "All projects";
+
+/* Toolbar */
 "確認中…" = "Checking…";
 "更新を確認" = "Check for Updates";
 "分析中…" = "Analyzing…";
 "使用状況を分析" = "Analyze Usage";
 "前回: %@" = "Last run: %@";
 "セッションログから最終使用日を集計します（初回は数秒かかります）" = "Reads session logs to work out when each resource was last used (the first run takes a few seconds).";
-"%lld 件" = "%lld items";
-"最終使用" = "Last Used";
-"更新" = "Update";
-"● 有効" = "● Enabled";
-"○ 未導入" = "○ Not installed";
-"— 非対応" = "— Unsupported";
-"· 未検出" = "· Not detected";
+"GitHub の URL からスキルを追加します" = "Add a skill from a GitHub URL";
 
-/* Agent column headers */
-"CLI なし" = "No CLI";
-"未検出" = "Not detected";
-"%@ は CLI を持ちません（設定を直接読みます）" = "%@ has no CLI; its configuration is read directly.";
-"設定は見つかりましたが %@ CLI が見つかりません。表示のみです" = "Configuration found, but the %@ CLI is missing. Display only.";
+/* Home screen */
+"AI エージェントが持っているスキルを、ここでまとめて追加・削除できます。" = "Add and remove the skills your AI agents carry — all in one place.";
+"スキル・サブエージェントを追加する" = "Add a skill or subagent";
+"使いたいスキルの GitHub ページを開き、その URL をそのまま貼り付けてください。" = "Open the skill's page on GitHub and paste its URL here.";
+"中身を確認するまで何も入りません。追加したものは Claude Code / Cursor / Codex の全部から使えます。" = "Nothing is installed until you review the contents. Whatever you add works in Claude Code, Cursor and Codex.";
+"MCP サーバーとプラグインの追加は各 CLI が行います（claude mcp add / claude plugin install）。このアプリでは一覧と整理ができます。" = "MCP servers and plugins are added by each CLI (claude mcp add / claude plugin install). This app lists and tidies them.";
+"どこで見つける？" = "Where to find skills";
+"anthropics/skills — Anthropic 公式のスキル集" = "anthropics/skills — Anthropic's official collection";
+"GitHub の claude-skills トピック" = "The claude-skills topic on GitHub";
+"開いたページのフォルダの URL をコピーして、上のボックスに貼り付けます。" = "Copy the URL of the folder you opened and paste it into the box above.";
+"まだありません。上のボックスから追加できます。" = "Nothing yet. Add something with the box above.";
+"あなたが入れたもの" = "Installed by you";
+"%lld 件。うち %lld 件はこのアプリから切り替え・削除できます（左のエージェントを選ぶ）" = "%1$lld items, %2$lld of which this app can enable, disable or delete — pick an agent on the left";
+"エージェントの検出状況" = "Detected agents";
+"~/%@（CLI なし・設定を直接読む）" = "~/%@ (no CLI — the config is read directly)";
+"~/%@ はあるが CLI が見つからない" = "~/%@ exists, but the CLI was not found";
+
+/* Agent screen */
 "%@ が見つかりません" = "%@ was not found";
+"インストールすると、ここに持っているスキルが並びます。" = "Install it and everything it carries will be listed here.";
+"まだ何も入っていません" = "Nothing installed yet";
+"GitHub の URL を貼り付けるだけで追加できます。" = "Just paste a GitHub URL to add one.";
+"あなたが入れたものはまだありません。" = "You haven't installed anything yourself yet.";
+"エージェントに同梱されているため、manage-arms からは変更できません。" = "These ship with the agent, so manage-arms cannot change them.";
+"エージェント同梱" = "Ships with the agent";
+"実体: %@" = "Files: %@";
+"MCP サーバー" = "MCP Servers";
+"スキル" = "Skills";
+"サブエージェント" = "Subagents";
+"プラグイン" = "Plugins";
 
-/* Last-used cell */
+/* Last used */
 "● 実行中" = "● Running";
 "停止中" = "Stopped";
-"未使用" = "Never used";
+"使用状況は未集計" = "Usage not analyzed";
+"使用状況は不明" = "Usage unknown";
+"最終使用 %@" = "Last used %@";
+"一度も使っていません" = "Never used";
 "所属不明のプロセス" = "an unidentified process";
 "%@ が使用中 · 稼働 %@ · pid %lld" = "In use by %1$@ · up %2$@ · pid %3$lld";
 "登録されていますが、いま起動しているプロセスはありません" = "Registered, but no process is running right now";
@@ -50,40 +74,51 @@
 "最終使用: %@" = "Last used: %@";
 "集計した範囲では一度も使われていません" = "Never used within the analyzed range";
 
-/* Update column */
-"CLI が管理" = "Managed by CLI";
-"プラグインの更新は claude / codex plugin update が行います" = "Plugin updates are handled by claude / codex plugin update";
-"未確認" = "Not checked";
+/* Updates */
 "最新" = "Up to date";
-"差分を見る" = "View Diff";
+"更新があります（差分を見る）" = "Update available — see the changes";
 "固定中（更新あり）" = "Pinned (update available)";
 "固定中" = "Pinned";
-"固定を解除するには行を右クリック" = "Right-click the row to unpin";
+"解除は右クリックメニューから" = "Unpin from the right-click menu";
+"このバージョンで固定" = "Pin to This Version";
+"更新の固定を解除" = "Unpin updates";
 
-/* Actions column */
-"ピン留め" = "Pin";
-"いま npm にある最新版に固定し、起動ごとに変わらないようにします" = "Pins to the latest version currently on npm so it stops changing on every launch";
-"固定済み" = "Pinned";
-"バージョンが指定済みです。起動ごとに変わることはありません" = "A version is already specified, so it will not change between launches";
+/* Row actions */
+"読み込めません" = "Cannot be loaded";
+"削除するには…" = "How to remove…";
+"「%@」の消し方" = "How to remove “%@”";
+"コピー" = "Copy";
+"MCP は各エージェントの設定ファイルにあります。動いている Claude と競合するため、書き換えは CLI に任せます。" = "MCP servers live in each agent's config file. Writing to it would race a running Claude, so the CLI does it.";
+"このアプリが入れたものではないため、実体を直接消してください。" = "This app did not install it, so remove the files directly.";
+"エージェントに同梱されているものです。消してもエージェントの更新で戻ります。" = "This ships with the agent — removing it just brings it back on the next update.";
+"どのプロジェクトでも使えます。" = "Available in every project.";
+"%lld プロジェクトにも個別に入っています" = "Also installed individually in %lld projects";
+"ユーザー全体にもあります。こちら側は消せます" = "Also installed for all projects — this copy can go";
+"同梱" = "Bundled";
+"このプロジェクトの中でだけ効きます。ユーザー全体にも同じものがあれば、こちら側は消せます。" = "These only apply inside this project. If the same thing is installed for all projects, this copy can go.";
+"Finder で開く" = "Open in Finder";
+"このアプリで管理" = "Manage in this app";
+"registry に登録して、切り替えと削除ができるようにします。ファイルは動かしません" = "Records it so this app can enable, disable and delete it. No files are moved.";
+"実体を ~/%@ から ~/.agents/skills へ移すと、このアプリで切り替え・削除できるようになります（移動は手で行ってください）。" = "Move the files from ~/%@ to ~/.agents/skills and this app can enable, disable and delete it (move them yourself).";
+"%@ plugin コマンドで管理します" = "Managed with %@ plugin";
+"%@ mcp コマンドで管理します" = "Managed with %@ mcp";
+"~/%@/mcp.json で管理します" = "Managed in ~/%@/mcp.json";
+"各 CLI が管理します" = "Managed by each CLI";
+"Cursor には CLI が無いので、設定ファイルの mcpServers から該当のエントリを消してください。" = "Cursor has no CLI — remove the entry from mcpServers in its config file.";
+"プラグインは各 CLI が入れています。**入れたのと同じ CLI**で消してください。" = "Plugins are installed by each CLI — remove it with the same CLI that installed it.";
+"このプロジェクトの分だけを消します。" = "Removes only this project's copy.";
+"ユーザー全体の分だけを消します。プロジェクト側は各プロジェクトのタブから消してください。" = "Removes only the copy installed for all projects. Use each project's tab for the project copies.";
+"無効" = "Off";
 "有効にする（全エージェント）" = "Enable (all agents)";
 "無効にする（全エージェント）" = "Disable (all agents)";
-"固定を解除" = "Unpin";
-"このバージョンで固定" = "Pin to This Version";
-"外部管理" = "External";
-"他のツールが入れたスキルです。manage-arms からは変更できません" = "Installed by another tool. ManageArms cannot change it.";
-
-/* Matrix cells */
-"%@ で有効" = "Enabled in %@";
-"ユーザー全体から継承" = "Inherited from the user scope";
-"他ツールが管理しています" = "Managed by another tool";
-"%@ には未導入" = "Not installed in %@";
-"%@ に %@ はありません" = "%1$@ has no %2$@";
-
-/* Agents screen */
-"バージョン" = "Version";
-"パス" = "Path";
-"~/%@（CLI なし・設定を直接読む）" = "~/%@ (no CLI; configuration read directly)";
-"~/%@ はあるが CLI が見つからない" = "~/%@ exists, but the CLI was not found";
+"有効にする" = "Enable";
+"無効にする" = "Disable";
+"削除する" = "Delete";
+"削除…" = "Delete…";
+"「%@」を削除しますか？" = "Delete “%@”?";
+"ファイルはゴミ箱へ移動します。あとから Finder で戻せます。" = "The files go to the Trash, so you can put them back from Finder.";
+"ピン留め" = "Pin";
+"いま npm にある最新版に固定し、起動ごとに変わらないようにします" = "Pins to the latest version currently on npm so it stops changing on every launch";
 
 /* Permissions screen */
 "使い捨て" = "Disposable";
@@ -102,14 +137,14 @@
 "削除前の内容は Application Support にバックアップされます" = "The previous contents are backed up to Application Support before deletion";
 
 /* Add sheet */
-"リソースを追加" = "Add a Resource";
+"スキル・サブエージェントを追加" = "Add a skill or subagent";
 "GitHub の URL / MCP の JSON / npx コマンドを貼り付け" = "Paste a GitHub URL, MCP JSON, or npx command";
 "取得中…" = "Fetching…";
 "取得" = "Fetch";
 "失敗しました" = "Something went wrong";
 "GitHub リポジトリとして解釈しました" = "Interpreted as a GitHub repository";
-"MCP の設定 JSON です。MCP の追加は未対応です" = "This is MCP configuration JSON. Adding MCP servers is not supported yet.";
-"MCP のコマンドです。MCP の追加は未対応です" = "This is an MCP command. Adding MCP servers is not supported yet.";
+"MCP の設定です。追加は claude mcp add で行います" = "This is an MCP config — add it with claude mcp add";
+"MCP の起動コマンドです。追加は claude mcp add で行います" = "This is an MCP launch command — add it with claude mcp add";
 "解釈できませんでした" = "Could not interpret this";
 "リポジトリ" = "Repository";
 "ブランチ" = "Branch";

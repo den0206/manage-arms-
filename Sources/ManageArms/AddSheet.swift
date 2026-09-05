@@ -71,7 +71,7 @@ struct AddSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("リソースを追加").font(.title3.weight(.semibold))
+            Text("スキル・サブエージェントを追加").font(.title3.weight(.semibold))
 
             VStack(alignment: .leading, spacing: 4) {
                 TextField("GitHub の URL / MCP の JSON / npx コマンドを貼り付け",
@@ -112,10 +112,10 @@ struct AddSheet: View {
             Label("GitHub リポジトリとして解釈しました", systemImage: "checkmark.circle")
                 .foregroundStyle(.green).font(.caption)
         case .mcpJSON:
-            Label("MCP の設定 JSON です。MCP の追加は未対応です", systemImage: "exclamationmark.triangle")
+            Label("MCP の設定です。追加は claude mcp add で行います", systemImage: "terminal")
                 .foregroundStyle(.orange).font(.caption)
         case .command:
-            Label("MCP のコマンドです。MCP の追加は未対応です", systemImage: "exclamationmark.triangle")
+            Label("MCP の起動コマンドです。追加は claude mcp add で行います", systemImage: "terminal")
                 .foregroundStyle(.orange).font(.caption)
         case .unrecognized:
             Text(add.text.isEmpty ? " " : "解釈できませんでした")

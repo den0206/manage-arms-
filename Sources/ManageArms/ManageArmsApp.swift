@@ -10,9 +10,8 @@ struct ManageArmsApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(model: model)
-                // 固定幅列の合計（名前 240 + 最終使用 96 + エージェント 4×108 + 更新 132
-                // + 操作 84 + 余白 32 = 1016）を下回ると、右端の操作列が切れる。
-                .frame(minWidth: 1160, minHeight: 480)
+                // サイドバー 200 + 一覧 560 + 余白。横並びの表をやめたので狭くてよい。
+                .frame(minWidth: 820, minHeight: 540)
                 // DESIGN.md 3.5 — FSEvents で監視せず、アクティブ化のたびに読み直す。
                 .onReceive(NotificationCenter.default.publisher(
                     for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -44,6 +43,9 @@ final class AppModel {
     var isChecking = false
     var isAnalyzing = false
     var isPinning = false
+    var isCleaning = false
+    /// 一括削除シートの中身。nil で閉じる。
+    var cleanup: [CleanupItem]?
     var isEditingPermissions = false
     /// 権限は一覧とは別に読む。プロジェクトのパスが動的で `Source` に載らないため（8 章）。
     private(set) var permissions: [PermissionEntry] = []
@@ -96,6 +98,62 @@ final class AppModel {
             reload()
         } catch {
             // 握り潰さず UI に出す。
+            errorMessage = "\(error)"
+        }
+    }
+
+    /// 一括削除（DESIGN.md 5.2）。**表示したコマンドをそのまま実行する** —
+    /// 何が起きるかを画面と実行で食い違わせない。
+    /// リポジトリの中のファイルは対象外（`isRemovalExecutable` が false）。
+    func runCleanup(_ items: [CleanupItem]) {
+        let targets = items.filter(\.executable)
+        guard !targets.isEmpty, !isCleaning else { return }
+        isCleaning = true
+        Task {
+            let failures = await Task.detached { () -> [String] in
+                targets.compactMap { item in
+                    // 書き込みは CLI に委譲する（3.1）。cd が要るので sh 経由で渡す。
+                    do { _ = try Environment.live.run(["sh", "-c", item.command]); return nil }
+                    catch { return "\(item.name): \(error)" }
+                }
+            }.value
+            if !failures.isEmpty { errorMessage = failures.joined(separator: "\n") }
+            isCleaning = false
+            cleanup = nil
+            reload()
+        }
+    }
+
+    /// 自分で入れたものをこのアプリの管理下に取り込む（DESIGN.md 8 章）。
+    /// **実体は動かさない** — registry に足して symlink を張るだけ。
+    func adopt(_ row: ResourceRow) {
+        guard row.adoption == .possible else { return }
+        do {
+            var registry = Registry.load(env: .live)
+            if row.kind == .subagent {
+                try SubagentManager.adopt(row.name, env: .live, registry: &registry)
+            } else {
+                try SkillManager.adopt(row.name, env: .live, registry: &registry)
+            }
+            reload()
+        } catch {
+            errorMessage = "\(error)"
+        }
+    }
+
+    /// 削除（DESIGN.md 8 章）。実体はゴミ箱へ移すので Finder から戻せる。
+    /// registry に載っているものだけ — 他ツールが入れたものは WriteGuard が弾く。
+    func remove(_ row: ResourceRow) {
+        guard row.isManaged else { return }
+        do {
+            var registry = Registry.load(env: .live)
+            if row.kind == .subagent {
+                try SubagentManager.remove(row.name, env: .live, registry: &registry)
+            } else {
+                try SkillManager.remove(row.name, env: .live, registry: &registry)
+            }
+            reload()
+        } catch {
             errorMessage = "\(error)"
         }
     }
