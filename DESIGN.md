@@ -7,7 +7,7 @@ AI コーディングエージェント（Claude Code / Cursor / Codex / Gemini 
 - **プラットフォーム**: macOS 26 以降 / SwiftUI
 - **配布**: DMG の直配布（App Sandbox 非対応のため App Store 不可）。13 章
 - **状態**: **v1〜v4 実装済み**（Skills / Subagents / Plugins / 使用実績 / MCP / 権限）、
-  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト 271 件
+  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト 273 件
 - **実装**: SPM パッケージ。`swift test` / `CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh`
   （`.xcodeproj` は不要。実 CLI・実ネットワークを使う確認は `MANUAL=1 swift test`）
 - **作業の進め方**: [CLAUDE.md](CLAUDE.md)。利用者向けの入口は [README.md](README.md)
@@ -232,8 +232,34 @@ enum Source {
 
 ### 3.6 エージェント抽象に protocol を切らない
 
-対象は 4 つで、増えない。`protocol` を切ると実装が 4 ファイルに散って読めなくなる。
-`enum Agent` + `switch` で書く。
+`protocol` を切ると実装がエージェントの数だけファイルに散って読めなくなる。
+`enum Agent` + `switch` で書く。**エージェントが増えても protocol にしない** —
+増えたときに必要なのは「実装の差し替え口」ではなく「埋め忘れの検出」で、
+それは `default` の無い `switch` がコンパイルエラーとして出してくれる。
+
+#### エージェントを 1 つ増やすとき
+
+**`Agent.swift` の `case` を足して、赤くなった `switch` を埋めるだけで終わる**状態を保つ。
+以下は `default` を持たないので、埋め忘れは必ずビルドが落ちる:
+
+| 何を答えるか | 場所 |
+|---|---|
+| 表示名 / CLI 名 / 設定ディレクトリ | `Agent.displayName` / `cliName` / `configDir` |
+| どの種別に対応するか（3.7） | `Agent.supports(_:)` |
+| 走査するスキル / Subagent ルート（3.2） | `Agent.skillRoots` / `subagentRoots` |
+| MCP / プラグインの読み取り元（3.1） | `Agent.mcpSource` / `pluginSources` |
+| MCP の追加・削除コマンド | `MCPCommand.add` / `remove` |
+| プラグインの読み取り経路 | `PluginScanner.scan` |
+| `ps` からの見分け方（3.9） | `Agent.processMarkers` |
+| アイコン | `Agent.appBundleID` / `symbol`（UI 側） |
+
+**走査対象（`Source.skills` / `subagents` / `mcp` / `plugins`）は `Agent` から導出する。**
+ホワイトリスト（3.4）であることは変わらず、列挙の出どころが `Agent` に一本化されるだけ。
+二重に書くと、片方だけ足したときに「宣言はあるのに一生読まれないルート」が
+**エラーを出さずに**でき、マトリクスが全部「未導入」になる。
+`SourceTests` の「Agent が宣言したルートは必ず走査対象に載る」がこれを検査する。
+
+一覧・サイドバー・ホームの列は `Agent.allCases` を回しているので、追加するだけで増える。
 
 ### 3.7 エージェントを自動検出し、未検出は非活性にする
 
