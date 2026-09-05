@@ -35,20 +35,10 @@ public enum PermissionScanner {
 
     static let fileNames = ["settings.json", "settings.local.json"]
 
-    /// プロジェクトの一覧は `~/.claude.json` の `projects` キーから取る。
-    /// **`~/.claude/projects/`（140 MB）は読まない** — あれはセッションログ。
-    public static func projectPaths(env: Environment) -> [String] {
-        guard let data = try? Data(contentsOf: env.home.appending(path: ".claude.json")),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let projects = object["projects"] as? [String: Any]
-        else { return [] }
-        return projects.keys.sorted()
-    }
-
     public static func scan(env: Environment) -> [PermissionEntry] {
         var found = read(file: env.home.appending(path: ".claude/settings.json"),
                          project: nil, env: env)
-        for path in projectPaths(env: env) {
+        for path in Source.projectPaths(in: env) {
             for name in fileNames {
                 found += read(file: URL(filePath: path).appending(path: ".claude/\(name)"),
                               project: path, env: env)

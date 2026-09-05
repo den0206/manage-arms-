@@ -14,6 +14,34 @@ public enum MCPScanner {
         ]
     }
 
+    /// プロジェクト単位の MCP（DESIGN.md 5.1）。プロジェクトの絶対パス → サーバー名 → スコープ。
+    ///
+    ///   `<proj>/.mcp.json`                            … git 共有（`-s project`）
+    ///   `~/.claude.json` の projects[path].mcpServers … そのマシンだけ（`-s local`）
+    ///
+    /// **スコープまで返すのは、削除コマンドに `-s` を正しく載せるため。**
+    /// 取り違えるとユーザー全体の同名サーバーを消す。
+    /// 承認済みか（`enabledMcpjsonServers`）までは見ない。登録の有無だけを出す。
+    public static func byProject(env: Environment) -> [String: [String: String]] {
+        var out: [String: [String: String]] = [:]
+        for path in Source.projectPaths(in: env) {
+            for name in fromJSON(URL(filePath: path).appending(path: ".mcp.json"),
+                                 key: "mcpServers").map(\.name) {
+                out[path, default: [:]][name] = "project"
+            }
+        }
+        // projects 配下は 98 KB の ~/.claude.json を 1 回だけ読んで拾う。
+        if let data = try? Data(contentsOf: env.home.appending(path: ".claude.json")),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let projects = object["projects"] as? [String: Any] {
+            for (path, value) in projects {
+                let local = (value as? [String: Any])?["mcpServers"] as? [String: Any] ?? [:]
+                for name in local.keys { out[path, default: [:]][name] = "local" }
+            }
+        }
+        return out
+    }
+
     static func fromJSON(_ url: URL, key: String) -> [MCPServer] {
         guard let data = try? Data(contentsOf: url),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],

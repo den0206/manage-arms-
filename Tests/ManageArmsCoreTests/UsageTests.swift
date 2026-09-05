@@ -172,7 +172,7 @@ struct UsageTests {
     static func row(_ name: String, kind: Kind = .skill,
                     claude: ResourceRow.State, lastUsed: Date? = nil) -> ResourceRow {
         ResourceRow(name: name, kind: kind, summary: nil, detail: "",
-                    state: [.claude: claude], isManaged: true, isDisabled: false,
+                    state: [.claude: claude], origin: .managed, isDisabled: false,
                     lastUsed: lastUsed)
     }
 

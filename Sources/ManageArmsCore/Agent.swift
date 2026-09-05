@@ -75,6 +75,14 @@ extension Agent {
         }
     }
 
+    /// エージェントに**最初から入っている**スキルのルート（DESIGN.md 3.2 / 8 章）。
+    /// Cursor は自前のスキル（automate / autopilot / canvas …）を `skills-cursor` に同梱し、
+    /// `cloud-skills` は Cursor 側が同期する。**ユーザーが入れたものと混ぜない** —
+    /// 混ぜると自分が入れたものが 20 件の同梱スキルに埋もれる。
+    public static let bundledSkillRoots: Set<String> = [
+        ".cursor/skills-cursor", ".cursor/cloud-skills",
+    ]
+
     /// 指定のルート群に置かれたスキルが、このエージェントから見えるか。
     public func sees(rootsContaining roots: Set<String>) -> Bool {
         !Set(skillRoots).isDisjoint(with: roots)

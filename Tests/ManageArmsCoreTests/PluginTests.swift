@@ -98,6 +98,8 @@ struct PluginScannerTests {
         ])
         let ponytail = try #require(rows.first { $0.name == "ponytail@ponytail" })
         #expect(ponytail.isManaged == false)
+        // 入れたのはユーザー自身。同梱扱いにしない（8 章）。
+        #expect(ponytail.origin == .user)
         #expect(ponytail.detail.contains("2 プロジェクトに重複導入"))
         #expect(ponytail.state[.claude] == .explicit)
         #expect(ponytail.state[.gemini] == .unsupported)   // Gemini に Plugin は無い

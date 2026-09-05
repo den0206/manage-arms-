@@ -64,6 +64,19 @@ extension Source {
         .file(.home, ".agents/.skill-lock.json"),   // 読み取り専用（4.1）
     ]
 
+    /// **静的列挙にできない唯一の例外。** プロジェクトのパスは動的なので
+    /// `~/.claude.json` の `projects` キーから取る（DESIGN.md 3.4 / 5.1）。
+    /// ここから読んでよいのは各プロジェクトの
+    /// `.claude/skills` / `.claude/agents` / `.mcp.json` / `.claude/settings*.json` だけ。
+    /// **`~/.claude/projects/`（140 MB のセッションログ）とは別物** — あれは読まない。
+    public static func projectPaths(in env: Environment) -> [String] {
+        guard let data = try? Data(contentsOf: env.home.appending(path: ".claude.json")),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let projects = object["projects"] as? [String: Any]
+        else { return [] }
+        return projects.keys.sorted()
+    }
+
     /// ファイル/ディレクトリのルート相対パス。CLI ケースは nil。
     public var relativePath: String? {
         switch self {
