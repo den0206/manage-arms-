@@ -4,7 +4,7 @@ AI コーディングエージェント（Claude Code / Cursor / Codex / Gemini 
 周辺リソース — MCP・Skills・Subagents・Plugins —
 を 1 つの GUI で横断管理する macOS アプリ。
 
-- **プラットフォーム**: macOS 14 以降 / SwiftUI
+- **プラットフォーム**: macOS 26 以降 / SwiftUI
 - **配布**: DMG の直配布（App Sandbox 非対応のため App Store 不可）。13 章
 - **状態**: **v1〜v4 実装済み**（Skills / Subagents / Plugins / 使用実績 / MCP / 権限）、
   および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト 241 件
@@ -1154,6 +1154,16 @@ Hooks / Commands / Rules は対象外に決まった（1 章）ため、v4 は�
 
 Hardened Runtime 下でも、子プロセス（`$SHELL -l -c` / 各 CLI）の起動に
 追加の entitlement は要らない。3.7 の `PATH` 解決はそのまま動く。
+
+### 13.1.1 最低 OS は macOS 26
+
+`Package.swift` の `platforms: [.macOS(.v26)]`、`Info.plist` の `LSMinimumSystemVersion`、
+CI の `runs-on` の 3 か所を必ず揃える。ズレると「手元では通るのに配布物が起動しない」が起きる。
+
+- `.macOS(.v26)` は **swift-tools-version 6.2 以降でないと `'v26' is unavailable`** になる。
+  そのためマニフェストは 6.2、CI ランナーは macOS 26 SDK を持つ `macos-26` を使う
+- 最低 OS を上げると対象ユーザーは狭まる。下げ直すときも上記 3 か所と
+  `README.md` / `README.ja.md` を同時に直す
 
 ### 13.2 `.xcodeproj` を持たず、`.app` を script で組む
 

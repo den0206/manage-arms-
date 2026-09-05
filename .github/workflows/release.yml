@@ -39,8 +39,8 @@ concurrency:
 
 jobs:
   release:
-    # Package.swift は swift-tools-version 6.0 なので Swift 6 ツールチェーン（Xcode 16 以降）が要る。
-    runs-on: macos-15
+    # macOS 26 ターゲット + swift-tools-version 6.2 なので macOS 26 SDK = Xcode 26 が要る。
+    runs-on: macos-26
 
     steps:
       - name: Require signing secrets

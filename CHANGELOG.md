@@ -33,4 +33,8 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
   running from a mounted disk image, an external volume, or Gatekeeper's app
   translocation. Skills that were already installed stay where they are.
 
+### Changed
+
+- ManageArms now requires macOS 26 or later.
+
 [Unreleased]: https://github.com/den0206/manage-arms/compare/Ver_0.0.1...HEAD

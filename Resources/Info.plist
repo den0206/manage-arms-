@@ -39,9 +39,9 @@
         <string>ja</string>
         <string>en</string>
     </array>
-    <!-- Package.swift の platforms: [.macOS(.v14)] と揃える。 -->
+    <!-- Package.swift の platforms: [.macOS(.v26)] と揃える。 -->
     <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
+    <string>26.0</string>
     <!-- 通常のウィンドウアプリ。Dock に出す（LSUIElement は書かない = false）。 -->
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
