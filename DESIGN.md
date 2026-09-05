@@ -4,12 +4,14 @@ AI コーディングエージェント（Claude Code / Cursor / Codex / Gemini 
 周辺リソース — MCP・Skills・Subagents・Plugins —
 を 1 つの GUI で横断管理する macOS アプリ。
 
-- **プラットフォーム**: macOS 単体 / SwiftUI
-- **配布**: 直配布（App Sandbox 無効のため App Store 不可）
-- **状態**: **v1〜v4 実装済み**（Skills / Subagents / Plugins / 使用実績 / MCP / 権限）。テスト 229 件
-- **実装**: SPM パッケージ。`swift test` / `swift run ManageArms`
+- **プラットフォーム**: macOS 14 以降 / SwiftUI
+- **配布**: DMG の直配布（App Sandbox 非対応のため App Store 不可）。13 章
+- **状態**: **v1〜v4 実装済み**（Skills / Subagents / Plugins / 使用実績 / MCP / 権限）、
+  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト 241 件
+- **実装**: SPM パッケージ。`swift test` / `CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh`
   （`.xcodeproj` は不要。実 CLI・実ネットワークを使う確認は `MANUAL=1 swift test`）
-- **最終更新**: 2026-09-05（spike #1 / #2 / #9 / #13 決着済み）
+- **作業の進め方**: [CLAUDE.md](CLAUDE.md)。利用者向けの入口は [README.md](README.md)
+- **最終更新**: 2026-09-05（spike 決着 + 配布基盤の追加）
 
 ---
 
@@ -1130,6 +1132,115 @@ Hooks / Commands / Rules は対象外に決まった（1 章）ため、v4 は�
 | 12 | Plugin の scope 移動（local → user）を `claude plugin` CLI が対応しているか | 5.2 の「ユーザー全体に昇格」ボタンの実現性。v2 着手前に確認 |
 | 14 | Cursor の使用実績ログの形式（`~/.cursor/projects/` / `ai-tracking/`） | 3.9 の最終使用日を Cursor 列にも出せるか。出せなければ Cursor だけ空欄 |
 | 15 | Plugin 由来の skill / command を使用実績から逆引きできるか（実測では `ponytail:ponytail-review` と `plugin:skill` 形式で記録されていた） | 3.9 の Plugin 行の最終使用日。命名規則が全プラグインで一貫しているか要確認 |
+
+---
+
+## 13. 配布
+
+### 13.1 App Store は選択肢にならない
+
+このアプリは `~/.claude` `~/.cursor` `~/.codex` `~/.agents` を読み書きし、
+`claude` / `codex` / `gemini` CLI を `Process` で起動する。これは **App Sandbox と非互換**。
+サンドボックスは Mac App Store の必須要件なので、残るのは
+**Developer ID 署名 + 公証による直接配布の一択**。
+
+配布物には次の 3 つがすべて要る。1 つでも欠けると利用者側で警告が出る。
+
+| 要素 | 何のため | 欠けるとどうなる |
+|---|---|---|
+| Developer ID 署名 | 開発者の同定 | 「開発元を確認できません」 |
+| Hardened Runtime | 公証の必須要件 | 公証が Invalid で返る |
+| セキュアタイムスタンプ | 公証の必須要件 | 公証が Invalid で返る |
+
+Hardened Runtime 下でも、子プロセス（`$SHELL -l -c` / 各 CLI）の起動に
+追加の entitlement は要らない。3.7 の `PATH` 解決はそのまま動く。
+
+### 13.2 `.xcodeproj` を持たず、`.app` を script で組む
+
+`Scripts/build-app.sh` が SwiftPM の成果物から `.app` を手組みして署名する。
+**同じスクリプトが CI とローカルの両方で動く**（CI 専用の隠れロジックを持たせない）。
+
+`swift run` では `Bundle.main` が Info.plist・アイコン・`.lproj` を解決できない。
+3.7 の `PATH` の罠も `.app` にして初めて再現するため、**動作確認は必ず `.app` で行う**。
+
+**デバッグ版は別アプリとして組む。** bundle id に `.debug` を付け、`Environment.live` が
+それを見て保存先を `Application Support/ManageArms Debug` に分ける。開発中のリビルドが
+インストール済みリリース版の `registry.json` を壊さないため。
+
+> 分離できるのは `appSupport` 配下だけ。`~/.agents/skills` と `~/.claude/skills` は
+> home 基準の共有ルート（3.2）なので分離できず、**デバッグ版でも有効化・無効化は実環境に効く**。
+
+### 13.3 未署名の配布物を作らせない
+
+未署名／アドホック署名の DMG は Gatekeeper に弾かれる配布物にしかならず、
+一度出回ると回収できない。そこで**二重にガードする**。
+
+| どこ | 何をする |
+|---|---|
+| `Scripts/build-app.sh` | `CONFIG=release` でアドホック署名ならエラーで停止（`ALLOW_ADHOC=1` で明示的に外せる。配布不可） |
+| `.github/workflows/release.yml` | 署名・公証の 7 シークレットが 1 つでも欠けていたら checkout より前に停止 |
+
+### 13.4 署名・公証の順序
+
+**`.app` と DMG の両方**に署名とチケットが要る。片方だけだと穴が開く。
+
+```
+1. .app をビルド + Developer ID 署名（+ runtime + timestamp）
+2. .app を zip 化 → 公証 → 【元の .app に】ステープル
+3. ステープル済みの .app から DMG を作る
+4. DMG 自体に Developer ID 署名（+ timestamp）
+5. DMG を公証 → ステープル
+6. stapler validate / spctl で検証
+```
+
+- **`.app` にステープルしないと初回起動がオンライン依存になる。** DMG のチケットは
+  DMG にしか付かないため、利用者が `/Applications` へドラッグしたアプリにはチケットが無い
+- **DMG を署名しないと** `spctl -a -t open --context context:primary-signature` が
+  `no usable signature` になる
+
+手順と罠（中間証明書が無いと `0 valid identities` になる件を含む）は `docs/signing.md`。
+
+### 13.5 設置場所ガード
+
+DMG を開いてそのまま起動されることが実際に起きる。その状態でスキルを有効化すると、
+ユーザーは「入れた」つもりなのに、ディスクイメージを取り出した瞬間にアプリが消える。
+**実体（`~/.agents/skills`）と symlink は残るので壊れはしない**が、管理する手段だけが
+無くなるという分かりにくい状態になる。起動時にこれを潰す。
+
+判定は純粋関数（`InstallLocationClassifier`）に置き、OS を触る部分だけを
+アプリシェル側（`InstallLocationGuard`）に持つ。
+
+| 分類 | 促す | 理由 |
+|---|---|---|
+| `applications` | — | 正規の設置場所 |
+| `readOnlyVolume` | ✓ | マウント中の DMG から直接起動している |
+| `removableVolume` | ✓ | 外付けディスク |
+| `translocated` | ✓ | Gatekeeper のアプリ移動保護（読み取り専用に見えるので**先に判定する**） |
+| `elsewhere` | — | 内蔵ディスク上の Applications 外。意図してそこに置いている場合があり、開発ビルド（`.build/…`）で毎回ダイアログが出るのを避ける |
+
+- 移動は `ditto`（拡張属性とコード署名の完全性を保つ）。**元は消さない** —
+  DMG は読み取り専用で消せず、外付け上のユーザーのファイルを勝手に消さないため
+- コピー後に `xattr -dr com.apple.quarantine`。残すと移動後の初回起動でまた確認が出る
+- 同一 bundle id が生きているうちに `open` しても既存インスタンスが前面に来るだけなので、
+  親の終了を待ってから開くヘルパー（`sh`）に委ねる
+
+### 13.6 バージョニングとリリース
+
+- `main` から `release/Ver_X.Y.Z` を切って push すると CI が全部やる
+- **公開済みリリースは不変。** 同じタグが既にあれば上書きせずジョブを落とす
+  （やり直したいときは新しいパッチ版として出す）
+- `CFBundleShortVersionString` は Apple の形式要件で数値 3 成分のみ。
+  再ビルド番号込みの完全版は独自キー `MAFullVersion` に持つ（アップデート確認を作るときに使う）
+- Release 本文は `CHANGELOG.md` の `[Unreleased]` を CI が版見出しへ切り出したもの。
+  **手で移さない**
+
+### 13.7 やらないこと
+
+| 対象外 | 理由 |
+|---|---|
+| **アプリ内自己更新** | 検証を誤ると更新経路がマルウェアの侵入口になる。`codesign -R` の designated requirement、TOCTOU、置換ヘルパー、再起動をまたぐ結果通知と、費用対効果が合わない。まずは「アップデート確認 → リリースページを開く」で止める |
+| Sparkle 等の更新フレームワーク | 依存ライブラリゼロの方針。そもそも自己更新をやらない |
+| 公開リリース専用リポジトリの分離 | ソースを Private にしたまま未認証で Release を読ませるための仕組み。アップデート確認を作るまで不要 |
 
 ---
 
