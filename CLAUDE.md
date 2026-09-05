@@ -1,0 +1,123 @@
+# CLAUDE.md — ManageArms 作業ガイド
+
+AI コーディングエージェントの周辺リソース（MCP / Skills / Subagents / Plugins）を
+横断管理する macOS アプリ。Swift 6 / SwiftUI / **依存ライブラリゼロ**。
+
+このファイルは「作業の進め方」を定める。**機能の詳細設計は [DESIGN.md](DESIGN.md) が正**。
+設計と矛盾する実装をしそうになったら、まず DESIGN.md の該当章を読むこと。
+
+| ファイル | 内容 |
+|---|---|
+| `DESIGN.md` | 設計の正本。中核の判断（3 章）・データモデル・スコープ・テスト戦略・実測データ |
+| `README.md` | 利用者・新規参加者向けの入口 |
+| `docs/signing.md` | Developer ID 署名・公証のセットアップ手順と罠（人間が 1 回だけやる作業） |
+| `CHANGELOG.md` | 公開 Release 本文の出所。**英語**・Keep a Changelog |
+
+## 完了の定義
+
+実装したら毎回これを通す。`main` 向け PR では `.github/workflows/ci.yml` が同じものを回す。
+
+```bash
+swift build && swift test
+./Scripts/check-invariants.sh                                              # 不変条件
+./Scripts/release-changelog.sh --check && ./Scripts/test-release-changelog.sh
+CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh                            # .app が組めること
+```
+
+**CI に別のロジックを持たせない。** CI は上と同じスクリプトを呼ぶだけにする。
+片方だけ直すと「手元では通るのに CI で落ちる／その逆」が起きる。
+
+## 絶対に守る不変条件
+
+`Scripts/check-invariants.sh` が機械的に検査する。載せるのは
+**「破れると実ユーザーのデータが壊れる」もの**だけ。網羅性より、
+赤くなったときに必ず本物のバグである状態を優先する。
+
+1. **設定ファイルの書き込みは 3 か所だけ** — `PermissionWriter`（`permissions` キーのみ）/
+   `Registry`（自分の `registry.json`）/ `MCPScanner`（`~/.cursor/mcp.json`）。
+   ここが増えると「書き込みは各 CLI に委譲する」という中核の判断（DESIGN 3.1）が崩れ、
+   実行中の Claude と競合してユーザーの全状態を壊しうる。
+2. **削除・移動・symlink 作成は `WriteGuard` を通る経路だけ** — `SkillManager` /
+   `SubagentScanner` / `Updater` は必ず `WriteGuard.assertMutable` を呼ぶ。
+   `Fetcher` / `Installer` は一時ディレクトリのみ、`InstallLocationGuard` は
+   直前に自分が `/Applications` へ作ったバンドルのみ。
+   新しいファイルで無防備に `removeItem` を書くと `~/.claude` や `~/.agents` を消しうる。
+3. **`ja` と `en` のキー集合が一致していること** — 片方に足し忘れると、
+   その文言だけ日本語のまま英語 UI に出る。
+4. **走査対象はホワイトリスト**（DESIGN 3.4）。除外リスト方式にしない。
+   `Source` の列挙に無いパスは存在しても読まない。`projects` / `sessions` は
+   使用実績の集計からのみ、`usageLog` ケース経由で読む。
+5. **常駐しない・キャッシュしない**（DESIGN 3.5）。FSEvents で監視せず、
+   アクティブ化のたびに読み直す。永続ファイルは `registry.json` 1 つだけ。
+
+## 設計上のパターン
+
+- **外部依存は `Environment`（構造体 + クロージャ）で注入する。** protocol を切らない
+  （DESIGN 3.6 — 実装が 1 つしか無いものに interface を作らない）。
+  テストは `Environment.test(home:)` で偽のホームを指し、**実ユーザーの `~/.claude` に
+  一切到達しない**。
+- **エージェント抽象に protocol を切らない。** `enum Agent` と `switch` で足りる。
+- OS を触る処理は薄く端に寄せ、**判定そのものは純粋関数**にしてテストする
+  （`InstallLocationClassifier` / `PasteInput.classify` / `WriteGuard.isInside` が実例）。
+- **握り潰さない。** 失敗は `AppModel.errorMessage` に出して UI に見せる。
+- **SourceKit の赤線は当てにしない。** 真偽は必ず `swift build` / `swift test` で判定する
+  （モジュール再コンパイル前の diagnostics は古いことが多い）。
+
+## ローカライズ
+
+- `Localization/{ja,en}.lproj/Localizable.strings`。`build-app.sh` が `.app` に同梱する。
+- **キーは日本語文字列そのもの。** `Text("…")` / `Button("…")` などのリテラルは
+  SwiftUI が `LocalizedStringKey` として自動で引く。`ja` は恒等写像、`en` を翻訳する。
+- **`String` を返す計算プロパティは自動で引かれない。** `String(localized: "…")` を使う
+  （`Screen.title` / `helpText` / `Filter.title` が実例）。
+- 引数が 2 つ以上ある文言は、**英語側を positional**（`%1$@` / `%2$lld`）にする。
+  語順が日本語と逆転するため、非 positional だと引数が入れ替わる。
+- 翻訳対象でないもの（差分の本文など）は `Text(verbatim:)` にする。
+- 追加したら必ず両ファイルに入れる。検査は `./Scripts/check-invariants.sh`。
+
+## テスト方針
+
+- **Swift Testing**（`import Testing` / `@Test` / `#expect`）。
+- **純粋関数を最も厚く書く**（DESIGN 10.1）。走査範囲の検査（10.2）は設計の生命線。
+- ファイルシステム操作は**偽ホーム**で実行する（10.3）。CLI 呼び出しはフェイク（10.4）。
+- 実 CLI・実ネットワークを使う確認は `MANUAL=1 swift test`（`_ManualCheck.swift`）。
+  通常の `swift test` では無効化されている。
+- **書かないもの**（10.6）: UI のスナップショット、モックを検証するだけのテスト。
+
+## 自動テストできないもの（実機で確認する）
+
+- **`.app` を Finder から起動したときの CLI 解決。** GUI の `PATH` はターミナルと違う
+  （DESIGN 3.7）。`swift run` では再現しない
+- symlink を張った瞬間に、稼働中の Claude / Cursor の一覧へ反映されるか
+- DMG のインストール導線、設置場所ガードの表示と移動・再起動
+- 公証済みビルドの初回起動が無警告か（`spctl -a -vv <app>` が `accepted`）
+
+## コミット規約
+
+- **日本語・Conventional Commits**。実績: `feat(scope):` `fix:` `docs:` `test:` `ci:` `chore:`。
+  例: `feat(build): .app バンドルの組み立てと署名スクリプトを追加`
+- **機能単位で分割**してコミットする。各コミットは `swift build` が通る状態に保つ。
+- コミット・push はユーザーが求めたときだけ行う。
+- **利用者に見える変更をしたら `CHANGELOG.md` の `[Unreleased]` に 1 項目足す。**
+  **英語**で書く（公開 Release の本文になる。コミットメッセージは日本語のまま）。
+  節見出しは `Added` / `Changed` / `Deprecated` / `Removed` / `Fixed` / `Security` のみ。
+  **版見出しへの切り出しはリリース時に CI がやるので手で移さない。**
+- 仕様やテスト件数が変わったら `DESIGN.md` / `README.md` も同時に更新する。
+
+## CI / リリース
+
+- **PR ゲート**: `main` 向け PR で `.github/workflows/ci.yml` が「完了の定義」を実行する。
+- **リリース**: `main` から `release/Ver_X.Y.Z` を切って push → `release.yml` が
+  テスト → 署名ビルド → `.app` 公証 → DMG → DMG 署名・公証 → Gatekeeper 検証 →
+  GitHub Release 作成 → `main` へ CHANGELOG 反映。
+- **署名・公証は必須。** シークレットが 1 つでも欠けていれば checkout より前に落ちる。
+  未署名の DMG は出回ると回収できないので作らせない。手順は `docs/signing.md`。
+- **公開済みリリースは不変。** 同じタグが既にあれば上書きせずジョブを落とす。
+  やり直したいときは新しいパッチ版として出す。
+- サードパーティ Action は使わない（許可は公式 `actions/checkout` のみ）。
+
+## 過剰実装のレビュー
+
+実装が一段落したら `/ponytail:ponytail-review` を回す（差分を過剰実装の観点だけで見て、
+削除・stdlib 置換の候補を出す）。**採用しない指摘**: 上記の不変条件・入力検証・
+エラー処理・アクセシビリティを削るもの。リポジトリ全体を見直すときは `/ponytail:ponytail-audit`。
