@@ -1,0 +1,86 @@
+# 機能別に Conventional Commit でコミットする
+
+現在の未コミット変更を**レビューしたうえで**、**機能・役割ごとに分けて**複数のコミットに分割する。
+
+**必ずコミット前にレビューする。** レビュー不合格のまま `git commit` しない。
+
+## 手順
+
+### 1. 変更の把握
+
+`git status -s` と `git diff`（必要なら `--cached`）で変更・未追跡ファイルを一覧し、
+役割ごとに**論理的なグループ**へ分類する。
+
+| グループ例 | 対象の目安 |
+|---|---|
+| `core` | `Sources/ManageArmsCore/` の走査・追加・更新・集計・権限 |
+| `ui` | `Sources/ManageArms/` |
+| `i18n` | `Localization/` |
+| `build` | `Package.swift`・`Resources/`・`Scripts/build-app.sh`・`.vscode/` |
+| `release` | `Scripts/make-dmg.sh`・`Scripts/release-changelog.sh`・`CHANGELOG.md` |
+| `ci` | `.github/workflows/`・`Scripts/check-invariants.sh` |
+| `docs` | `README.md`・`README.ja.md`・`DESIGN.md`・`CLAUDE.md`・`docs/` |
+
+- 同じ機能の「新規ファイル」「既存ファイルの修正」「対応するテスト」は**同じグループ**に含める。
+- **ローカライズは、それを使うコードと同じコミットに入れる**（`ja`/`en` は必ず両方）。
+- `CHANGELOG.md` の `[Unreleased]` への追記は、その変更を入れるコミットに含める。
+
+### 2. コミット前レビュー（必須）
+
+グループごとに次を確認する。1 つでも引っかかったら**直してからコミットする**。
+
+**不変条件**（`CLAUDE.md`「絶対に守る不変条件」）
+
+- 設定ファイルの書き込みが `PermissionWriter` / `Registry` / `MCPScanner` の外に出ていないか
+- 削除・移動・symlink 作成が `WriteGuard` を通る経路の外に出ていないか
+- 走査対象がホワイトリスト（`Source` の列挙）から外れていないか
+- `ja` / `en` のキー集合が一致しているか
+
+**ストレージ・メモリの規律**（`CLAUDE.md`「ストレージ・メモリの規律」）
+
+- **無駄なファイルを増やしていないか。** 恒久ファイル・キャッシュ・ログを足していないか
+- 作った一時物を `defer` で確実に片付けているか
+- 全部読んでいないか（frontmatter だけで足りるところで本文を読んでいないか）
+- 役割の重なるスクリプト／ドキュメントを新設していないか（既存に足せないか）
+
+**その他**
+
+- `String` を返す計算プロパティで `String(localized:)` を忘れていないか
+- 失敗を握り潰していないか（`errorMessage` に出しているか）
+- 純粋関数にできる判定を OS 依存のまま書いていないか
+
+### 3. 「完了の定義」を通す
+
+```bash
+swift build && swift test
+./Scripts/check-invariants.sh
+./Scripts/release-changelog.sh --check && ./Scripts/test-release-changelog.sh
+CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh
+```
+
+**すべて緑になるまでコミットしない。**
+
+### 4. グループごとにコミット
+
+```bash
+git add <そのグループのファイル>
+git commit
+```
+
+- **日本語・Conventional Commits**。`feat(scope):` `fix:` `docs:` `test:` `ci:` `chore:`
+- 件名は 1 行で「何をしたか」。本文には**なぜそうしたか**を書く（何をしたかは diff が語る）
+- **各コミット単体で `swift build` が通る状態に保つ。**
+  `Package.swift` がターゲットを宣言している以上、`Sources/` や `Tests/` を
+  途中まで欠いた状態はビルドできない。分割できないものは無理に割らない
+- 依存関係のある順に積む（例: Core → UI → i18n → docs）
+
+### 5. 報告
+
+作ったコミットを `git log --oneline` で示し、**分割の理由**と、
+レビューで直した点があればそれも述べる。
+
+## やらないこと
+
+- **push はしない。** ユーザーが明示的に求めたときだけ。
+- `CHANGELOG.md` の版見出しへの切り出し（リリース時に CI がやる）。
+- 「とりあえず全部入り」の 1 コミット。逆に、ビルドが通らなくなるまでの過剰な分割。
