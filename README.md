@@ -18,7 +18,7 @@ The design document is [DESIGN.md](DESIGN.md) (Japanese).
 | **Enable / disable / delete** | Disabling parks the resource aside; deleting moves it to the Trash. Either way it can be brought back |
 | **Adopt** | A skill you installed yourself can be brought under management without moving a single file |
 | **Update** | Review the `SKILL.md` diff before applying. Pin a resource to stop updates when upstream changes direction |
-| **Scope** | A tab for "all projects", one per project, and one for what ships with the agent — with a warning when the same thing is installed both ways |
+| **Scope** | A tab for "all projects", one per project, and one for what ships with the agent — with a warning when the same thing is installed both ways, and bulk removal of the project copies |
 | **Usage** | Last-used dates gathered from session logs. For MCP, which servers are running *right now* |
 | **Permission cleanup** | Remove machine-specific and cross-project duplicate entries from `permissions.allow` |
 
@@ -41,7 +41,7 @@ The project is a Swift Package — there is no `.xcodeproj` (open `Package.swift
 directly).
 
 ```bash
-swift test                  # unit tests (268)
+swift test                  # unit tests (271)
 swift build                 # compile check
 
 # The distributable form is a hand-assembled .app bundle.

@@ -7,7 +7,7 @@ AI コーディングエージェント（Claude Code / Cursor / Codex / Gemini 
 - **プラットフォーム**: macOS 26 以降 / SwiftUI
 - **配布**: DMG の直配布（App Sandbox 非対応のため App Store 不可）。13 章
 - **状態**: **v1〜v4 実装済み**（Skills / Subagents / Plugins / 使用実績 / MCP / 権限）、
-  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト 268 件
+  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト 271 件
 - **実装**: SPM パッケージ。`swift test` / `CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh`
   （`.xcodeproj` は不要。実 CLI・実ネットワークを使う確認は `MANUAL=1 swift test`）
 - **作業の進め方**: [CLAUDE.md](CLAUDE.md)。利用者向けの入口は [README.md](README.md)
@@ -851,6 +851,27 @@ Claude Code
   自前で描かず OS のものを使う
 - 補足は**できるだけ 1 行に畳む**（使用実績・更新・管理元を横に並べる）。
   独立した行にしてよいのは警告だけ
+
+### プロジェクトからの一括削除
+
+5.2 の「統合提案」の実装。プロジェクトのタブから
+`このプロジェクトの N 件を削除…`、ユーザー全体のタブで重複している行から
+`プロジェクト側 N 件を削除…` で確認シートを開く。
+
+**シートには実行するコマンドをそのまま並べる。** 何が消えるか分からないボタンを作らない。
+実行は `sh -c` に**表示したのと同じ文字列**を渡す（画面と実行を食い違わせない）。
+
+| 対象 | 扱い |
+|---|---|
+| Plugin（`-s local`） | **実行する。** `installed_plugins.json` は CLI の管理物（3.1） |
+| MCP の `local` スコープ | **実行する。** 実体は `~/.claude.json` |
+| MCP の `project` スコープ | **実行しない。** `<proj>/.mcp.json` は git 共有のファイル |
+| Skill / Subagent | **実行しない。** `<proj>/.claude/skills/` はリポジトリの中 |
+
+**ユーザーのリポジトリには書かない**（5.2 の「プロジェクトスコープは読み取り表示のみ」）。
+消えたことに気づくのは別のマシンや他のメンバーで、git の履歴にも出る。
+実行しない分は**コマンドをまとめてコピー**できるようにして、判断を人に残す。
+判定は `ResourceRow.isRemovalExecutable`（純粋関数・テスト済み）。
 
 ### 「消せないもの」の消し方を出す
 
