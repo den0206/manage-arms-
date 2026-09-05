@@ -72,5 +72,8 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
   shows as a thin bar at the top instead of a spinner over the list. Spacing, corner radii
   and motion now come from one shared vocabulary, and every animation is disabled when
   "Reduce motion" is on.
+- Toned the interface down to match the rest of macOS: no gradients, no drop shadows and
+  no per-kind colour coding. Colour is now reserved for meaning — green for running, orange
+  for attention, red for destructive actions.
 
 [Unreleased]: https://github.com/den0206/manage-arms/compare/Ver_0.0.1...HEAD

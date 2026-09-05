@@ -157,8 +157,8 @@ struct AgentIcon: View {
             Image(nsImage: icon).resizable().frame(width: size, height: size)
         } else {
             Image(systemName: agent.symbol)
-                .font(.system(size: size * 0.72, weight: .semibold))
-                .foregroundStyle(agent.tint)
+                .font(.system(size: size * 0.72))
+                .foregroundStyle(.secondary)
                 .frame(width: size, height: size)
         }
     }
@@ -185,20 +185,14 @@ extension Agent {
 
     /// アプリが無いときの代替。**エージェントごとに変える** —
     /// 同じアイコンが 4 つ並ぶと、選択中がどれか分からない。
+    /// 色は付けない（無彩色で形だけ変える）— 4 色に塗り分けると、
+    /// 色が状態を表している他の場所（緑=稼働 / 橙=注意）と読み違える。
     var symbol: String {
         switch self {
         case .claude: "asterisk"
         case .cursor: "cursorarrow"
         case .codex:  "chevron.left.forwardslash.chevron.right"
         case .gemini: "sparkle"
-        }
-    }
-    var tint: Color {
-        switch self {
-        case .claude: .orange
-        case .cursor: .blue
-        case .codex:  .teal
-        case .gemini: .purple
         }
     }
 }
@@ -238,7 +232,6 @@ struct HomeView: View {
     @Bindable var add: AddModel
     @Binding var showAdd: Bool
     @Binding var screen: Screen
-    @FocusState private var pasteFocused: Bool
 
     /// 自分で入れたもの全部（このアプリ経由に限らない）。同梱は数えない。
     private var mine: [ResourceRow] { model.inventory.rows.filter { $0.origin != .bundled } }
@@ -261,33 +254,30 @@ struct HomeView: View {
         .navigationTitle("ホーム")
     }
 
+    /// 表紙。**ロゴを大きく飾らない** — ここで要るのは「何ができるアプリか」の 1 行だけ。
     private var hero: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 10) {
-                Image(nsImage: NSApp.applicationIconImage)
-                    .resizable().frame(width: 38, height: 38)
-                Text(verbatim: "ManageArms")
-                    .font(.system(size: 30, weight: .semibold, design: .rounded))
-                    .foregroundStyle(Theme.brand)
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable().frame(width: 26, height: 26)
+                .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 5 }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: "ManageArms").font(.title2.weight(.semibold))
+                Text("AI エージェントが持っているスキルを、ここでまとめて追加・削除できます。")
+                    .foregroundStyle(.secondary)
             }
-            Text("AI エージェントが持っているスキルを、ここでまとめて追加・削除できます。")
-                .foregroundStyle(.secondary)
         }
     }
 
     /// 貼って押すだけ。**取得して中身を見せるまで何も入らない**（6 章）。
     private var addCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("スキル・サブエージェントを追加する", systemImage: "plus.circle.fill")
-                .font(.headline)
-                .labelStyle(TintedLabel(tint: .accentColor))
+            Text("スキル・サブエージェントを追加する").font(.headline)
             Text("使いたいスキルの GitHub ページを開き、その URL をそのまま貼り付けてください。")
                 .font(.callout).foregroundStyle(.secondary)
             HStack(spacing: 8) {
                 TextField("https://github.com/owner/repo/tree/main/skills/foo", text: $add.text)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.body, design: .monospaced))
-                    .focused($pasteFocused)
                     .onSubmit { openAdd() }
                 Button("追加") { openAdd() }
                     .buttonStyle(.borderedProminent)
@@ -308,7 +298,7 @@ struct HomeView: View {
             }
             .font(.caption).foregroundStyle(.tertiary)
         }
-        .card(accented: pasteFocused || !add.text.isEmpty)
+        .card()
         .animation(Motion.pop, value: add.text.isEmpty)
     }
 
@@ -333,13 +323,24 @@ struct HomeView: View {
     }
 
     /// 種別ごとの件数。**同梱は数えない** — 自分で入れたものの規模が知りたい。
+    /// 4 枚のカードに散らさず、1 本の帯を縦罫で仕切る（合計が 1 つの事実だと分かる）。
     private var statRow: some View {
-        HStack(spacing: Theme.gap + 2) {
+        HStack(spacing: 0) {
             ForEach(Kind.allCases, id: \.self) { kind in
+                if kind != Kind.allCases.first {
+                    Divider().frame(height: 30)
+                }
                 StatTile(title: kind.title,
                          count: mine.filter { $0.kind == kind }.count,
-                         symbol: kind.symbol, tint: kind.tint)
+                         symbol: kind.symbol)
+                    .padding(.horizontal, 14)
             }
+        }
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity)
+        .background(.background.secondary, in: RoundedRectangle(cornerRadius: Theme.radiusM))
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.radiusM).strokeBorder(.separator, lineWidth: 1)
         }
     }
 
@@ -377,8 +378,10 @@ struct HomeView: View {
                     .font(.callout).foregroundStyle(.secondary)
                 WrapLayout(spacing: 5) {
                     ForEach(mine) { row in
+                        // 管理下かどうかは**印**で示す。18 個のチップを色で塗り分けると、
+                        // 名前を読む前に色の群れが目に入る。色は異常（読み込めない）だけ。
                         Pill(text: row.name,
-                             tint: row.isUnusable ? .orange : (row.isManaged ? .accentColor : nil),
+                             tint: row.isUnusable ? .orange : nil,
                              icon: row.isManaged ? "checkmark" : nil)
                     }
                 }
@@ -389,24 +392,18 @@ struct HomeView: View {
     private var findCard: some View {
         VStack(alignment: .leading, spacing: Theme.tight) {
             Text("どこで見つける？").font(.headline)
-            LinkRow(title: "anthropics/skills — Anthropic 公式のスキル集",
-                    url: URL(string: "https://github.com/anthropics/skills")!)
-            LinkRow(title: "GitHub の claude-skills トピック",
-                    url: URL(string: "https://github.com/topics/claude-skills")!)
+            // 行の当たり判定は見出しより外へはみ出させ、**文字の左端は見出しと揃える**。
+            // ホバーの下敷きの分だけ字下げされていると、節の中で 1 か所だけ列がずれる。
+            VStack(alignment: .leading, spacing: 0) {
+                LinkRow(title: "anthropics/skills — Anthropic 公式のスキル集",
+                        url: URL(string: "https://github.com/anthropics/skills")!)
+                LinkRow(title: "GitHub の claude-skills トピック",
+                        url: URL(string: "https://github.com/topics/claude-skills")!)
+            }
+            .padding(.horizontal, -8)
             Text("開いたページのフォルダの URL をコピーして、上のボックスに貼り付けます。")
                 .font(.caption).foregroundStyle(.tertiary)
                 .padding(.top, 2)
-        }
-    }
-}
-
-/// アイコンだけ差し色にするラベル。見出しの文字色は本文と揃える（読みやすさ優先）。
-struct TintedLabel: LabelStyle {
-    let tint: Color
-    func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 6) {
-            configuration.icon.foregroundStyle(tint)
-            configuration.title
         }
     }
 }
@@ -456,7 +453,8 @@ struct AgentCard: View {
                     StatusDot(detection: detection)
                     Spacer(minLength: 0)
                     if count > 0, detection != .undetected {
-                        Pill(text: count.formatted(), tint: agent.tint)
+                        Text(count.formatted())
+                            .font(.callout).monospacedDigit().foregroundStyle(.secondary)
                     }
                 }
                 detail
@@ -466,9 +464,15 @@ struct AgentCard: View {
             }
         }
         .card(padding: 12, radius: Theme.radiusM)
+        // ホバーで拡大しない。並んだカードが 1 枚だけ動くと、位置が揺れて読みにくい。
+        // 押せることは、地色がわずかに変わるだけで足りる。
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.radiusM)
+                .fill(.quaternary.opacity(hovering && detection != .undetected ? 0.4 : 0))
+                .allowsHitTesting(false)
+        }
         .opacity(detection == .undetected ? 0.55 : 1)
-        .scaleEffect(hovering && detection != .undetected ? 1.015 : 1)
-        .animation(Motion.pop, value: hovering)
+        .animation(Motion.gentle, value: hovering)
         .onHover { hovering = $0 }
     }
 
@@ -589,10 +593,8 @@ struct AgentPage: View {
                     }
                 } header: {
                     HStack(spacing: 6) {
-                        Image(systemName: kind.symbol)
-                            .font(.caption2).foregroundStyle(kind.tint)
                         Text(kind.title)
-                        Pill(text: items.count.formatted())
+                        Text(items.count.formatted()).monospacedDigit().foregroundStyle(.tertiary)
                     }
                     .textCase(nil)
                 }
@@ -671,15 +673,6 @@ extension Kind {
         case .plugin:   "puzzlepiece.extension"
         }
     }
-
-    var tint: Color {
-        switch self {
-        case .mcp:      .teal
-        case .skill:    .blue
-        case .subagent: .purple
-        case .plugin:   .pink
-        }
-    }
 }
 
 /// スコープの切り替えタブ（DESIGN.md 8 章）。**同時に見せるのは 1 つの表だけ。**
@@ -723,19 +716,16 @@ struct ScopeTabs: View {
                                 .opacity(0.75)
                         }
                         .font(.callout)
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 6)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
                         .foregroundStyle(chosen ? AnyShapeStyle(.white)
                                                 : AnyShapeStyle(.secondary))
                         .background {
-                            ZStack {
-                                Capsule().fill(.quaternary.opacity(0.5))
-                                if chosen {
-                                    Capsule().fill(Theme.brand)
-                                        .matchedGeometryEffect(id: "scope", in: underlay)
-                                        .shadow(color: .accentColor.opacity(0.35),
-                                                radius: 5, y: 2)
-                                }
+                            if chosen {
+                                Capsule().fill(Color.accentColor)
+                                    .matchedGeometryEffect(id: "scope", in: underlay)
+                            } else {
+                                Capsule().fill(.quaternary.opacity(0.4))
                             }
                         }
                         .contentShape(Capsule())
@@ -896,16 +886,20 @@ struct ScopeNote: View {
         switch (context, reach) {
         case (.userWide, .both(let paths)):
             // 5.2 の「散らかり」。ユーザー全体にあるのに個別にも入っている。
+            // 橙にするのは**指摘の 1 行だけ**。プロジェクト名まで橙にすると、
+            // 行の半分が警告色になって、本当に危ないもの（読み込めない）と区別が付かない。
             VStack(alignment: .leading, spacing: 1) {
                 Label("\(paths.count) プロジェクトにも個別に入っています",
-                      systemImage: "exclamationmark.2")
+                      systemImage: "exclamationmark.circle")
+                    .foregroundStyle(.orange)
                 Text(verbatim: paths.map { ($0 as NSString).lastPathComponent }
                                     .joined(separator: "  ·  "))
+                    .foregroundStyle(.secondary)
                     .help(paths.joined(separator: "\n"))
             }
-            .font(.caption2).foregroundStyle(.orange)
+            .font(.caption2)
         case (.project, .both):
-            Label("ユーザー全体にもあります。こちら側は消せます", systemImage: "exclamationmark.2")
+            Label("ユーザー全体にもあります。こちら側は消せます", systemImage: "exclamationmark.circle")
                 .font(.caption2).foregroundStyle(.orange)
         default:
             EmptyView()
@@ -928,8 +922,7 @@ struct RemovalHelp: View {
             .buttonStyle(.link).font(.caption)
             .popover(isPresented: $shown, arrowEdge: .trailing) {
                 VStack(alignment: .leading, spacing: 10) {
-                    SheetHeader(title: "「\(row.name)」の消し方",
-                                symbol: "trash", tint: .red)
+                    SheetHeader(title: "「\(row.name)」の消し方")
                     Text(reason).font(.callout).foregroundStyle(.secondary)
                     if let command {
                         HStack(spacing: 8) {
@@ -1001,18 +994,18 @@ struct RemovalHelp: View {
     }
 }
 
-/// 種別の目印。色と記号で「どこから次の 1 件か」を作る。
+/// 種別の目印。**記号だけで区別する** — 色付きの角丸タイルを 1 行ごとに並べると、
+/// 一覧が模様になって、肝心の名前より先にアイコンが目に入る。
+/// 幅を固定しているのは、行が何行になっても本文の左端が縦に揃うようにするため。
 struct KindIcon: View {
     let kind: Kind
-    var size: CGFloat = 22
+    var size: CGFloat = Theme.glyph
 
     var body: some View {
         Image(systemName: kind.symbol)
-            .font(.system(size: size * 0.48, weight: .semibold))
-            .foregroundStyle(.white)
+            .font(.system(size: size * 0.62))
+            .foregroundStyle(.secondary)
             .frame(width: size, height: size)
-            .background(kind.tint.gradient, in: RoundedRectangle(cornerRadius: size * 0.28))
-            .shadow(color: kind.tint.opacity(0.35), radius: 2, y: 1)
             .padding(.top, 1)
             .help(kind.rawValue.uppercased())
     }
@@ -1159,7 +1152,7 @@ struct CleanupSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            SheetHeader(title: "プロジェクトから削除", symbol: "trash", tint: .red)
+            SheetHeader(title: "プロジェクトから削除")
 
             if !runnable.isEmpty {
                 Text("次のコマンドを実行します（\(runnable.count) 件）")

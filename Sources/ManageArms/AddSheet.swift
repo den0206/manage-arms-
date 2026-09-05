@@ -72,8 +72,7 @@ struct AddSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             SheetHeader(title: "スキル・サブエージェントを追加",
-                        subtitle: String(localized: "確認するまで何も入りません"),
-                        symbol: "plus.circle", tint: .accentColor)
+                        subtitle: String(localized: "確認するまで何も入りません"))
 
             VStack(alignment: .leading, spacing: 6) {
                 TextField("GitHub の URL / MCP の JSON / npx コマンドを貼り付け",
@@ -87,9 +86,7 @@ struct AddSheet: View {
 
             if case .github = add.interpretation { form }
 
-            Divider()
-            result
-            Spacer(minLength: 0)
+            result.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .padding(20)
         .safeAreaInset(edge: .bottom, spacing: 0) { footer }
@@ -168,27 +165,45 @@ struct AddSheet: View {
         .background(.quinary, in: RoundedRectangle(cornerRadius: Theme.radiusS))
     }
 
+    /// 取得するまでの下半分は**空のまま置く**。罫線で仕切ったり注記を左上に貼ったりすると、
+    /// 「何か出るはずの場所が壊れている」ように見える。中央に 1 行だけ置いて、
+    /// 空白が意図的なものだと分かるようにする。
     @ViewBuilder
     private var result: some View {
         if add.isBusy {
-            HStack(spacing: 8) { ProgressView().controlSize(.small); Text("取得しています…") }
-                .foregroundStyle(.secondary)
+            centered {
+                HStack(spacing: 8) { ProgressView().controlSize(.small); Text("取得しています…") }
+            }
         } else if let staged = add.staged {
-            Text("見つかった候補").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(staged.candidates, id: \.name) { candidate in
-                        CandidateRow(candidate: candidate) {
-                            add.install(candidate) { onInstalled() }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("見つかった候補").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(staged.candidates, id: \.name) { candidate in
+                            CandidateRow(candidate: candidate) {
+                                add.install(candidate) { onInstalled() }
+                            }
                         }
                     }
+                    .padding(.vertical, 2)
                 }
-                .padding(.vertical, 2)
             }
         } else {
-            Text("「取得」を押すと中身を確認できます。確認するまで何も入りません。")
-                .font(.caption).foregroundStyle(.tertiary)
+            centered {
+                Text("「取得」を押すと中身を確認できます。確認するまで何も入りません。")
+            }
         }
+    }
+
+    private func centered(@ViewBuilder _ content: () -> some View) -> some View {
+        VStack {
+            Spacer(minLength: 0)
+            content()
+            Spacer(minLength: 0)
+        }
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity)
     }
 }
 

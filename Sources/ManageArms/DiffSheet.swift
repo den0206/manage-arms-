@@ -17,8 +17,7 @@ struct DiffSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            SheetHeader(title: "\(preview.name) を更新", subtitle: versions,
-                        symbol: "arrow.triangle.2.circlepath", tint: .accentColor)
+            SheetHeader(title: "\(preview.name) を更新", subtitle: versions)
 
             if preview.hasChanges {
                 HStack(spacing: 6) {
