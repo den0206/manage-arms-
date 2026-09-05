@@ -5,13 +5,23 @@ public enum MCPScanner {
     /// 読み取りは設定ファイルの直読みを優先する。DESIGN.md 3.1 が禁じているのは**書き込み**で、
     /// `claude mcp list` は健全性チェックのため**ネットワークを叩いて遅い**うえ
     /// JSON 出力が無く、人間向けの整形テキストしか返さない（実測）。
+    ///
+    /// 読み取り先は `Agent.mcpSource` が持つ。**ここでエージェントを直書きしない** —
+    /// 直書きすると、増えたエージェントが黙って欠落する（コンパイラが気づけない）。
     public static func scan(env: Environment) -> [Agent: [MCPServer]] {
-        [
-            .claude: fromJSON(env.home.appending(path: ".claude.json"), key: "mcpServers"),
-            .cursor: fromJSON(env.home.appending(path: ".cursor/mcp.json"), key: "mcpServers"),
-            .gemini: fromJSON(env.home.appending(path: ".gemini/settings.json"), key: "mcpServers"),
-            .codex:  fromCodexCLI(env: env),
-        ]
+        var result: [Agent: [MCPServer]] = [:]
+        for agent in Agent.allCases {
+            switch agent.mcpSource {
+            case .file(let root, let path):
+                let base = root == .home ? env.home : env.appSupport
+                result[agent] = fromJSON(base.appending(path: path), key: "mcpServers")
+            case .cli(let argv):
+                result[agent] = fromCLI(argv, env: env)
+            case .dir, nil:
+                continue                         // 読み取る経路が無いエージェント
+            }
+        }
+        return result
     }
 
     /// プロジェクト単位の MCP（DESIGN.md 5.1）。プロジェクトの絶対パス → サーバー名 → スコープ。
@@ -50,9 +60,10 @@ public enum MCPScanner {
         return MCPServer.parseAll(["mcpServers": servers])
     }
 
-    /// Codex は設定が `config.toml` にあり TOML パースが要るため CLI の JSON を使う。
-    static func fromCodexCLI(env: Environment) -> [MCPServer] {
-        guard let out = try? env.run(["codex", "mcp", "list", "--json"]),
+    /// 設定ファイルを直読みできないエージェント（Codex は `config.toml` で TOML パースが要る）。
+    /// 出力は `[{...}]` と `{"name": {...}}` の両方を実測しているので、どちらも受ける。
+    static func fromCLI(_ argv: [String], env: Environment) -> [MCPServer] {
+        guard let out = try? env.run(argv),
               let data = out.data(using: .utf8),
               let list = try? JSONSerialization.jsonObject(with: data)
         else { return [] }

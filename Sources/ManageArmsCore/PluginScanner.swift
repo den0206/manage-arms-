@@ -15,9 +15,18 @@ public struct InstalledPlugin: Equatable, Sendable {
 
 public enum PluginScanner {
 
+    /// **エージェントを直書きせず `Agent.allCases` を回す。** `default` を置かないので、
+    /// エージェントが増えたらここがコンパイルエラーになり、読み取り経路の要否を必ず決めさせる。
     public static func scan(env: Environment) -> [InstalledPlugin] {
         let auto = autoUpdateMarketplaces(env: env)
-        return claude(env: env, autoUpdate: auto) + codex(env: env)
+        return Agent.allCases.flatMap { agent -> [InstalledPlugin] in
+            switch agent {
+            case .claude: claude(env: env, autoUpdate: auto)
+            case .codex:  codex(env: env)
+            // Cursor は `~/.cursor/plugins/` を持つが読み取り経路が未実測（3.7 — 推測で埋めない）。
+            case .cursor, .gemini: []
+            }
+        }
     }
 
     /// `~/.claude/plugins/known_marketplaces.json` の `autoUpdate` を拾う。

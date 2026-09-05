@@ -100,3 +100,55 @@ extension Agent {
         }
     }
 }
+
+extension Agent {
+    /// MCP の読み取り元（DESIGN.md 3.1）。設定ファイルの直読みを優先し、
+    /// Codex だけ設定が `config.toml` なので CLI の JSON を使う。
+    /// **`.file` は `mcpServers` キーで読まれる**（`MCPScanner.scan`）。
+    /// 別のキーを使うエージェントはここに足すだけでは読めない。
+    /// `nil` は「読み取る経路が無い」— `supports(.mcp)` が false のエージェント。
+    ///
+    /// **`Source.mcp` はここから導出される。** 二重に書かない。
+    public var mcpSource: Source? {
+        switch self {
+        case .claude: .file(.home, ".claude.json")            // key: mcpServers
+        case .cursor: .file(.home, ".cursor/mcp.json")
+        case .gemini: .file(.home, ".gemini/settings.json")
+        case .codex:  .cli(["codex", "mcp", "list", "--json"])
+        }
+    }
+
+    /// プラグインの読み取り元（DESIGN.md 3.1）。書き込みは CLI に委譲する。
+    /// Cursor は `~/.cursor/plugins/` を持つが**読み取り経路が未実測**なので空にする
+    /// （3.7 — 推測で埋めない）。`Source.plugins` はここから導出される。
+    public var pluginSources: [Source] {
+        switch self {
+        case .claude:
+            [.file(.home, ".claude/plugins/installed_plugins.json"),
+             .file(.home, ".claude/plugins/known_marketplaces.json"),
+             .cli(["claude", "plugin", "list", "--json"])]
+        case .codex:
+            [.cli(["codex", "plugin", "list", "--json"])]
+        case .cursor, .gemini:
+            []
+        }
+    }
+
+    /// `ps` の行からエージェントを見分ける手掛かり。**実行ファイル名（`cliName`）で
+    /// 当てられないものだけ**ここに書く（DESIGN.md 3.9）。
+    /// Cursor は CLI を持たず、アプリ本体とヘルパープロセスの名前でしか判別できない。
+    ///
+    /// **そのエージェントのプロセスにしか現れない語だけを載せる。** 部分一致なので、
+    /// `/Cursor` のような広い語を入れると
+    /// `node …/Library/Application Support/Cursor/foo.js` を Cursor のものと誤って言う。
+    /// 所属は表示にしか使わないが、**間違った持ち主を名乗るのは分からないより悪い**
+    /// （3.9 の「Codex を Cursor と取り違えない」と同じ理由）。
+    /// 実測のプロセス `/Applications/Cursor.app/Contents/MacOS/Cursor` は
+    /// `Cursor.app/` で拾える。
+    public var processMarkers: [String] {
+        switch self {
+        case .claude, .codex, .gemini: []
+        case .cursor: ["Cursor.app/", "Cursor Helper"]
+        }
+    }
+}

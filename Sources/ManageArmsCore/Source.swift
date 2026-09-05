@@ -21,40 +21,28 @@ extension Source {
     /// （3.9）。一覧スキャンがあの 140 MB を踏むと 3.4 の前提が崩れる。
     public static let all: [Source] = skills + subagents + mcp + plugins + app
 
-    /// スキルルート。3.2 の実測表に対応する。
-    /// `.agents/skills` が実体の置き場、他は他ツール/他エージェントが入れたものの読み取り。
-    public static let skills: [Source] = [
-        .dir(.home, ".agents/skills"),
-        .dir(.home, ".claude/skills"),
-        .dir(.home, ".codex/skills"),
-        .dir(.home, ".cursor/skills"),
-        .dir(.home, ".cursor/skills-cursor"),
-        .dir(.home, ".cursor/cloud-skills"),
-        .dir(.home, ".grok/skills"),
-    ]
+    /// 走査するスキルルート。**各 `Agent.skillRoots` の和集合**（3.2 の実測表）。
+    ///
+    /// エージェントを増やしても、ここには何も書かない —
+    /// `Agent.skillRoots` に足せば走査対象になる。**二重管理をすると、
+    /// 片方だけ足したときに「宣言はあるのに一生読まれないルート」が静かにできる。**
+    public static let skills: [Source] = homeDirs(Agent.allCases.flatMap(\.skillRoots))
 
-    public static let subagents: [Source] = [
-        .dir(.home, ".claude/agents"),
-        .dir(.home, ".cursor/agents"),
-        .dir(.appSupport, "agents"),
-    ]
+    /// `Agent.subagentRoots` の和集合 + アプリ自身の実体置き場（3.2 / 9 章）。
+    public static let subagents: [Source] =
+        homeDirs(Agent.allCases.flatMap(\.subagentRoots)) + [.dir(.appSupport, "agents")]
 
-    /// 読み取りは設定ファイルの直読みを優先する。
+    /// 読み取りは設定ファイルの直読みを優先する（`Agent.mcpSource`）。
     /// `claude mcp list` は健全性チェックでネットワークを叩き、JSON 出力も無い（実測）。
     /// Codex だけは設定が `config.toml` なので CLI の JSON を使う。
-    public static let mcp: [Source] = [
-        .file(.home, ".claude.json"),
-        .file(.home, ".cursor/mcp.json"),
-        .file(.home, ".gemini/settings.json"),
-        .cli(["codex", "mcp", "list", "--json"]),
-    ]
+    public static let mcp: [Source] = Agent.allCases.compactMap(\.mcpSource)
 
-    public static let plugins: [Source] = [
-        .file(.home, ".claude/plugins/installed_plugins.json"),
-        .file(.home, ".claude/plugins/known_marketplaces.json"),
-        .cli(["claude", "plugin", "list", "--json"]),
-        .cli(["codex", "plugin", "list", "--json"]),
-    ]
+    public static let plugins: [Source] = Agent.allCases.flatMap(\.pluginSources)
+
+    /// ホーム相対ルートの列挙を重複なく畳む。順序は安定させる（走査順が結果に出る）。
+    static func homeDirs(_ paths: [String]) -> [Source] {
+        Set(paths).sorted().map { .dir(.home, $0) }
+    }
 
     /// アプリ自身の保存領域（9 章）。
     public static let app: [Source] = [

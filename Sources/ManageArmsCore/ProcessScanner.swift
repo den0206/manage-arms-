@@ -128,16 +128,15 @@ public enum ProcessScanner {
     /// **実行ファイル名を先に見る。** Codex は Cursor の拡張の中に入っていることがあり
     /// （実測: `~/.cursor/extensions/openai.chatgpt-…/bin/…/codex`）、
     /// パスに `cursor` が含まれるからと先に Cursor と判定すると取り違える。
+    ///
+    /// 手掛かりは `Agent.cliName` / `Agent.processMarkers` が持つ。
+    /// ここでエージェント名を直書きすると、増えたぶんが黙って `nil` になる。
     static func agent(ofCommand command: String) -> Agent? {
         let executable = command.split(separator: " ").first.map(String.init) ?? command
-        switch (executable as NSString).lastPathComponent {
-        case "claude": return .claude
-        case "codex":  return .codex
-        case "gemini": return .gemini
-        default: break
+        let name = (executable as NSString).lastPathComponent
+        if let byCLI = Agent.allCases.first(where: { $0.cliName == name }) { return byCLI }
+        return Agent.allCases.first { agent in
+            agent.processMarkers.contains { command.contains($0) }
         }
-        if command.contains("Cursor.app/") || command.hasPrefix("Cursor Helper")
-            || command.hasSuffix("/Cursor") { return .cursor }
-        return nil
     }
 }

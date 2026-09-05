@@ -60,4 +60,28 @@ struct SourceTests {
             #expect(inHome || inApp, "\(resolved) がどちらのルートにも属さない")
         }
     }
+
+    /// **エージェントを増やしたときに黙って壊れる唯一の経路を塞ぐ。**
+    /// `Agent` 側にルートを宣言してもスキャナが読まなければ、マトリクスは
+    /// エラーを出さずに全部「未導入」と表示する（3.4 のホワイトリストを二重管理した場合の事故）。
+    @Test("Agent が宣言したルートは必ず走査対象に載る")
+    func agentRootsAreScanned() {
+        let scanned = Set(Source.all.compactMap(\.relativePath))
+        for agent in Agent.allCases {
+            for root in agent.skillRoots + agent.subagentRoots {
+                #expect(scanned.contains(root),
+                        "\(agent.rawValue) が読む \(root) が Source.all に無い")
+            }
+        }
+    }
+
+    /// MCP 対応と宣言したのに読み取り経路が無い = 一覧に一生出てこない（3.7）。
+    @Test("MCP 対応のエージェントには読み取り経路がある")
+    func mcpSupportHasSource() {
+        for agent in Agent.allCases where agent.supports(.mcp) {
+            #expect(agent.mcpSource != nil,
+                    "\(agent.rawValue) は MCP 対応だが mcpSource が無い")
+            #expect(agent.mcpSource.map(Source.mcp.contains) == true)
+        }
+    }
 }

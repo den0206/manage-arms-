@@ -67,6 +67,11 @@ struct ProcessTests {
         #expect(ProcessScanner.agent(ofCommand: "Cursor Helper: mcp-process") == .cursor)
         #expect(ProcessScanner.agent(ofCommand:
             "/Applications/Cursor.app/Contents/MacOS/Cursor") == .cursor)
+
+        // 部分一致なので、広い語を手掛かりに足すと無関係なプロセスを Cursor と誤認する。
+        // 持ち主を間違えて名乗るのは、分からないと言うより悪い。
+        #expect(ProcessScanner.agent(ofCommand:
+            "node /Users/x/Library/Application Support/Cursor/foo.js") == nil)
         #expect(ProcessScanner.agent(ofCommand: "/usr/bin/some-random-daemon") == nil)
     }
 
