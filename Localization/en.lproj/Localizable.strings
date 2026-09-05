@@ -1,0 +1,132 @@
+/* ManageArms — English localization. Keys are the Japanese (development language) strings.
+   Interpolated strings with 2+ arguments use positional specifiers (%1$@, %2$lld …). */
+
+/* Navigation & shared */
+"リソース" = "Resources";
+"権限" = "Permissions";
+"エージェント" = "Agents";
+"OK" = "OK";
+"閉じる" = "Close";
+"追加" = "Add";
+"すべて" = "All";
+"—" = "—";
+"操作できませんでした" = "The operation failed";
+"再読み込み" = "Reload";
+
+/* Resource list */
+"リソースがありません" = "No resources";
+"スコープ" = "Scope";
+"ユーザー全体" = "All projects";
+"確認中…" = "Checking…";
+"更新を確認" = "Check for Updates";
+"分析中…" = "Analyzing…";
+"使用状況を分析" = "Analyze Usage";
+"前回: %@" = "Last run: %@";
+"セッションログから最終使用日を集計します（初回は数秒かかります）" = "Reads session logs to work out when each resource was last used (the first run takes a few seconds).";
+"%lld 件" = "%lld items";
+"最終使用" = "Last Used";
+"更新" = "Update";
+"● 有効" = "● Enabled";
+"○ 未導入" = "○ Not installed";
+"— 非対応" = "— Unsupported";
+"· 未検出" = "· Not detected";
+
+/* Agent column headers */
+"CLI なし" = "No CLI";
+"未検出" = "Not detected";
+"%@ は CLI を持ちません（設定を直接読みます）" = "%@ has no CLI; its configuration is read directly.";
+"設定は見つかりましたが %@ CLI が見つかりません。表示のみです" = "Configuration found, but the %@ CLI is missing. Display only.";
+"%@ が見つかりません" = "%@ was not found";
+
+/* Last-used cell */
+"● 実行中" = "● Running";
+"停止中" = "Stopped";
+"未使用" = "Never used";
+"所属不明のプロセス" = "an unidentified process";
+"%@ が使用中 · 稼働 %@ · pid %lld" = "In use by %1$@ · up %2$@ · pid %3$lld";
+"登録されていますが、いま起動しているプロセスはありません" = "Registered, but no process is running right now";
+"未集計 —「使用状況を分析」を押すと集計します" = "Not analyzed — press “Analyze Usage” to collect this";
+"Claude のセッションログしか読めないため不明です。使われていないという意味ではありません" = "Unknown, because only Claude’s session logs can be read. This does not mean it is unused.";
+"最終使用: %@" = "Last used: %@";
+"集計した範囲では一度も使われていません" = "Never used within the analyzed range";
+
+/* Update column */
+"CLI が管理" = "Managed by CLI";
+"プラグインの更新は claude / codex plugin update が行います" = "Plugin updates are handled by claude / codex plugin update";
+"未確認" = "Not checked";
+"最新" = "Up to date";
+"差分を見る" = "View Diff";
+"固定中（更新あり）" = "Pinned (update available)";
+"固定中" = "Pinned";
+"固定を解除するには行を右クリック" = "Right-click the row to unpin";
+
+/* Actions column */
+"ピン留め" = "Pin";
+"いま npm にある最新版に固定し、起動ごとに変わらないようにします" = "Pins to the latest version currently on npm so it stops changing on every launch";
+"固定済み" = "Pinned";
+"バージョンが指定済みです。起動ごとに変わることはありません" = "A version is already specified, so it will not change between launches";
+"有効にする（全エージェント）" = "Enable (all agents)";
+"無効にする（全エージェント）" = "Disable (all agents)";
+"固定を解除" = "Unpin";
+"このバージョンで固定" = "Pin to This Version";
+"外部管理" = "External";
+"他のツールが入れたスキルです。manage-arms からは変更できません" = "Installed by another tool. ManageArms cannot change it.";
+
+/* Matrix cells */
+"%@ で有効" = "Enabled in %@";
+"ユーザー全体から継承" = "Inherited from the user scope";
+"他ツールが管理しています" = "Managed by another tool";
+"%@ には未導入" = "Not installed in %@";
+"%@ に %@ はありません" = "%1$@ has no %2$@";
+
+/* Agents screen */
+"バージョン" = "Version";
+"パス" = "Path";
+"~/%@（CLI なし・設定を直接読む）" = "~/%@ (no CLI; configuration read directly)";
+"~/%@ はあるが CLI が見つからない" = "~/%@ exists, but the CLI was not found";
+
+/* Permissions screen */
+"使い捨て" = "Disposable";
+"重複" = "Duplicated";
+"権限の設定が見つかりません" = "No permission settings found";
+"該当なし" = "No matches";
+"マシン固有のパスを含むエントリはありません" = "No entries contain machine-specific paths";
+"条件に合うエントリはありません" = "No entries match the filter";
+"表示中をすべて選択" = "Select All Shown";
+"選択解除" = "Deselect";
+"選択した %lld 件を削除" = "Delete %lld selected";
+"マシン固有" = "Machine-specific";
+"%lld プロジェクトに重複" = "duplicated across %lld projects";
+"%lld 件中 %lld 件を表示" = "Showing %2$lld of %1$lld";
+"削除中…" = "Deleting…";
+"削除前の内容は Application Support にバックアップされます" = "The previous contents are backed up to Application Support before deletion";
+
+/* Add sheet */
+"リソースを追加" = "Add a Resource";
+"GitHub の URL / MCP の JSON / npx コマンドを貼り付け" = "Paste a GitHub URL, MCP JSON, or npx command";
+"取得中…" = "Fetching…";
+"取得" = "Fetch";
+"失敗しました" = "Something went wrong";
+"GitHub リポジトリとして解釈しました" = "Interpreted as a GitHub repository";
+"MCP の設定 JSON です。MCP の追加は未対応です" = "This is MCP configuration JSON. Adding MCP servers is not supported yet.";
+"MCP のコマンドです。MCP の追加は未対応です" = "This is an MCP command. Adding MCP servers is not supported yet.";
+"解釈できませんでした" = "Could not interpret this";
+"リポジトリ" = "Repository";
+"ブランチ" = "Branch";
+"サブディレクトリ" = "Subdirectory";
+"owner/name" = "owner/name";
+"main" = "main";
+"（リポジトリ直下なら空）" = "(leave empty for the repository root)";
+"ブランチ名に「/」が含まれる場合、区切りが正しいか確認してください" = "If the branch name contains “/”, check that the split is correct";
+"取得しています…" = "Fetching…";
+"見つかった候補" = "Candidates found";
+"（説明なし）" = "(no description)";
+"Claude Code / Cursor に導入されます" = "Will be installed for Claude Code / Cursor";
+"Claude Code / Cursor / Codex に導入されます" = "Will be installed for Claude Code / Cursor / Codex";
+"「取得」を押すと中身を確認できます。確認するまで何も入りません。" = "Press “Fetch” to inspect the contents. Nothing is installed until you confirm.";
+
+/* Diff sheet */
+"%@ を更新" = "Update %@";
+"内容に差分はありません" = "No changes in the contents";
+"上流が方針転換した時に更新を止めます" = "Stops updates if upstream changes direction";
+"更新する" = "Update";
