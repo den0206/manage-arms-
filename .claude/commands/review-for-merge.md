@@ -1,9 +1,19 @@
+---
+description: main へ入れる前に、変更一式をこのリポジトリ固有の観点でレビューする
+allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(swift build:*), Bash(swift test:*), Bash(./Scripts/check-invariants.sh), Bash(./Scripts/release-changelog.sh:*), Bash(./Scripts/test-release-changelog.sh), Bash(./Scripts/build-app.sh)
+---
+
 # マージ前レビュー
 
 `main` へ入れる前に、変更一式を**このリポジトリ固有の観点で**レビューする。
 汎用の指摘ではなく、**ここで壊れると実ユーザーのデータが飛ぶ**箇所を優先して見る。
 
 対象は `git diff main...HEAD`（ブランチ全体）。ファイル単位ではなく**変更の意図**を見る。
+
+## レビュー対象
+
+- ブランチの差分: !`git diff --stat main...HEAD 2>/dev/null || echo "(main 上。未コミット分を見る)"`
+- 未コミット: !`git status -s`
 
 ## 1. 不変条件（最優先・機械検査と同じ観点）
 

@@ -1,8 +1,18 @@
+---
+description: 未コミット変更をレビューし、機能・役割ごとに分けて Conventional Commit する
+allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git add:*), Bash(git commit:*), Bash(swift build:*), Bash(swift test:*), Bash(./Scripts/check-invariants.sh), Bash(./Scripts/release-changelog.sh:*), Bash(./Scripts/test-release-changelog.sh), Bash(./Scripts/build-app.sh)
+---
+
 # 機能別に Conventional Commit でコミットする
 
 現在の未コミット変更を**レビューしたうえで**、**機能・役割ごとに分けて**複数のコミットに分割する。
 
 **必ずコミット前にレビューする。** レビュー不合格のまま `git commit` しない。
+
+## いまの状態
+
+- 変更・未追跡: !`git status -s`
+- 直近のコミット: !`git log --oneline -5`
 
 ## 手順
 

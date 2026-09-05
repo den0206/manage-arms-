@@ -10,7 +10,7 @@ AI コーディングエージェントの周辺リソース（MCP / Skills / Su
 |---|---|
 | `DESIGN.md` | 設計の正本。中核の判断（3 章）・データモデル・スコープ・テスト戦略・実測データ |
 | `README.md` / `README.ja.md` | 利用者・新規参加者向けの入口（英語が既定、日本語は対訳）。**片方だけ直さない** |
-| `.cursor/commands/` | コミット分割・マージ前レビューの手順（Cursor のスラッシュコマンド） |
+| `.claude/commands/` | `/commit-by-feature`・`/review-for-merge`（このリポジトリ用のスラッシュコマンド） |
 | `docs/signing.md` | Developer ID 署名・公証のセットアップ手順と罠（人間が 1 回だけやる作業） |
 | `CHANGELOG.md` | 公開 Release 本文の出所。**英語**・Keep a Changelog |
 
