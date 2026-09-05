@@ -17,34 +17,17 @@ struct ContentView: View {
     @State private var add = AddModel()
     @State private var showAdd = false
 
+    /// 何かしら走っている間は、トップの細い帯だけで知らせる（一覧は読めるまま）。
+    private var busy: Bool {
+        model.isLoading || model.isChecking || model.isAnalyzing || model.isCleaning
+    }
+
     var body: some View {
         NavigationSplitView {
-            List(selection: $screen) {
-                Label("ホーム", systemImage: "house").tag(Screen.home)
-                Section("エージェント") {
-                    ForEach(Agent.allCases) { agent in
-                        AgentSidebarRow(
-                            agent: agent,
-                            detection: model.inventory.agents[agent] ?? .undetected,
-                            count: model.inventory.rows(for: agent).filter { $0.origin != .bundled }.count
-                        )
-                        .tag(Screen.agent(agent))
-                    }
-                }
-                Section("そのほか") {
-                    Label("権限", systemImage: "lock").tag(Screen.permissions)
-                }
-            }
-            .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
+            sidebar
         } detail: {
-            switch screen {
-            case .home:
-                HomeView(model: model, add: add, showAdd: $showAdd)
-            case .agent(let agent):
-                AgentPage(agent: agent, model: model, showAdd: $showAdd)
-            case .permissions:
-                PermissionList(model: model)
-            }
+            detail
+                .overlay(alignment: .top) { BusyBar(active: busy) }
         }
         .alert("操作できませんでした",
                isPresented: .init(get: { model.errorMessage != nil },
@@ -68,37 +51,96 @@ struct ContentView: View {
                              set: { if $0 == nil { model.discardPreview() } })) { box in
             DiffSheet(preview: box.value, model: model)
         }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button { showAdd = true } label: { Label("追加", systemImage: "plus") }
-                    .help("GitHub の URL からスキルを追加します")
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    model.analyzeUsage()
-                } label: {
-                    Label(model.isAnalyzing ? "分析中…" : "使用状況を分析",
-                          systemImage: "clock.arrow.circlepath")
+        .toolbar { toolbar }
+    }
+
+    private var sidebar: some View {
+        List(selection: $screen) {
+            Label("ホーム", systemImage: "house").tag(Screen.home)
+            Section("エージェント") {
+                ForEach(Agent.allCases) { agent in
+                    AgentSidebarRow(
+                        agent: agent,
+                        detection: model.inventory.agents[agent] ?? .undetected,
+                        count: model.inventory.rows(for: agent).filter { $0.origin != .bundled }.count
+                    )
+                    .tag(Screen.agent(agent))
                 }
-                .disabled(model.isAnalyzing)
-                .help(model.inventory.usageScannedAt.map {
-                    String(localized: "前回: \($0.formatted(date: .abbreviated, time: .shortened))")
-                } ?? String(localized: "セッションログから最終使用日を集計します（初回は数秒かかります）"))
             }
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    model.checkUpdates()
-                } label: {
-                    Label(model.isChecking ? "確認中…" : "更新を確認",
-                          systemImage: "arrow.triangle.2.circlepath")
-                }
-                .disabled(model.isChecking)
+            Section("そのほか") {
+                Label("権限", systemImage: "lock").tag(Screen.permissions)
             }
-            ToolbarItem(placement: .primaryAction) {
-                Button { model.reload() } label: { Image(systemName: "arrow.clockwise") }
-                    .help("再読み込み")
-                    .disabled(model.isLoading)
+        }
+        .navigationSplitViewColumnWidth(min: 208, ideal: 228, max: 300)
+        .safeAreaInset(edge: .bottom) { sidebarFooter }
+    }
+
+    /// 最後に何を読んだのか。**使用状況は明示的に集計する**（3.9）ので、
+    /// 「まだ押していない」ことが分かる場所が要る。
+    private var sidebarFooter: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "clock.arrow.circlepath")
+            if let at = model.inventory.usageScannedAt {
+                Text("使用状況 \(at.formatted(.relative(presentation: .numeric)))")
+            } else {
+                Text("使用状況は未集計")
             }
+            Spacer(minLength: 0)
+        }
+        .font(.caption2)
+        .foregroundStyle(.tertiary)
+        .lineLimit(1)
+        .padding(.horizontal, 14).padding(.vertical, 8)
+    }
+
+    @ViewBuilder
+    private var detail: some View {
+        switch screen {
+        case .home:
+            HomeView(model: model, add: add, showAdd: $showAdd, screen: $screen)
+        case .agent(let agent):
+            AgentPage(agent: agent, model: model, showAdd: $showAdd)
+        case .permissions:
+            PermissionList(model: model)
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbar: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Button { showAdd = true } label: { Label("追加", systemImage: "plus") }
+                .help("GitHub の URL からスキルを追加します")
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                model.analyzeUsage()
+            } label: {
+                Label(model.isAnalyzing ? "分析中…" : "使用状況を分析",
+                      systemImage: "clock.arrow.circlepath")
+                    .symbolEffect(.pulse, isActive: model.isAnalyzing && !Motion.reduced)
+            }
+            .disabled(model.isAnalyzing)
+            .help(model.inventory.usageScannedAt.map {
+                String(localized: "前回: \($0.formatted(date: .abbreviated, time: .shortened))")
+            } ?? String(localized: "セッションログから最終使用日を集計します（初回は数秒かかります）"))
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                model.checkUpdates()
+            } label: {
+                Label(model.isChecking ? "確認中…" : "更新を確認",
+                      systemImage: "arrow.triangle.2.circlepath")
+                    .symbolEffect(.rotate, isActive: model.isChecking && !Motion.reduced)
+            }
+            .disabled(model.isChecking)
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button { model.reload() } label: {
+                Image(systemName: "arrow.clockwise")
+                    .symbolEffect(.rotate, isActive: model.isLoading && !Motion.reduced)
+            }
+            .help("再読み込み")
+            .disabled(model.isLoading)
         }
     }
 }
@@ -114,7 +156,10 @@ struct AgentIcon: View {
         if let icon = Self.icons[agent] {
             Image(nsImage: icon).resizable().frame(width: size, height: size)
         } else {
-            Image(systemName: agent.symbol).foregroundStyle(agent.tint)
+            Image(systemName: agent.symbol)
+                .font(.system(size: size * 0.72, weight: .semibold))
+                .foregroundStyle(agent.tint)
+                .frame(width: size, height: size)
         }
     }
 
@@ -164,20 +209,25 @@ struct AgentSidebarRow: View {
     let count: Int
 
     var body: some View {
-        HStack {
-            Label {
-                Text(agent.displayName)
-            } icon: {
-                AgentIcon(agent: agent)
-            }
-            Spacer()
+        HStack(spacing: 8) {
+            AgentIcon(agent: agent, size: 17)
+            Text(agent.displayName).lineLimit(1)
+            Spacer(minLength: 4)
             if detection == .undetected {
-                Text("未検出").font(.caption).foregroundStyle(.tertiary)
+                StatusDot(detection: detection)
             } else if count > 0 {
-                Text(count.formatted()).font(.caption).foregroundStyle(.secondary)
+                Text(count.formatted())
+                    .font(.caption.weight(.medium))
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                    .animation(Motion.count, value: count)
+                    .foregroundStyle(.secondary)
+            } else {
+                StatusDot(detection: detection)
             }
         }
-        .opacity(detection == .undetected ? 0.5 : 1)
+        .opacity(detection == .undetected ? 0.55 : 1)
+        .animation(Motion.gentle, value: detection)
     }
 }
 
@@ -187,6 +237,8 @@ struct HomeView: View {
     let model: AppModel
     @Bindable var add: AddModel
     @Binding var showAdd: Bool
+    @Binding var screen: Screen
+    @FocusState private var pasteFocused: Bool
 
     /// 自分で入れたもの全部（このアプリ経由に限らない）。同梱は数えない。
     private var mine: [ResourceRow] { model.inventory.rows.filter { $0.origin != .bundled } }
@@ -194,37 +246,57 @@ struct HomeView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("ManageArms").font(.title2.weight(.semibold))
-                    Text("AI エージェントが持っているスキルを、ここでまとめて追加・削除できます。")
-                        .foregroundStyle(.secondary)
-                }
+            VStack(alignment: .leading, spacing: Theme.block) {
+                hero
                 addCard
+                statRow
+                agentGrid
+                mineCard
                 findCard
-                managedCard
-                agentCard
             }
             .padding(28)
-            .frame(maxWidth: 760, alignment: .leading)
+            .frame(maxWidth: Theme.readable, alignment: .leading)
+            .frame(maxWidth: .infinity)
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
         .navigationTitle("ホーム")
+    }
+
+    private var hero: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable().frame(width: 38, height: 38)
+                Text(verbatim: "ManageArms")
+                    .font(.system(size: 30, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Theme.brand)
+            }
+            Text("AI エージェントが持っているスキルを、ここでまとめて追加・削除できます。")
+                .foregroundStyle(.secondary)
+        }
     }
 
     /// 貼って押すだけ。**取得して中身を見せるまで何も入らない**（6 章）。
     private var addCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("スキル・サブエージェントを追加する").font(.headline)
+            Label("スキル・サブエージェントを追加する", systemImage: "plus.circle.fill")
+                .font(.headline)
+                .labelStyle(TintedLabel(tint: .accentColor))
             Text("使いたいスキルの GitHub ページを開き、その URL をそのまま貼り付けてください。")
                 .font(.callout).foregroundStyle(.secondary)
             HStack(spacing: 8) {
                 TextField("https://github.com/owner/repo/tree/main/skills/foo", text: $add.text)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.body, design: .monospaced))
+                    .focused($pasteFocused)
                     .onSubmit { openAdd() }
                 Button("追加") { openAdd() }
                     .buttonStyle(.borderedProminent)
+                    .disabled(add.text.isEmpty)
+            }
+            // 貼った瞬間に「何として読んだか」を返す。シートを開く前に間違いに気づける（6 章）。
+            if !add.text.isEmpty {
+                interpretation
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
             VStack(alignment: .leading, spacing: 4) {
                 Label("中身を確認するまで何も入りません。追加したものは Claude Code / Cursor / Codex の全部から使えます。",
@@ -236,9 +308,23 @@ struct HomeView: View {
             }
             .font(.caption).foregroundStyle(.tertiary)
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quinary, in: RoundedRectangle(cornerRadius: 10))
+        .card(accented: pasteFocused || !add.text.isEmpty)
+        .animation(Motion.pop, value: add.text.isEmpty)
+    }
+
+    @ViewBuilder
+    private var interpretation: some View {
+        switch add.interpretation {
+        case .github:
+            Label("GitHub リポジトリとして解釈しました", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green).font(.caption)
+        case .mcpJSON, .command:
+            Label("MCP の設定です。追加は claude mcp add で行います", systemImage: "terminal")
+                .foregroundStyle(.orange).font(.caption)
+        case .unrecognized:
+            Label("解釈できませんでした", systemImage: "questionmark.circle")
+                .foregroundStyle(.secondary).font(.caption)
+        }
     }
 
     private func openAdd() {
@@ -246,22 +332,42 @@ struct HomeView: View {
         showAdd = true
     }
 
-    private var findCard: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("どこで見つける？").font(.headline)
-            Link(destination: URL(string: "https://github.com/anthropics/skills")!) {
-                Label("anthropics/skills — Anthropic 公式のスキル集", systemImage: "link")
+    /// 種別ごとの件数。**同梱は数えない** — 自分で入れたものの規模が知りたい。
+    private var statRow: some View {
+        HStack(spacing: Theme.gap + 2) {
+            ForEach(Kind.allCases, id: \.self) { kind in
+                StatTile(title: kind.title,
+                         count: mine.filter { $0.kind == kind }.count,
+                         symbol: kind.symbol, tint: kind.tint)
             }
-            Link(destination: URL(string: "https://github.com/topics/claude-skills")!) {
-                Label("GitHub の claude-skills トピック", systemImage: "link")
-            }
-            Text("開いたページのフォルダの URL をコピーして、上のボックスに貼り付けます。")
-                .font(.caption).foregroundStyle(.tertiary)
         }
     }
 
-    private var managedCard: some View {
-        VStack(alignment: .leading, spacing: 6) {
+    /// 旧「エージェント」画面の中身（DESIGN.md 8 章）。専用画面を持つほどの情報量が無い。
+    /// **押せばそのエージェントの画面へ行く** — 検出状況を見た次にやることはそれ。
+    private var agentGrid: some View {
+        VStack(alignment: .leading, spacing: Theme.gap) {
+            Text("エージェントの検出状況").font(.headline)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: Theme.gap)],
+                      spacing: Theme.gap) {
+                ForEach(Agent.allCases) { agent in
+                    let detection = model.inventory.agents[agent] ?? .undetected
+                    Button {
+                        withAnimation(Motion.gentle) { screen = .agent(agent) }
+                    } label: {
+                        AgentCard(agent: agent, detection: detection,
+                                  count: model.inventory.rows(for: agent)
+                                      .filter { $0.origin != .bundled }.count)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(detection == .undetected)
+                }
+            }
+        }
+    }
+
+    private var mineCard: some View {
+        VStack(alignment: .leading, spacing: Theme.gap) {
             Text("あなたが入れたもの").font(.headline)
             if mine.isEmpty {
                 Text("まだありません。上のボックスから追加できます。")
@@ -269,28 +375,105 @@ struct HomeView: View {
             } else {
                 Text("\(mine.count) 件。うち \(managed.count) 件はこのアプリから切り替え・削除できます（左のエージェントを選ぶ）")
                     .font(.callout).foregroundStyle(.secondary)
-                Text(verbatim: mine.map(\.name).joined(separator: "  ·  "))
-                    .font(.caption).foregroundStyle(.tertiary)
-            }
-        }
-    }
-
-    /// 旧「エージェント」画面の中身（DESIGN.md 8 章）。専用画面を持つほどの情報量が無い。
-    private var agentCard: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("エージェントの検出状況").font(.headline)
-            ForEach(Agent.allCases) { agent in
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text(agent.displayName).frame(width: 110, alignment: .leading)
-                    detail(for: model.inventory.agents[agent] ?? .undetected, agent: agent)
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                WrapLayout(spacing: 5) {
+                    ForEach(mine) { row in
+                        Pill(text: row.name,
+                             tint: row.isUnusable ? .orange : (row.isManaged ? .accentColor : nil),
+                             icon: row.isManaged ? "checkmark" : nil)
+                    }
                 }
             }
         }
     }
 
+    private var findCard: some View {
+        VStack(alignment: .leading, spacing: Theme.tight) {
+            Text("どこで見つける？").font(.headline)
+            LinkRow(title: "anthropics/skills — Anthropic 公式のスキル集",
+                    url: URL(string: "https://github.com/anthropics/skills")!)
+            LinkRow(title: "GitHub の claude-skills トピック",
+                    url: URL(string: "https://github.com/topics/claude-skills")!)
+            Text("開いたページのフォルダの URL をコピーして、上のボックスに貼り付けます。")
+                .font(.caption).foregroundStyle(.tertiary)
+                .padding(.top, 2)
+        }
+    }
+}
+
+/// アイコンだけ差し色にするラベル。見出しの文字色は本文と揃える（読みやすさ優先）。
+struct TintedLabel: LabelStyle {
+    let tint: Color
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 6) {
+            configuration.icon.foregroundStyle(tint)
+            configuration.title
+        }
+    }
+}
+
+struct LinkRow: View {
+    let title: LocalizedStringKey
+    let url: URL
+    @State private var hovering = false
+
+    var body: some View {
+        Button { NSWorkspace.shared.open(url) } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "link").foregroundStyle(.tint)
+                Text(title)
+                Spacer(minLength: 0)
+                Image(systemName: "arrow.up.forward")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .opacity(hovering ? 1 : 0)
+                    .offset(x: hovering ? 0 : -4)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(hovering ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear),
+                    in: RoundedRectangle(cornerRadius: Theme.radiusS))
+        .animation(Motion.gentle, value: hovering)
+        .onHover { hovering = $0 }
+        .help(url.absoluteString)
+    }
+}
+
+/// ホームのエージェント 1 枚。検出状況（3.7 の 4 状態）を色と文で両方出す。
+struct AgentCard: View {
+    let agent: Agent
+    let detection: Detection
+    let count: Int
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            AgentIcon(agent: agent, size: 26)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(agent.displayName).font(.callout.weight(.semibold))
+                    StatusDot(detection: detection)
+                    Spacer(minLength: 0)
+                    if count > 0, detection != .undetected {
+                        Pill(text: count.formatted(), tint: agent.tint)
+                    }
+                }
+                detail
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .lineLimit(2).multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .card(padding: 12, radius: Theme.radiusM)
+        .opacity(detection == .undetected ? 0.55 : 1)
+        .scaleEffect(hovering && detection != .undetected ? 1.015 : 1)
+        .animation(Motion.pop, value: hovering)
+        .onHover { hovering = $0 }
+    }
+
     @ViewBuilder
-    private func detail(for detection: Detection, agent: Agent) -> some View {
+    private var detail: some View {
         switch detection {
         case .detected(let version, let path):
             // Cursor は CLI が無いのが正常。空欄にせず理由を書く（DESIGN.md 8 章）。
@@ -298,7 +481,6 @@ struct HomeView: View {
                 Text("~/\(agent.configDir)（CLI なし・設定を直接読む）")
             } else {
                 Text(verbatim: [version, path].compactMap { $0 }.joined(separator: "  "))
-                    .textSelection(.enabled)
             }
         case .configOnly:
             Text("~/\(agent.configDir) はあるが CLI が見つからない")
@@ -376,10 +558,13 @@ struct AgentPage: View {
                 Spacer()
             }
             .font(.caption)
-            .padding(.horizontal, 16).padding(.bottom, 8)
+            .padding(.horizontal, 16).padding(.bottom, 10)
             Divider()
             table(rows(for: current, in: scoped), tab: current)
+                .id(current)
+                .transition(.opacity)
         }
+        .animation(Motion.gentle, value: current)
     }
 
     private func table(_ rows: [ResourceRow], tab: ScopeTab) -> some View {
@@ -404,18 +589,20 @@ struct AgentPage: View {
                     }
                 } header: {
                     HStack(spacing: 6) {
-                        Text(title(kind))
-                        Text(items.count.formatted())
-                            .font(.caption2.weight(.semibold))
-                            .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(.quaternary, in: Capsule())
+                        Image(systemName: kind.symbol)
+                            .font(.caption2).foregroundStyle(kind.tint)
+                        Text(kind.title)
+                        Pill(text: items.count.formatted())
                     }
+                    .textCase(nil)
                 }
             }
         }
-        // 1 件が数行にわたるので、区切りと縞が無いと塊の境目が読めない。
+        // 1 件が数行にわたるので、区切りが無いと塊の境目が読めない。
+        // 縞（alternatingRowBackgrounds）は入れない — 中身の無い下部まで縞が伸びて、
+        // 「まだ何かある」ように見える。行頭のアイコンとホバーで境目は足りている。
         .listRowSeparator(.visible)
-        .alternatingRowBackgrounds()
+        .listStyle(.inset)
     }
 
     private func tabs(_ scoped: Inventory.Scoped) -> [ScopeTabItem] {
@@ -464,13 +651,33 @@ struct AgentPage: View {
         case .bundled: .bundled
         }
     }
+}
 
-    private func title(_ kind: Kind) -> String {
-        switch kind {
-        case .mcp:      String(localized: "MCP サーバー")
-        case .skill:    String(localized: "スキル")
-        case .subagent: String(localized: "サブエージェント")
-        case .plugin:   String(localized: "プラグイン")
+extension Kind {
+    var title: LocalizedStringKey {
+        switch self {
+        case .mcp:      "MCP サーバー"
+        case .skill:    "スキル"
+        case .subagent: "サブエージェント"
+        case .plugin:   "プラグイン"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .mcp:      "server.rack"
+        case .skill:    "wand.and.stars"
+        case .subagent: "person.2"
+        case .plugin:   "puzzlepiece.extension"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .mcp:      .teal
+        case .skill:    .blue
+        case .subagent: .purple
+        case .plugin:   .pink
         }
     }
 }
@@ -496,25 +703,42 @@ struct ScopeTabItem: Identifiable {
 struct ScopeTabs: View {
     let items: [ScopeTabItem]
     @Binding var selection: ScopeTab
+    /// 選択中の下敷きだけが動く。チップ全体をフェードさせるより、
+    /// **どこからどこへ移ったか**が分かる。
+    @Namespace private var underlay
 
     var body: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 6) {
                 ForEach(items) { item in
                     let chosen = item.tab == selection
-                    Button { selection = item.tab } label: {
+                    Button {
+                        withAnimation(Motion.pop) { selection = item.tab }
+                    } label: {
                         HStack(spacing: 5) {
-                            Image(systemName: item.icon)
-                            Text(item.title)
+                            Image(systemName: item.icon).font(.caption)
+                            Text(verbatim: item.title).lineLimit(1)
                             Text(item.count.formatted())
-                                .font(.caption2.weight(.semibold))
-                                .opacity(0.7)
+                                .font(.caption2.weight(.semibold)).monospacedDigit()
+                                .opacity(0.75)
                         }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(chosen ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary),
-                                    in: Capsule())
-                        .foregroundStyle(chosen ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+                        .font(.callout)
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 6)
+                        .foregroundStyle(chosen ? AnyShapeStyle(.white)
+                                                : AnyShapeStyle(.secondary))
+                        .background {
+                            ZStack {
+                                Capsule().fill(.quaternary.opacity(0.5))
+                                if chosen {
+                                    Capsule().fill(Theme.brand)
+                                        .matchedGeometryEffect(id: "scope", in: underlay)
+                                        .shadow(color: .accentColor.opacity(0.35),
+                                                radius: 5, y: 2)
+                                }
+                            }
+                        }
+                        .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
                     .help(item.help ?? item.title)
@@ -541,6 +765,7 @@ struct ResourceRowView: View {
     /// プロジェクトのタブならそのパス。削除コマンドのスコープに効く。
     var project: String?
     @State private var confirmDelete = false
+    @State private var hovering = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -550,7 +775,7 @@ struct ResourceRowView: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(row.name).font(.body.weight(.semibold))
-                    if row.isDisabled { Badge(text: String(localized: "無効")) }
+                    if row.isDisabled { Pill(text: String(localized: "無効")) }
                     // 事故（リンク切れ等）は無効化と別物として見せる。
                     if row.isUnusable {
                         Label("読み込めません", systemImage: "exclamationmark.triangle.fill")
@@ -586,8 +811,14 @@ struct ResourceRowView: View {
             Spacer(minLength: 8)
             controls
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 7)
+        .padding(.horizontal, 6)
+        .background(hovering ? AnyShapeStyle(.quaternary.opacity(0.5)) : AnyShapeStyle(.clear),
+                    in: RoundedRectangle(cornerRadius: Theme.radiusS))
+        .animation(Motion.gentle, value: hovering)
+        .onHover { hovering = $0 }
         .opacity(row.isDisabled ? 0.6 : 1)
+        .animation(Motion.gentle, value: row.isDisabled)
     }
 
     /// **「他ツールが入れた」で片付けない。** ユーザーが入れたものは
@@ -690,26 +921,33 @@ struct RemovalHelp: View {
     let model: AppModel
     var project: String?
     @State private var shown = false
+    @State private var copied = false
 
     var body: some View {
         Button("削除するには…") { shown = true }
             .buttonStyle(.link).font(.caption)
             .popover(isPresented: $shown, arrowEdge: .trailing) {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("「\(row.name)」の消し方").font(.headline)
+                    SheetHeader(title: "「\(row.name)」の消し方",
+                                symbol: "trash", tint: .red)
                     Text(reason).font(.callout).foregroundStyle(.secondary)
                     if let command {
                         HStack(spacing: 8) {
                             Text(verbatim: command)
                                 .font(.system(.caption, design: .monospaced))
                                 .textSelection(.enabled)
-                                .padding(6)
+                                .padding(8)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                                 .background(.quinary, in: RoundedRectangle(cornerRadius: 6))
                             Button {
                                 NSPasteboard.general.clearContents()
                                 NSPasteboard.general.setString(command, forType: .string)
+                                withAnimation(Motion.pop) { copied = true }
                             } label: {
-                                Image(systemName: "doc.on.doc")
+                                Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                                    .contentTransition(.symbolEffect(.replace))
+                                    .foregroundStyle(copied ? AnyShapeStyle(.green)
+                                                            : AnyShapeStyle(.primary))
                             }
                             .help("コピー")
                         }
@@ -729,9 +967,10 @@ struct RemovalHelp: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                .padding(14)
-                .frame(width: 400)
+                .padding(16)
+                .frame(width: 420)
             }
+            .onChange(of: shown) { _, open in if !open { copied = false } }
     }
 
     private var reason: String {
@@ -765,43 +1004,17 @@ struct RemovalHelp: View {
 /// 種別の目印。色と記号で「どこから次の 1 件か」を作る。
 struct KindIcon: View {
     let kind: Kind
+    var size: CGFloat = 22
 
     var body: some View {
-        Image(systemName: symbol)
-            .font(.caption)
+        Image(systemName: kind.symbol)
+            .font(.system(size: size * 0.48, weight: .semibold))
             .foregroundStyle(.white)
-            .frame(width: 22, height: 22)
-            .background(tint.gradient, in: RoundedRectangle(cornerRadius: 6))
+            .frame(width: size, height: size)
+            .background(kind.tint.gradient, in: RoundedRectangle(cornerRadius: size * 0.28))
+            .shadow(color: kind.tint.opacity(0.35), radius: 2, y: 1)
             .padding(.top, 1)
             .help(kind.rawValue.uppercased())
-    }
-
-    private var symbol: String {
-        switch kind {
-        case .mcp:      "server.rack"
-        case .skill:    "wand.and.stars"
-        case .subagent: "person.2"
-        case .plugin:   "puzzlepiece.extension"
-        }
-    }
-
-    private var tint: Color {
-        switch kind {
-        case .mcp:      .teal
-        case .skill:    .blue
-        case .subagent: .purple
-        case .plugin:   .pink
-        }
-    }
-}
-
-struct Badge: View {
-    let text: String
-    var body: some View {
-        Text(text)
-            .font(.caption2.weight(.semibold))
-            .padding(.horizontal, 5).padding(.vertical, 1)
-            .background(.quaternary, in: Capsule())
     }
 }
 
@@ -843,7 +1056,11 @@ struct UsageLabel: View {
         Group {
             // MCP だけは「今この瞬間の状態」を持つ（3.9）。最終使用日より優先する。
             if row.running != nil {
-                Text("● 実行中").foregroundStyle(.green)
+                HStack(spacing: 4) {
+                    RunningDot()
+                    Text("実行中")
+                }
+                .foregroundStyle(.green)
             } else if row.kind == .mcp {
                 Text("停止中").foregroundStyle(.secondary)
             } else if scannedAt == nil {
@@ -885,6 +1102,29 @@ struct UsageLabel: View {
     }
 }
 
+/// 稼働中の点。**動くのはここだけ** — 一覧の中で本当に「今」を表しているのは
+/// 実行中の MCP だけなので、点滅する要素をこれ以外に増やさない。
+struct RunningDot: View {
+    @State private var pulsing = false
+
+    var body: some View {
+        Circle()
+            .fill(.green)
+            .frame(width: 6, height: 6)
+            .overlay {
+                Circle().stroke(.green.opacity(0.5), lineWidth: 1)
+                    .scaleEffect(pulsing ? 2.2 : 1)
+                    .opacity(pulsing ? 0 : 1)
+            }
+            .onAppear {
+                guard !Motion.reduced else { return }
+                withAnimation(.easeOut(duration: 1.4).repeatForever(autoreverses: false)) {
+                    pulsing = true
+                }
+            }
+    }
+}
+
 /// 更新状態（DESIGN.md 7.6）。
 struct UpdateLabel: View {
     let row: ResourceRow
@@ -919,7 +1159,7 @@ struct CleanupSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("プロジェクトから削除").font(.title3.weight(.semibold))
+            SheetHeader(title: "プロジェクトから削除", symbol: "trash", tint: .red)
 
             if !runnable.isEmpty {
                 Text("次のコマンドを実行します（\(runnable.count) 件）")
@@ -952,19 +1192,18 @@ struct CleanupSheet: View {
             }
         }
         .padding(20)
-        .frame(width: 620, height: 420)
+        .frame(width: 620, height: 440)
     }
 
     private func commands(_ list: [CleanupItem]) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
                 ForEach(list) { item in
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {
-                            KindIcon(kind: item.kind)
+                            KindIcon(kind: item.kind, size: 18)
                             Text(item.name).font(.callout.weight(.medium))
-                            Text(verbatim: item.projectName)
-                                .font(.caption2).foregroundStyle(.secondary)
+                            Pill(text: item.projectName, icon: "folder")
                         }
                         Text(verbatim: item.command)
                             .font(.system(.caption2, design: .monospaced))
@@ -972,10 +1211,12 @@ struct CleanupSheet: View {
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background(.quinary, in: RoundedRectangle(cornerRadius: Theme.radiusS))
                 }
             }
             .padding(.vertical, 2)
         }
-        .frame(maxHeight: 150)
+        .frame(maxHeight: 160)
     }
 }

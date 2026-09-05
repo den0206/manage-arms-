@@ -10,14 +10,16 @@ struct ManageArmsApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(model: model)
-                // サイドバー 200 + 一覧 560 + 余白。横並びの表をやめたので狭くてよい。
-                .frame(minWidth: 820, minHeight: 540)
+                // サイドバー 208 + 一覧。理想値は要約タイル 4 枚とエージェント 2 列が
+                // そのまま入る幅にする（最小のままだと初回だけ窮屈に見える）。
+                .frame(minWidth: 820, idealWidth: 1020, minHeight: 540, idealHeight: 720)
                 // DESIGN.md 3.5 — FSEvents で監視せず、アクティブ化のたびに読み直す。
                 .onReceive(NotificationCenter.default.publisher(
                     for: NSApplication.didBecomeActiveNotification)) { _ in
                     model.reload()
                 }
         }
+        .defaultSize(width: 1020, height: 720)
         .windowToolbarStyle(.unified)
     }
 }

@@ -60,7 +60,6 @@
 "プラグイン" = "Plugins";
 
 /* Last used */
-"● 実行中" = "● Running";
 "停止中" = "Stopped";
 "使用状況は未集計" = "Usage not analyzed";
 "使用状況は不明" = "Usage unknown";
@@ -180,3 +179,9 @@
 "移動できませんでした" = "Could not move the app";
 "アプリケーションフォルダに同じ名前のアプリが既にあります。そちらを起動してください。" = "An app with the same name is already in the Applications folder. Please open that one instead.";
 "アプリケーションフォルダへ手動でドラッグしてください。" = "Please drag it into the Applications folder yourself.";
+
+/* Status & summary */
+"実行中" = "Running";
+"検出済み" = "Detected";
+"設定のみ" = "Config only";
+"使用状況 %@" = "Usage %@";
