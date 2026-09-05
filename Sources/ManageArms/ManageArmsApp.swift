@@ -29,6 +29,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        // DMG や外付けから直接起動していたら /Applications への移動を促す。
+        // 一覧を読む前に出す（移動して再起動するなら、その走査は無駄になる）。
+        InstallLocationGuard.promptIfNeeded()
     }
 }
 

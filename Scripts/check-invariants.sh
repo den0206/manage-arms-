@@ -35,8 +35,11 @@ fi
 # ユーザーの ~/.claude や ~/.agents を消しうる。
 #   SkillManager / SubagentScanner / Updater … WriteGuard.assertMutable を必ず呼ぶ
 #   Fetcher / Installer                      … 一時ディレクトリのみを触る（ユーザーデータ外）
+#   InstallLocationGuard                     … /Applications へ自分自身をコピーする際の
+#                                              失敗ロールバック。消すのは直前に自分が作った
+#                                              バンドルだけで、ユーザーの資源ではない
 LEAKS=$(grep -rnE 'removeItem|moveItem|createSymbolicLink|trashItem' Sources/ --include='*.swift' \
-        | grep -vE '/(SkillManager|SubagentScanner|Updater|Fetcher|Installer)\.swift:' \
+        | grep -vE '/(SkillManager|SubagentScanner|Updater|Fetcher|Installer|InstallLocationGuard)\.swift:' \
         | grep -vE ':[0-9]+:[[:space:]]*//')
 if [ -n "$LEAKS" ]; then
     fail "削除・移動が WriteGuard を通る経路の外に漏れています（DESIGN.md 9 章）" "$LEAKS"

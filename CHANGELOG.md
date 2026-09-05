@@ -29,5 +29,8 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
   paths and for entries duplicated across projects. The previous contents are backed up
   before anything is removed.
 - Japanese and English localization.
+- A prompt on launch to move ManageArms into the Applications folder when it is
+  running from a mounted disk image, an external volume, or Gatekeeper's app
+  translocation. Skills that were already installed stay where they are.
 
 [Unreleased]: https://github.com/den0206/manage-arms/compare/Ver_0.0.1...HEAD

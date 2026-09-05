@@ -130,3 +130,12 @@
 "内容に差分はありません" = "No changes in the contents";
 "上流が方針転換した時に更新を止めます" = "Stops updates if upstream changes direction";
 "更新する" = "Update";
+
+/* Install-location guard */
+"アプリケーションフォルダに移動しますか？" = "Move to the Applications folder?";
+"いまの場所から起動したままだと、ディスクを取り出したときに ManageArms が使えなくなります。導入したスキルはそのまま残ります。" = "If you keep running it from here, ManageArms stops working once the disk is ejected. The skills you installed stay where they are.";
+"移動して再起動" = "Move and Relaunch";
+"そのまま使う" = "Keep Using It Here";
+"移動できませんでした" = "Could not move the app";
+"アプリケーションフォルダに同じ名前のアプリが既にあります。そちらを起動してください。" = "An app with the same name is already in the Applications folder. Please open that one instead.";
+"アプリケーションフォルダへ手動でドラッグしてください。" = "Please drag it into the Applications folder yourself.";
