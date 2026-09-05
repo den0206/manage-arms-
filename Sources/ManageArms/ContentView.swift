@@ -60,6 +60,10 @@ struct ContentView: View {
                 model.reload()
             }
         }
+        .sheet(isPresented: .init(get: { model.cleanup != nil },
+                                  set: { if !$0 { model.cleanup = nil } })) {
+            CleanupSheet(items: model.cleanup ?? [], model: model)
+        }
         .sheet(item: Binding(get: { model.preview.map { PreviewBox(value: $0) } },
                              set: { if $0 == nil { model.discardPreview() } })) { box in
             DiffSheet(preview: box.value, model: model)
@@ -360,6 +364,14 @@ struct AgentPage: View {
                     }
                     .buttonStyle(.link)
                     .help(path)
+                    let rows = rows(for: current, in: scoped)
+                    if !rows.isEmpty {
+                        Button("このプロジェクトの \(rows.count) 件を削除…") {
+                            model.cleanup = model.inventory
+                                .cleanupItems(rows, agent: agent, project: path)
+                        }
+                        .buttonStyle(.link)
+                    }
                 }
                 Spacer()
             }
@@ -559,7 +571,17 @@ struct ResourceRowView: View {
                             .textSelection(.enabled)
                     }
                 }
-                ScopeNote(reach: row.reach, context: context)
+                HStack(spacing: 8) {
+                    ScopeNote(reach: row.reach, context: context)
+                    if context == .userWide, case .both(let paths) = row.reach {
+                        Button("プロジェクト側 \(paths.count) 件を削除…") {
+                            model.cleanup = paths.flatMap {
+                                model.inventory.cleanupItems([row], agent: agent, project: $0)
+                            }
+                        }
+                        .buttonStyle(.link).font(.caption2)
+                    }
+                }
             }
             Spacer(minLength: 8)
             controls
@@ -882,5 +904,78 @@ struct UpdateLabel: View {
         case .unknown, .unmanaged:
             EmptyView()
         }
+    }
+}
+
+/// 一括削除の確認（DESIGN.md 5.2）。**実行するコマンドをそのまま見せる。**
+/// 「何が消えるか分からないボタン」を作らない。
+struct CleanupSheet: View {
+    let items: [CleanupItem]
+    let model: AppModel
+    @SwiftUI.Environment(\.dismiss) private var dismiss
+
+    private var runnable: [CleanupItem] { items.filter(\.executable) }
+    private var manual: [CleanupItem] { items.filter { !$0.executable } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("プロジェクトから削除").font(.title3.weight(.semibold))
+
+            if !runnable.isEmpty {
+                Text("次のコマンドを実行します（\(runnable.count) 件）")
+                    .font(.callout).foregroundStyle(.secondary)
+                commands(runnable)
+            }
+            if !manual.isEmpty {
+                Divider()
+                Label("これはアプリから実行しません。リポジトリの中のファイルなので、消したことが git で共有されます。",
+                      systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
+                commands(manual)
+                Button {
+                    let text = manual.map(\.command).joined(separator: "\n")
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                } label: {
+                    Label("コマンドをコピー", systemImage: "doc.on.doc")
+                }
+                .font(.caption)
+            }
+
+            Spacer(minLength: 0)
+            HStack {
+                Spacer()
+                Button("キャンセル") { dismiss() }
+                Button(model.isCleaning ? "削除中…" : "削除する") { model.runCleanup(items) }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(runnable.isEmpty || model.isCleaning)
+            }
+        }
+        .padding(20)
+        .frame(width: 620, height: 420)
+    }
+
+    private func commands(_ list: [CleanupItem]) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(list) { item in
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            KindIcon(kind: item.kind)
+                            Text(item.name).font(.callout.weight(.medium))
+                            Text(verbatim: item.projectName)
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Text(verbatim: item.command)
+                            .font(.system(.caption2, design: .monospaced))
+                            .textSelection(.enabled)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(.vertical, 2)
+        }
+        .frame(maxHeight: 150)
     }
 }

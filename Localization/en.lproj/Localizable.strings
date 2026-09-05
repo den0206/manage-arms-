@@ -108,6 +108,12 @@
 "プラグインは各 CLI が入れています。**入れたのと同じ CLI**で消してください。" = "Plugins are installed by each CLI — remove it with the same CLI that installed it.";
 "このプロジェクトの分だけを消します。" = "Removes only this project's copy.";
 "ユーザー全体の分だけを消します。プロジェクト側は各プロジェクトのタブから消してください。" = "Removes only the copy installed for all projects. Use each project's tab for the project copies.";
+"このプロジェクトの %lld 件を削除…" = "Remove %lld items from this project…";
+"プロジェクト側 %lld 件を削除…" = "Remove the %lld project copies…";
+"プロジェクトから削除" = "Remove from projects";
+"次のコマンドを実行します（%lld 件）" = "These %lld commands will be run";
+"これはアプリから実行しません。リポジトリの中のファイルなので、消したことが git で共有されます。" = "These are not run by the app: they are files inside your repository, so removing them would show up in git.";
+"コマンドをコピー" = "Copy commands";
 "無効" = "Off";
 "有効にする（全エージェント）" = "Enable (all agents)";
 "無効にする（全エージェント）" = "Disable (all agents)";

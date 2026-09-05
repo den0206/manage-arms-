@@ -29,6 +29,11 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
   and project-scoped plugins — and one for what ships with the agent. Anything installed
   both for all projects and inside individual projects is flagged on both tabs, since
   that duplication is the thing worth seeing.
+- Bulk removal from projects. A project tab can remove everything it lists in one go, and a
+  resource duplicated across projects can have all its project copies removed at once. The
+  confirmation sheet shows the exact commands that will run. Files inside your repository
+  (`<project>/.claude/skills`, `<project>/.mcp.json`) are never touched by the app — those
+  commands are listed for you to copy and run yourself.
 - Adoption. A skill or subagent you installed yourself can be brought under this app's
   management — it then gains the enable/disable switch and delete — as long as its files
   already sit in `~/.agents/skills`. Nothing is moved; adoption only records it and adds
