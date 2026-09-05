@@ -1,5 +1,7 @@
 # ManageArms
 
+*[English](README.md) · 日本語*
+
 AI コーディングエージェント（Claude Code / Cursor / Codex / Gemini CLI）の周辺リソース —
 **MCP・Skills・Subagents・Plugins** — を 1 つの GUI で横断管理する macOS アプリ。
 
@@ -19,8 +21,8 @@ AI コーディングエージェント（Claude Code / Cursor / Codex / Gemini 
 
 ## 必要環境
 
-- macOS 14 以降
-- ビルドするなら Xcode 16 / Swift 6 以降
+- macOS 26 以降
+- ビルドするなら Xcode 26 / Swift 6.2 以降
 
 ## インストール
 
@@ -84,6 +86,8 @@ docs/signing.md         Developer ID 署名と公証のセットアップ
 - 設定ファイルの書き戻しは 3 か所のみ。MCP と Plugin の追加・削除は各 CLI に委譲する
   （`~/.claude.json` は 98 KB あり、直接書き戻すと実行中の Claude と競合して全状態を壊す）
 - 権限の削除は `permissions` キーだけを書き換え、削除前の内容をバックアップする
+- **自分の永続ファイルは 1 つだけ。** キャッシュディレクトリを持たず、`URLSession` は
+  `.ephemeral`、一時展開は OS の一時領域で完結させる
 - 依存サードパーティライブラリ ゼロ
 
 ## リリース
