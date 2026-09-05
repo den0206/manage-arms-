@@ -1,0 +1,9 @@
+.build/
+.swiftpm/
+*.xcodeproj
+DerivedData/
+.DS_Store
+*.dSYM
+
+# リリース成果物（GitHub Release に添付するもの。リポジトリには入れない）
+*.dmg

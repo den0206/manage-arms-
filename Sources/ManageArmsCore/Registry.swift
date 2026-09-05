@@ -1,0 +1,108 @@
+import Foundation
+
+/// アプリが永続化する唯一のファイル。DESIGN.md 4.1。
+/// `~/.agents/.skill-lock.json` は読み取り専用で参照するだけで、ここには書かない。
+public struct Registry: Codable, Equatable, Sendable {
+    public var resources: [Entry] = []
+    /// ETag と更新チェック結果は repo/branch 単位で持つ（7.3 の「リポジトリ単位で束ねる」）。
+    public var repos: [String: RepoState] = [:]
+    /// 使用実績（3.9）。過去は変化しないのでキャッシュしてよい — 3.5 の唯一の例外。
+    public var usage = Usage()
+
+    public struct Usage: Codable, Equatable, Sendable {
+        /// ここまでのログは集計済み。次回はこれより新しいファイルだけ読む。
+        /// `nil` は「未集計」。**「一度も使われていない」と区別する**（5.3）。
+        public var scannedUpTo: Date?
+        public var lastUsed: [String: Date] = [:]
+        public init(scannedUpTo: Date? = nil, lastUsed: [String: Date] = [:]) {
+            self.scannedUpTo = scannedUpTo; self.lastUsed = lastUsed
+        }
+    }
+
+    public struct Entry: Codable, Equatable, Sendable {
+        public var name: String
+        public var kind: String
+        public var repo: String?
+        public var branch: String?
+        public var subdir: String?
+        public var sha: String?
+        /// 上流が方針転換した時に更新を止める（7.4）。
+        public var pinned: Bool = false
+        /// 無効化されている（実体が退避ディレクトリにある）。
+        public var disabled: Bool = false
+
+        public init(name: String, kind: Kind, repo: String? = nil, branch: String? = nil,
+                    subdir: String? = nil, sha: String? = nil,
+                    pinned: Bool = false, disabled: Bool = false) {
+            self.name = name; self.kind = kind.rawValue
+            self.repo = repo; self.branch = branch; self.subdir = subdir; self.sha = sha
+            self.pinned = pinned; self.disabled = disabled
+        }
+    }
+
+    public struct RepoState: Codable, Equatable, Sendable {
+        public var etag: String?
+        public var latestSha: String?
+        public var checkedAt: Date?
+        public init(etag: String? = nil, latestSha: String? = nil, checkedAt: Date? = nil) {
+            self.etag = etag; self.latestSha = latestSha; self.checkedAt = checkedAt
+        }
+    }
+
+    public init() {}
+
+    enum CodingKeys: String, CodingKey { case resources, repos, usage }
+
+    /// **欠けているキーは既定値で埋める。**
+    /// 合成された `init(from:)` はキーが 1 つ足りないだけで失敗し、`load` の
+    /// フォールバックで空の Registry になる = 導入済みスキルの取得元が全部飛ぶ。
+    /// このファイルは今後もフィールドが増える（`repos` → `usage` で 2 度目）ため、
+    /// 前のバージョンが書いたファイルを読めることを構造的に保証しておく。
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        resources = try container.decodeIfPresent([Entry].self, forKey: .resources) ?? []
+        repos = try container.decodeIfPresent([String: RepoState].self, forKey: .repos) ?? [:]
+        usage = try container.decodeIfPresent(Usage.self, forKey: .usage) ?? Usage()
+    }
+
+    public func entry(named name: String) -> Entry? {
+        resources.first { $0.name == name }
+    }
+
+    public mutating func upsert(_ entry: Entry) {
+        if let i = resources.firstIndex(where: { $0.name == entry.name }) {
+            resources[i] = entry
+        } else {
+            resources.append(entry)
+        }
+    }
+
+    // MARK: - 永続化
+
+    public static func load(env: Environment) -> Registry {
+        guard let data = try? Data(contentsOf: env.registryFile),
+              let decoded = try? decoder.decode(Registry.self, from: data)
+        else { return Registry() }
+        return decoded
+    }
+
+    /// アトミックに書く。書き込み中のクラッシュで壊れると
+    /// 全リソースの出所情報が飛ぶ（9 章）。
+    public func save(env: Environment) throws {
+        try FileManager.default.createDirectory(
+            at: env.appSupport, withIntermediateDirectories: true)
+        try Self.encoder.encode(self).write(to: env.registryFile, options: .atomic)
+    }
+
+    static let encoder: JSONEncoder = {
+        let e = JSONEncoder()
+        e.outputFormatting = [.prettyPrinted, .sortedKeys]
+        e.dateEncodingStrategy = .iso8601
+        return e
+    }()
+    static let decoder: JSONDecoder = {
+        let d = JSONDecoder()
+        d.dateDecodingStrategy = .iso8601
+        return d
+    }()
+}

@@ -1,0 +1,1156 @@
+# manage-arms 設計ドキュメント
+
+AI コーディングエージェント（Claude Code / Cursor / Codex / Gemini CLI）の
+周辺リソース — MCP・Skills・Subagents・Plugins —
+を 1 つの GUI で横断管理する macOS アプリ。
+
+- **プラットフォーム**: macOS 単体 / SwiftUI
+- **配布**: 直配布（App Sandbox 無効のため App Store 不可）
+- **状態**: **v1〜v4 実装済み**（Skills / Subagents / Plugins / 使用実績 / MCP / 権限）。テスト 229 件
+- **実装**: SPM パッケージ。`swift test` / `swift run ManageArms`
+  （`.xcodeproj` は不要。実 CLI・実ネットワークを使う確認は `MANUAL=1 swift test`）
+- **最終更新**: 2026-09-05（spike #1 / #2 / #9 / #13 決着済み）
+
+---
+
+## 1. 解こうとしている問題
+
+同じリソースを、エージェントごとに、別々の場所へ、別々の書式で登録し直している。
+
+実測した具体例（このマシンの実データ）:
+
+- `ponytail` プラグイン v4.9.0（同一 commit SHA）が、**5 プロジェクトに個別インストール**されている
+- スキルの取得元を管理するために、ユーザーが `skills-registry.json` + `update-skills.py` を**手作りしている**
+- **インストール済みスキル 26 件のうち、使用実績があるのは 7 件**（3.9 で実測）
+- `chrome-devtools` が Cursor に登録されているが、**起動しているかは設定を見ても分からない**（3.9）
+
+どれも「横断ビューが無いこと」が原因。これがアプリの存在理由。
+
+### やらないこと
+
+| 対象外 | 理由 |
+|---|---|
+| model / env / theme / statusLine などの素の設定 | 各 CLI に `/config` がある。作っても使われない |
+| Cursor extensions（1.6 GB） | VSCode 拡張であってエージェント要素ではない |
+| **Hooks** | 3 エージェントで**イベント名が 1 つも揃っていない**（`PostToolUse` / `afterAgentResponse` / …）。変換は最難関なのに、書き込みは `~/.claude/settings.json` の直接編集が要り 3.1 と衝突する。Codex の `trusted_hash` も未解明。**費用対効果が合わない** |
+| **Commands / Rules** | `CLAUDE.md` / `AGENTS.md` / `.cursorrules` はエディタで直接開いた方が早い。横断ビューにしても得るものが無い |
+| エージェントのディスク使用量の掃除機能 | このアプリの仕事ではない |
+| Windows / Linux 対応 | macOS 単体に絞る |
+
+---
+
+## 2. 対象エージェントと実態
+
+扱うのは **4 種別だけ**（`enum Kind`）。Hooks / Commands / Rules は 1 章の通り対象外。
+
+| | MCP | Skills | Subagents | Plugins |
+|---|---|---|---|---|
+| **Claude Code** | `claude mcp` CLI | `~/.claude/skills/<n>/SKILL.md` のみ | `~/.claude/agents/*.md` | `claude plugin` CLI |
+| **Cursor** | `~/.cursor/mcp.json`（CLI 無） | 9 ルートを走査（3.2） | `~/.cursor/agents/` | `~/.cursor/plugins/` |
+| **Codex** | `codex mcp` CLI | `~/.codex/skills/` + `~/.agents/skills/` | — | `codex plugin` CLI |
+| **Gemini CLI** | `gemini mcp` CLI | — | — | — |
+
+非対応のセルは UI 上でグレーアウトし、**無理に変換しない**。
+
+---
+
+## 3. 中核となる設計判断
+
+### 3.1 書き込みは各 CLI に委譲する
+
+`~/.claude.json` は **98 KB** あり、MCP 設定だけでなくプロジェクト履歴・
+オンボーディング状態・キャッシュが同居している。ここをアプリが読んで
+書き戻すと、Claude Code の実行中に競合して**ユーザーの全状態を破壊する**。
+`~/.codex/config.toml` も、素朴に読み書きするとコメントが消える。
+
+したがって:
+
+| 操作 | 実装 |
+|---|---|
+| MCP 追加/削除（Claude / Codex / Gemini） | `Process` で `<cli> mcp add\|remove` を実行 |
+| MCP 追加/削除（Cursor） | `~/.cursor/mcp.json` を直接編集（専用の小さいファイルなので安全） |
+| Plugin 追加/削除/更新（Claude） | `claude plugin install\|uninstall\|update` |
+| Plugin 追加/削除（Codex） | `codex plugin add\|remove`（`update` が無いため remove + add） |
+| Skill / Subagent 有効化 | 実体を配置 + `FileManager.createSymbolicLink`（3.2） |
+| Skill / Subagent 無効化 | 実体を退避ディレクトリへ移動 + symlink 削除（実体は消さない。3.2） |
+| 権限の削除 | `settings.json` / `settings.local.json` の `permissions` キーのみ書き換え（8 章）。**9 章のホワイトリストの唯一の例外**。バックアップ + アトミック |
+| 一覧読み取り | 列挙されたファイルの直読み + `<cli> mcp list --json` |
+
+自前で設定ファイルを組み立てる箇所が消えるため、**一番壊れやすいコードが存在しなくなる**。
+
+### 3.2 実体は `~/.agents/skills/` に置き、symlink は Claude 用の 1 本だけ
+
+**検証済み（2026-09-05・spike #1 / #2）。** 各エージェントが実際に走査するスキルルートを
+バイナリと `codex debug prompt-input` から確定させた。
+
+| 走査元 → | Claude | Cursor | Codex |
+|---|---|---|---|
+| `~/.claude/skills/` | ✅ | ✅ | ❌ |
+| `~/.codex/skills/` | ❌ | ✅ | ✅ |
+| `~/.cursor/skills/` | ❌ | ✅ | ❌ |
+| `~/.cursor/skills-cursor/` | ❌ | ✅（Cursor 自前管理） | ❌ |
+| `~/.agents/skills/` | ❌ | ✅ | ✅ |
+| `~/.grok/skills/` | ❌ | ✅ | ❌ |
+
+**Cursor は他エージェントのディレクトリを直接読む。** 実際のコードに 9 個のルートが
+配列で埋まっている:
+
+```js
+[".cursor/skills/", ".cursor/skills-cursor/", ".cursor/cloud-skills/",
+ ".cursor/plugins/", ".claude/skills/", ".claude/plugins/",
+ ".codex/skills/", ".grok/skills/", ".agents/skills/"]
+```
+
+Codex も `~/.agents/skills` を第 2 のスキルルート（`r1`）として読む。
+`codex debug prompt-input` の出力で確認済み:
+
+```
+### Skill roots
+- `r0` = ~/.codex/skills
+- `r1` = ~/.agents/skills
+- `r2` = ~/.codex/skills/.system
+```
+
+したがって配置はこうなる:
+
+```
+~/.agents/skills/my-skill/SKILL.md        ← 実体（1 箇所）
+  → Cursor が読む     （symlink 不要）
+  → Codex が読む      （symlink 不要）
+  → ~/.claude/skills/my-skill  へ symlink 1 本だけ張る
+```
+
+**symlink はスキル 1 つにつき 1 本、Claude のためだけ。** 当初の「3 本張る」設計より
+さらに小さくなった。
+
+#### 有効/無効は「全エージェント一括」。エージェント別の on/off は提供しない（確定）
+
+Cursor と Codex は `~/.agents/skills/` を直接読むため、実体を置いた時点で有効になり、
+アプリが個別に無効化する手段が無い。symlink で制御できるのは Claude だけ。
+さらに Cursor は `.claude/skills/` も `.codex/skills/` も走査するため、
+**どの配置方式を採っても「Cursor だけ無効」は原理的に不可能**。
+
+したがって Skills の有効/無効は行単位（全対応エージェント一括）とし、
+マトリクスのセルは表示専用にする（5.2 参照）。無効化は
+`~/.agents/skills/<name>` を退避ディレクトリへ移動 + Claude symlink 削除で行う。
+
+**Claude が symlink を辿ることは実測で確認済み。** `~/.claude/skills/` に symlink を
+張った瞬間、起動中の Claude Code セッションのスキル一覧に現れた（再起動不要）。
+逆に `~/.agents/skills/find-skills` は一覧に現れないため、
+Claude がそのルートを読まないことも確定している。
+
+#### `~/.agents/skills/` を選ぶ理由
+
+`~/.claude/skills/` に実体を置いても symlink は 1 本（Codex 向け）で同数になるが、
+`~/.agents/skills/` を採る:
+
+- **エージェント中立**。他社製品の設定ディレクトリの中にアプリのデータを置かない
+- **既存エコシステムと相互運用できる。** `~/.agents/.skill-lock.json` が既にあり、
+  `vercel-labs/skills` が 8 エージェント（amp / codex / cursor / gemini-cli /
+  github-copilot / kimi-cli / opencode / claude-code）向けにこの場所を使っている
+
+#### `~/.cursor/skills-cursor/` には触らない
+
+`.sync-manifest.json` と `.cursor-managed-skills-manifest.json`（`builtinSkillIds` /
+`managedSkillIds`）を持つ Cursor 専用の管理領域。**Cursor は `~/.agents/skills` を読むので
+ここに何かを置く必要が最初から無い。** 剪定されるかどうかを気にする必要もなくなった。
+
+#### Subagents
+
+Skills と同じ構造だが、共有ルートの慣習が無い。
+`~/.claude/agents/` と `~/.cursor/agents/` へそれぞれ symlink する。
+
+### 3.3 `git clone` を使わない
+
+`git clone --depth 1` は `.git/` を残す。スキル本体が 20 KB でも数 MB が
+アプリの保存領域に永久に溜まる。
+
+→ `https://github.com/{repo}/archive/refs/heads/{branch}.zip` を
+`FileManager.temporaryDirectory` にダウンロードして展開し、`subdir` だけコピーして
+一時ディレクトリを破棄する。`.git` はそもそも生成されない。
+（`update-skills.py:43,166` と同じ方式）
+
+- **ダウンロードは `URLSession.downloadTask`**（ファイルに直接書く）。
+  `Data(contentsOf:)` は使わない — メモリに全部載る
+- **サイズ上限を設ける（50 MB）。** monorepo の zipball は subdir が 20 KB でも
+  数百 MB になり得る（実測: `torvalds/linux` は 310 MB）。
+  **codeload は GET には `Content-Length` を返す**（HEAD には返さないので
+  `curl -I` では見えない）。最初の進捗コールバックで全体サイズが判明するため、
+  **10 KB 書いた時点で中断できる**（実測 0.1 秒）。返らない場合の保険として
+  書き込み量による中断も残す。エラーにはリポジトリ名と実サイズを添える
+- **⚠️ completion handler 付きの `downloadTask` はデリゲートの進捗コールバックを
+  無効化する。** 中断するにはデリゲート駆動にして継続を自分で resume する必要がある。
+  ここを間違えると 310 MB を最後まで落としてから拒否することになる（実測 74 秒）
+- **展開は `/usr/bin/ditto -xk` に委譲する。** Foundation に zip 展開 API は無く、
+  ZIPFoundation 等の依存を足すより OS 同梱バイナリに任せる方が
+  メモリにも載らず依存もゼロ。**Zip Slip 安全であることは実測済み**（spike #13）—
+  `../evil.txt` や `a/../../evil.txt` は拒否ではなく `../` が除去されて
+  展開先の内側に着地する。自前でエントリ名を検証する必要は無い
+
+### 3.4 走査対象はホワイトリスト
+
+`~/.claude` を素朴に走査すると `projects/` の **129 MB / 145 ファイル**、
+`file-history/` の 17 MB、`~/.codex/logs_2.sqlite` の 44 MB を踏む。
+1 回のスキャンで数百 MB の I/O が走り UI が固まる。
+
+除外リスト方式だと新しいディレクトリが増えた時に踏むため、**逆にする**。
+
+```swift
+// 読むのはこれだけ。列挙にないパスは存在しても触らない。
+enum Source {
+    case file(String)    // ~/.cursor/mcp.json, ~/.claude/settings.json
+    case dir(String)     // ~/.claude/skills, ~/.claude/agents, ~/.agents/skills,
+                         // App Support の agents/（Subagent 実体）と
+                         // disabled-skills/（無効化スキルの表示に必要。9 章）
+    case cli([String])   // ["claude", "mcp", "list", "--json"]
+}
+```
+
+`file-history` / `logs_*.sqlite` / `cache` / `archived_sessions` は
+列挙に載らない = 一生読まない。
+
+**例外: `projects` / `sessions` は「使用実績の集計」のためだけに限定形で読む（3.9）。**
+一覧スキャンでは触らない。`case usageLog(String)` として別ケースに分け、
+明示的な集計操作からしか呼ばれないようにする。
+
+### 3.5 常駐しない・状態を持たない
+
+- **FSEvents で監視しない。** 監視スレッドとイベントバッファが常時メモリに乗り、
+  Claude Code が `projects/` に書くたびにコールバックが飛ぶ。
+  代わりに `NSApplication.didBecomeActiveNotification` で再スキャンする。
+  ただし **CLI 呼び出し（`claude mcp list` は node 起動を伴い秒単位）は毎回走らせない** —
+  ファイル走査はアクティブ化ごと、CLI 呼び出しは前回から一定間隔
+  （数分）空いた時だけ再実行する
+- **メニューバー常駐にしない。** 通常のウィンドウアプリとし、
+  `applicationShouldTerminateAfterLastWindowClosed = true`。**アイドル時のメモリ消費 0**
+- **sqlite / Core Data / SwiftData を使わない。** 永続化するのは `registry.json` のみ
+- **スキャン結果をキャッシュしない。** 再スキャンはファイル数十個 + CLI 数回で完了する。
+  キャッシュは「実際の設定とズレる」という管理アプリとして最悪のバグを生む
+- **`Process` の出力はパイプを読み切って即破棄**
+
+### 3.6 エージェント抽象に protocol を切らない
+
+対象は 4 つで、増えない。`protocol` を切ると実装が 4 ファイルに散って読めなくなる。
+`enum Agent` + `switch` で書く。
+
+### 3.7 エージェントを自動検出し、未検出は非活性にする
+
+インストールされていないエージェントの列を、有効そうに見せてはいけない。
+クリックしてから「CLI がありません」と出るのは最悪の体験になる。
+
+**⚠️ 最大の罠: GUI アプリの `PATH` はターミナルと違う。**
+launchd から起動された GUI アプリの `PATH` は `/usr/bin:/bin:/usr/sbin:/sbin` のみ。
+実測すると、3 つの CLI すべてがこの `PATH` では**見つからない**:
+
+```
+claude   /opt/homebrew/bin/claude   → launchd の PATH では NOT FOUND
+codex    /opt/homebrew/bin/codex    → NOT FOUND
+gemini   /opt/homebrew/bin/gemini   → NOT FOUND
+```
+
+`Process` で素朴に `claude` を起動すると、ターミナルからのデバッグ実行では動くのに
+**Finder から起動した瞬間に全エージェントが「未検出」になる**。
+
+出荷済みアプリで実際にこうなっている。起動中の Cursor Helper の環境変数:
+
+```
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+```
+
+検出は次の順で行う:
+
+1. **ログインシェルから `PATH` を取得する** — `$SHELL -l -c 'echo $PATH'` を 1 回だけ実行し、
+   得られた `PATH` を以後すべての `Process` に渡す。mise / asdf / nvm の shim も含めてこれで拾える
+2. **既知のパスを直接探す** — 1 が失敗した場合の保険。
+   `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin`, `~/.bun/bin`, `~/.volta/bin`
+3. **設定ディレクトリの存在を見る** — `~/.claude`, `~/.cursor`, `~/.codex`, `~/.gemini`
+4. **手動でパスを指定できる逃げ道を用意する** — ⚙️ エージェント画面から
+
+検出できたら `<cli> --version` でバージョンも取る（実測: `2.1.236 (Claude Code)` /
+`codex-cli 0.153.2` / `0.46.0` と書式がバラバラなので、パースは緩く行い、
+失敗しても「検出済み・バージョン不明」として扱う）。
+
+#### 4 つの状態を区別する
+
+| 状態 | 意味 | UI |
+|---|---|---|
+| **検出済み** | CLI があり実行できる | 通常表示 |
+| **設定のみ** | `~/.codex` はあるが CLI が見つからない | 非活性。既存リソースは**読み取り表示する** |
+| **未検出** | CLI も設定ディレクトリも無い | 列ごと非活性 + 「未検出」 |
+| **非対応** | 検出済みだがそのリソース種別を持たない（例: Gemini の Skills） | `—` |
+
+**「未検出」と「非対応」を混ぜない。** Gemini CLI は検出できても Skills の概念が無い。
+同じグレーで表示すると、ユーザーは「Gemini を入れれば使えるようになる」と誤解する。
+
+**「設定のみ」で既存リソースを隠さない。** CLI が PATH から外れただけで
+設定は生きていることがある。ここで「無い」と表示すると、ユーザーは重複して追加してしまう。
+読み取り専用で表示し、変更操作だけを無効化する。
+
+#### 後から入ったエージェントを活性化する
+
+再検出は**ウィンドウがアクティブになった時**（`NSApplication.didBecomeActiveNotification`）
+に行う。3.5 の「常駐しない」と同じ仕組みに相乗りさせる。
+別ウィンドウでインストールして戻ってくれば活性化している。
+
+`$SHELL -l -c` は数十 ms かかるため、**検出結果はプロセスが生きている間だけ保持**し、
+再検出は非同期で行って UI をブロックしない。永続化はしない（ズレの原因になる）。
+
+### 3.8 テストのために `Environment` を注入する
+
+ホームディレクトリのパス・コマンド実行・ネットワークを直接呼ぶと、
+テストが実ユーザーの `~/.claude` を書き換えてしまう。**これは事故になる。**
+
+すべての外部依存を 1 つの構造体に集約し、テストでは差し替える。
+
+```swift
+struct Environment {
+    var home: URL
+    var run: ([String]) throws -> String      // CLI 実行
+    var download: (URL) async throws -> URL   // zip 取得
+    var now: () -> Date
+
+    static let live = Environment(...)
+    static func test(home: URL) -> Environment { ... }   // 一時ディレクトリを指す
+}
+```
+
+3.6 で「protocol を切らない」と決めたが、**ここだけは例外**。
+protocol ではなく構造体 + クロージャなので実装は 1 つのまま、テスト時だけ差し替えられる。
+
+### 3.9 「使用中」の検知 — MCP だけが本当にリアルタイムで光る
+
+**リソース種別によって「使用中」の意味がまったく違う。** ここを混ぜると
+実装できない UI を約束することになる。
+
+| リソース | 実行実体 | 「使用中」の性質 |
+|---|---|---|
+| **MCP** | **独立した常駐プロセス** | **状態**。起動している / していない |
+| Skills | 無し（プロンプトに注入されるテキスト） | 瞬間的イベント。1 ターンで消える |
+| Subagents | 無し（同上） | 同上 |
+| Plugins | 無し（skills / commands の入れ物） | 同上 |
+
+**MCP だけが「今この瞬間の状態」を持つ。** 他は「使われた」という過去の点でしかなく、
+点灯させても一瞬で消えるので UI として成立しない。
+
+#### MCP: プロセス検出で光らせる（実測で確認済み）
+
+MCP サーバーは独立プロセスとして常駐しており、親を辿れば**どのエージェントが
+掴んでいるか**まで分かる。実測:
+
+```
+87446  chrome-devtools-mcp
+  └ 87431  npm exec chrome-devtools-mcp@latest
+      └ 87139  Cursor Helper: mcp-process
+          └ 87070  /Applications/Cursor.app/.../Cursor      ← 所属エージェント確定
+```
+
+`ps -eo pid,ppid,command` 1 回で全部取れる。**常駐もポーリングも不要**で、
+3.5 と衝突しない。`didBecomeActive` の再スキャンに相乗りさせる。
+
+```
+chrome-devtools   MCP   ● 実行中（Cursor が使用中・2 時間 6 分）
+supabase          MCP   ○ 停止中
+```
+
+これは「設定上は登録されているが実際には起動していない」という、
+設定ファイルを見るだけでは絶対に分からない情報になる。**登録と実態のズレの可視化**で、
+このアプリの目的そのもの。
+
+#### Skills / Plugins: リアルタイムではなく「最終使用日」を出す
+
+点灯ではなく**いつ最後に使われたか**を表示する。リアルタイム性は要らず、
+セッションログから取れる。実測で抽出できることを確認済み:
+
+```
+2026-09-04T23:02  Skill  {'skill': 'artifact-design'}
+2026-09-03T09:48  Skill  {'skill': 'review-for-merge'}
+```
+
+Claude は `~/.claude/projects/*/*.jsonl`、Codex は
+`~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` と**同じ JSONL 形式**。
+
+**そしてこれが、リアルタイム点灯よりはるかに価値がある。** 実測:
+
+```
+インストール済みスキル 26 件 / 過去に使用実績のあるスキル 7 件
+```
+
+「今使われている」より**「入れたまま一度も使っていない」**の方が行動につながる。
+1 章の散らかり検出（`ponytail` の 5 重複）と同じ問題の別の顔であり、
+アプリを「入れる道具」から**「捨てる判断ができる道具」**に変える。
+
+#### 集計結果はキャッシュしてよい（3.5 の例外）
+
+3.5 で「スキャン結果をキャッシュしない」と決めたのは、
+**現在の設定状態**がキャッシュとズレると管理アプリとして最悪だから。
+一方**過去の使用実績は変化しない** — セッションログは追記のみで、
+書き終わったファイルが後から変わることはない。キャッシュしても嘘にならない。
+
+したがって:
+
+- `registry.json` に `usageScannedUpTo`（タイムスタンプ）と集計結果を持つ
+- 2 回目以降は **mtime がそれより新しいログだけ**読む（増分スキャン）
+- ログのメタデータ走査は実測 **147 ファイルで 6 ms**。増分なら実質ゼロ
+- 初回の全読みは 129 MB になるため、**明示的な「使用状況を分析」ボタン**から
+  バックグラウンドで実行し、進捗を出す。起動時には走らせない
+
+#### やらないこと: hooks を仕込んでの通知
+
+`PostToolUse` フックを登録すれば正確なリアルタイム通知が得られる
+（`vibe-island-bridge` が実際にこの方式で動いている）。だが
+**`~/.claude/settings.json` への書き込みが必要**で、3.1 の
+「他人の設定ファイルを書き換えない」に真っ向から反する。**採らない。**
+リアルタイム性が必要なのは MCP だけで、それはプロセス検出で足りている。
+
+---
+
+## 4. データモデル
+
+### 4.1 registry.json
+
+アプリが永続化する唯一のファイル。数 KB。
+既存の `skills-registry.json` のスキーマを継承し、更新管理用のフィールドを足したもの。
+
+```json
+{
+  "resources": [
+    {
+      "name": "ui-ux-pro-max",
+      "kind": "skill",
+      "repo": "nextlevelbuilder/ui-ux-pro-max-skill",
+      "branch": "main",
+      "subdir": "src/ui-ux-pro-max",
+      "sha": "abc1234",
+      "pinned": false
+    }
+  ],
+  "repos": {
+    "nextlevelbuilder/ui-ux-pro-max-skill#main": {
+      "etag": "W/\"...\"",
+      "latestSha": "def5678",
+      "checkedAt": "2026-09-05T07:00:00Z"
+    }
+  }
+}
+```
+
+- `repo` / `branch` / `subdir` — 取得元。更新と再取得に必要な最小情報
+- `sha` — 導入時のコミット。更新判定の基準
+- `pinned` — 更新を止める。上流が方針転換した時に必要
+- `repos` — **ETag と更新チェック結果は repo/branch 単位で持つ**。
+  7.3 の「リポジトリ単位で束ねる」と対応する。リソースごとに持つと
+  同一リポジトリ由来のスキル間で値が重複・不整合になる
+
+**MCP と Plugin はここに載せない。** 実体の所在は各エージェントが持っており、
+アプリが二重に記録すると必ずズレる。
+
+#### `~/.agents/.skill-lock.json` との関係（確定）
+
+3.2 で実体の置き場を `~/.agents/skills/` にしたため、既存の
+`~/.agents/.skill-lock.json`（`vercel-labs/skills` が使用）と同じ場所を共有する。
+スキーマはほぼ同型:
+
+```json
+"find-skills": {
+  "source": "vercel-labs/skills", "sourceType": "github",
+  "sourceUrl": "https://github.com/vercel-labs/skills.git",
+  "skillPath": "skills/find-skills/SKILL.md",
+  "skillFolderHash": "c2f31172...", "installedAt": "...", "updatedAt": "..."
+}
+```
+
+**自前の `registry.json` を持ち、`.skill-lock.json` は読み取り専用で参照する。**
+3.1「他人の設定ファイルを書き換えない」と同じ理由。他社がスキーマを変えても壊れず、
+書き込み競合も起きず、`pinned` のような自前フィールドを置く場所も確保できる。
+
+`.skill-lock.json` に載っていて `registry.json` に無いスキルは
+**「外部管理」として一覧に表示し、変更操作は出さない**（4.2 / 5.2 / 9 章）。
+表示しないと「あるはずのスキルが一覧に無い」状態になり、ユーザーが重複追加する。
+
+### 4.2 メモリ上のモデル
+
+```swift
+enum Agent  { case claude, cursor, codex, gemini }
+enum Kind   { case mcp, skill, subagent, plugin }
+enum State  {
+    case absent        // 未導入
+    case inherited     // ユーザー全体から継承（プロジェクトスコープ表示時）
+    case explicit      // このスコープで明示的に導入
+    case external      // 他ツールが管理。表示のみ・操作不可（9 章）
+    case undetected    // エージェント自体が未検出。Agent の検出状態から導出（3.7）
+    case unsupported   // そのエージェントにこのリソース種別が無い
+}
+
+struct Resource {
+    let name: String
+    let kind: Kind
+    let summary: String            // frontmatter の description / MCP のコマンド
+    var state: [Agent: State]
+}
+```
+
+---
+
+## 5. スコープ
+
+### 5.1 実態
+
+| リソース | ユーザー全体 | プロジェクト（git 共有） | ローカル（gitignore） |
+|---|---|---|---|
+| MCP | `~/.claude.json` | `<proj>/.mcp.json` | `~/.claude.json` の projects 配下 |
+| Skills | `~/.claude/skills/` | `<proj>/.claude/skills/` | — |
+| Subagents | `~/.claude/agents/` | `<proj>/.claude/agents/` | — |
+| Plugins | `installed_plugins.json` scope: `user` | — | scope: `local` + `projectPath` |
+| Permissions | `~/.claude/settings.json` | `<proj>/.claude/settings.json` | `settings.local.json`（実際はここに集中） |
+
+### 5.2 UI
+
+タブでもツリーでもなく、**ウィンドウ上部のスコープセレクタ 1 つ**で切り替える。
+CSS の cascade と同じ見え方にする。
+
+```
+┌─ スコープ: [ ユーザー全体 ▾ ] ────────────────── [+ 追加] ─┐
+│                                                             │
+│  リソース                    Claude  Cursor  Codex  Gemini  │
+│  ─────────────────────────────────────────────────────────  │
+│  chrome-devtools      MCP      ●       ●       ○      ○     │
+│  ponytail          Plugin      ●       ●       ●      —     │
+│  codiff             Skill      ●       ○       ○      —     │
+│  review-bugbot   Subagent      ○       ●       —      —     │
+└─────────────────────────────────────────────────────────────┘
+      ● 有効   ○ 未導入   — 非対応
+```
+
+プロジェクトを選ぶと、継承が薄く表示される:
+
+```
+┌─ スコープ: [ Free-Projects/reborn ▾ ] ──────────────────────┐
+│                                                             │
+│  chrome-devtools      MCP      ◐       ◐       ○      ○     │
+│  ponytail          Plugin      ●       —       —      —     │
+│     ⚠ 同じ v4.9.0 が他 4 プロジェクトにも個別導入されています  │
+│        [ ユーザー全体に昇格して 5 件を統合 ]                  │
+└─────────────────────────────────────────────────────────────┘
+      ◐ ユーザー全体から継承   ● このスコープで明示
+```
+
+セルは 3 状態（未導入 / 継承 / 明示）。
+
+**ただし Skills のセルは表示専用。** 3.2 の通り Cursor / Codex は共有ルートを
+直接読むため、エージェント別の on/off は存在しない。Skills の有効/無効は
+行単位の一括操作にする。クリックで昇格・降格できるのは
+エージェント別に実体を持つリソース（MCP / Plugins）のみ。
+
+**プロジェクトスコープは v1 では読み取り表示のみ（確定）。**
+`<proj>/.claude/skills/` への symlink は `~/` 配下を指す絶対パスが
+git 共有で他マシン・他メンバーの環境を壊すため、ユーザースコープと同じ方式が使えない。
+継承表示と重複警告（散らかり検出）は読み取りだけで成立するので v1 の価値は保てる。
+プロジェクトスコープへの書き込み（実体コピー方式）は需要を見てから。
+
+**散らかりの検出と統合提案が、このアプリ最大の見せ場**になる。
+`ponytail` が 5 プロジェクトに同一バージョンで重複しているのは、
+まさにこのビューが無いから起きている。
+
+### 5.3 使用実績の列（3.9）
+
+「入れたまま使っていない」を可視化する列を足す。実測で
+**インストール済み 26 件に対し使用実績があるのは 7 件**だった。
+
+```
+  リソース              最終使用      Claude Cursor Codex Gemini
+  ────────────────────────────────────────────────────────────
+  review-for-merge      2 日前          ●      ○     ○     —
+  chrome-devtools  MCP  ● 実行中        ○      ●     ○     ○
+                        （Cursor が使用中・2h06m）
+  webview-ui            1 か月前        ●      ○     ○     —
+  supabase-postgres     未使用          ●      ○     ○     —
+                        ⚠ 導入から 3 か月・使用実績なし  [削除]
+```
+
+- **MCP は実行中プロセスを検出して光らせる**（3.9）。他は最終使用日
+- 「未使用」に削除導線を置く。**このアプリを「入れる道具」から
+  「捨てる判断ができる道具」に変える**のがこの列の役目
+
+**この列は 4 つの状態を持ち、1 つも混ぜてはいけない**（3.7 の
+「未検出と非対応を混ぜない」と同じ原則）:
+
+| 表示 | 意味 |
+|---|---|
+| `● 実行中`（緑） | **MCP のみ。** プロセスが生きている。所属エージェントと稼働時間を tooltip に出す |
+| `停止中` | **MCP のみ。** 登録されているがプロセスが無い |
+| `—`（淡） | **未集計**。まだ「使用状況を分析」を押していない |
+| `─` | **観測範囲外**。読めるログは Claude のものだけで、Cursor / Codex での使用は見えない |
+| `未使用`（橙） | 集計した範囲で一度も使われていない。**削除の候補** |
+| `2 日前` | 最終使用日 |
+
+MCP は最終使用日より**実行状態を優先**する。3.9 の通り MCP だけが
+「今この瞬間の状態」を持ち、そちらの方が情報量が多い。
+
+**「観測範囲外」を「未使用」と出すと嘘になる。** 実装時に実際にこれが起き、
+`~/.cursor/skills-cursor/` にしか無いスキル 26 件が全部「未使用」と表示された。
+Cursor は使っているかもしれず、こちらに見えていないだけ。
+
+---
+
+## 6. 追加フロー
+
+入力欄は **1 つだけ**。ペーストされた文字列を見て分岐する。
+
+| 入力 | 解釈 |
+|---|---|
+| `{"mcpServers": {...}}` | MCP。公式サイトの JSON をそのままコピペできる（最頻の導線） |
+| `https://github.com/owner/repo/tree/main/skills/foo` | `repo` / `branch` / `subdir` に分解して zip 取得 → 中身で種別判定 |
+| `npx -y foo-mcp` などのコマンド行 | MCP のコマンドとして解釈 |
+
+種別判定は取得した中身を見る: `SKILL.md` があれば Skill、
+`.claude-plugin/plugin.json` があれば Plugin、frontmatter に `tools:` があれば Subagent。
+
+**自動では入れない。** README からのコマンド抽出は必ず外すため、勝手にインストールすると
+初心者ほど詰む。
+
+```
+解釈結果 → 確認画面（編集可能）→ 導入先エージェントを選択 → 追加
+```
+
+---
+
+## 7. 更新フロー
+
+### 7.1 リソースごとの実態
+
+| リソース | 更新 | 検知 | 適用 |
+|---|---|---|---|
+| **Plugins (Claude)** | ✅ | `claude plugin list` | `claude plugin update <name>` |
+| **Plugins (Codex)** | △ | `codex plugin list` | `remove` + `add` |
+| **Skills** | ✅ | GitHub commit SHA 比較 | zip 再取得 |
+| **Subagents** | ✅ | 同上 | 同上 |
+| **MCP** | ❌ | — | — |
+
+### 7.2 MCP に更新機能を作らない
+
+実際に登録されている MCP はこの形:
+
+```json
+"chrome-devtools": { "command": "npx", "args": ["-y", "chrome-devtools-mcp@latest"] }
+```
+
+`npx` が起動のたびに npm から最新を取るため、アプリが更新する余地が無い。
+「更新」ボタンを置いても押すと何も起きない偽ボタンになる。
+
+**MCP に必要なのは更新機能ではなくピン留め管理。**
+
+```
+chrome-devtools   MCP   @latest（起動ごとに最新を取得）
+                        ⚠ サイレントに壊れる可能性  [1.4.2 にピン留め]
+```
+
+ピン留めされている場合だけ npm registry と比較して新バージョンを通知できる。
+
+### 7.3 GitHub API のコスト制約
+
+未認証で **60 リクエスト/時**（実測 `x-ratelimit-limit: 60`）。素朴に作ると詰む。
+
+1. **リポジトリ単位で束ねる** — `GET /repos/{repo}/commits/{branch}` 1 回で、
+   同一リポジトリ由来の全スキルを判定できる
+2. **ETag を保存し `If-None-Match` を付ける** — 変化なしなら 304 が返る。
+   **⚠️ 実測では 304 もレート制限を消費する**（残り 43 → 42 → 41 → 40）。
+   GitHub の従来のドキュメント記載と異なるので、304 を当てにした設計にはしない。
+   ETag の利点は本文が転送されないこと（帯域）と「変化なし」が確実に分かることで、
+   **レート制限を守っているのは 1 と 3**
+3. **起動時の自動チェックはしない** — 明示的な「更新を確認」ボタン + 1 日 1 回のスロットル。
+   3.5 の「常駐しない」と整合する
+
+### 7.4 更新は差分を見せてから適用する
+
+Skills / Subagents の中身は**プロンプト**。黙って差し替えるとエージェントの挙動が変わり、
+原因追跡が不可能になる。追加は簡単でよいが、**更新は diff を見せる**。
+
+```
+ui-ux-pro-max を更新    abc1234 → def5678（3 コミット）
+
+  SKILL.md
+  - Always use Tailwind v3 syntax
+  + Always use Tailwind v4 syntax
+                          [ 更新する ] [ このバージョンで固定 ]
+```
+
+適用手順は **一時ディレクトリに展開 → 検証 → 差し替え → 失敗ならロールバック**。
+Cursor / Codex は `~/.agents/skills/` を直読みし Claude は symlink 越しに読むため、
+**実体を差し替えるだけで 3 エージェントすべてに同時反映される**（3.2）。
+
+### 7.5 Claude の自動更新と衝突させない
+
+`known_marketplaces.json` の `ponytail` には **`autoUpdate: true`** が付いており、
+Claude Code が既に自動更新している。ここにアプリが手を出すと二重管理になる。
+
+→ `autoUpdate: true` のプラグインは「Claude Code が自動更新」と表示し、
+更新ボタンを出さない。トグルで `autoUpdate` を切った時だけアプリが引き受ける。
+
+### 7.6 一覧の見え方
+
+```
+📦 リソース                              [ 更新を確認 ]  [ すべて更新 ]
+──────────────────────────────────────────────────────────────────
+ui-ux-pro-max            Skill    ● 3 コミット新しい     [差分] [更新]
+supabase-postgres-…      Skill    最新                        [固定]
+web-design-guidelines    Skill    📌 固定中（2 コミット遅れ）
+ponytail                 Plugin   Claude Code が自動更新
+swift-lsp                Plugin   1.0.0 → 1.2.0            [更新]
+chrome-devtools          MCP      @latest（常に最新）    [ピン留め]
+```
+
+---
+
+## 8. 画面構成
+
+```
+サイドバー          内容
+────────────────────────────────────────────────────────────
+📦 リソース         MCP / Skills / Subagents / Plugins
+                    （スコープセレクタで ユーザー全体 ⇄ プロジェクト）
+🔒 権限             permissions.allow の横断掃除
+⚙️ エージェント      検出状況（CLI パス・バージョン）
+```
+
+### 未検出エージェントの見え方
+
+3.7 の 4 状態を、列ヘッダと本体の両方で表現する。
+
+```
+                        Claude  Cursor  Codex   Gemini
+                         2.1.236  ─      0.153.2  未検出
+  ─────────────────────────────────────────────────────
+  chrome-devtools  MCP      ●      ●       ○      ·
+  codiff          Skill     ●      ○       ○      —
+  review-bugbot Subagent    ○      ●       —      —
+
+    ● 有効   ○ 未導入   — 非対応   · 未検出（操作不可）
+```
+
+- 列ヘッダにバージョンを出す。ここが「未検出」なら列全体が非活性
+- **Cursor は CLI が無い**（`cursor-agent` は存在しない）ため、
+  ヘッダは `─` とし、設定ディレクトリの有無だけで判定する。
+  CLI が無いこと自体は異常ではないので「未検出」とは表示しない
+- 非活性の列でもセルの状態は表示する（3.7 の「設定のみで既存リソースを隠さない」）
+- 非活性セルにホバーすると理由を出す — 「Codex CLI が見つかりません」/
+  「Gemini CLI に Skills はありません」。**この 2 つを同じ文言にしない**
+
+### ⚙️ エージェント画面
+
+```
+Claude Code    2.1.236    /opt/homebrew/bin/claude          ✓
+Cursor         ─          ~/.cursor（CLI なし・設定を直接編集）  ✓
+Codex          0.153.2    /opt/homebrew/bin/codex           ✓
+Gemini CLI     未検出      —                        [パスを指定…]
+```
+
+`PATH` 解決に失敗した時の逃げ道として、**手動でパスを指定できるようにする**。
+3.7 の通り GUI アプリの `PATH` は当てにならないため、これが無いと詰む環境が出る。
+
+### 権限画面
+
+各プロジェクトの `settings.local.json` に `permissions.allow` が蓄積している。
+実測（11 プロジェクト）:
+
+```
+371 件の allow
+  ├ マシン固有（使い捨て候補） 22 件
+  │   Bash(git -C /Users/…/secondary-simulator log --oneline -15)
+  └ 複数プロジェクトに重複     31 種類 / 75 件
+      7× WebSearch    7× WebFetch(domain:github.com)
+```
+
+3 つのフィルタで絞り、チェックして一括削除する。
+
+| フィルタ | 中身 |
+|---|---|
+| **使い捨て** | `env.home` の絶対パスを含む = 他のマシンでも他のプロジェクトでも使えない |
+| **重複** | 複数プロジェクトに同じエントリ。5.2 の散らかり検出と同じ問題 |
+| すべて | 371 件 |
+
+**判定は `/Users/` のハードコードではなく `env.home` 基準。**
+そうしないとテストが実ユーザーのパスに依存する（3.8）。
+
+#### 9 章のホワイトリストの唯一の例外
+
+`WriteGuard` は**削除・移動**を守るもので、ここは「ファイルの中の 1 キーを
+書き換える」別の操作。`PermissionWriter` に専用のガードを置き、
+次を全部満たす時だけ通す:
+
+1. ファイル名が `settings.json` / `settings.local.json` に**完全一致**する
+2. 場所が `.claude` ディレクトリの**直下**である（`..` で抜けられない）
+3. 操作が `permissions.<bucket>` の配列からの**削除**である
+
+**`permissions` 以外のキーには一切触らない。** 実測で `enabledPlugins` /
+`hooks` / `extraKnownMarketplaces` が同居しており、消すと別の設定が壊れる。
+
+削除前の中身は `~/Library/Application Support/ManageArms/permission-backups/`
+に残す。**プロジェクト側に `.bak` を作らない** — git status に出てしまう。
+
+---
+
+## 9. アプリ自身のリソース規律
+
+### 保存領域
+
+```
+~/Library/Application Support/ManageArms/
+  registry.json          数 KB
+  agents/<name>.md       Subagent 実体（共有ルートの慣習が無いためここに置く）
+  disabled-skills/       無効化した Skill の退避先（3.2）
+```
+
+**Skill の実体はここではなく `~/.agents/skills/` に置く（3.2 で確定）。**
+App Support に置くと Cursor / Codex から見えず、symlink を 3 本張る旧設計に戻ってしまう。
+
+**キャッシュディレクトリを持たない。** 一時展開は `temporaryDirectory` で完結し
+OS が回収する。アプリが自前の掃除機能を持たなくて済む状態にすることが、
+最も確実なストレージ管理。そのために明示が必要なのは 2 点:
+
+- **`URLSession` のディスクキャッシュを切る** — デフォルト設定のままだと
+  `~/Library/Caches/<bundle-id>/Cache.db` が勝手に生えて宣言と矛盾する。
+  `URLSessionConfiguration` で `urlCache = nil` にする。
+  HTTP キャッシュは 7.3 の ETag を registry で自前管理しており、二重に持つ理由が無い
+- **`registry.json` はアトミックに書く** — 唯一の永続ファイルなので、
+  書き込み中のクラッシュで壊れると全リソースの出所情報が飛ぶ。
+  `Data.write(to:options:.atomic)`（一時ファイル + rename）。1 行で済む
+
+### frontmatter だけ読む
+
+一覧に必要なのは `name` と `description` のみ。スキルが 100 個あっても本文は要らない。
+
+```swift
+let h = try FileHandle(forReadingFrom: url)
+defer { try? h.close() }
+let head = try h.read(upToCount: 4096) ?? Data()   // 先頭 4 KB だけ
+```
+
+本文は詳細ペインを開いた時に読み、閉じたら捨てる。
+
+### 目標値
+
+| 項目 | 目標 |
+|---|---|
+| アイドル時 RSS | 0（ウィンドウを閉じたらプロセス終了） |
+| ウィンドウ表示中 RSS | < 60 MB |
+| アプリ自身のディスク使用 | < 5 MB（ユーザーが入れたスキルを除く） |
+| 起動 → 一覧表示 | < 300 ms |
+
+### 触ってよい対象の限定（ホワイトリスト・確定）
+
+削除・移動の安全策は「触ってはいけないパスの列挙」ではなく
+**「触ってよい対象の限定」**で行う。3.4 の走査範囲と同じ発想で、
+新しいリソース種別を足しても安全側に倒れる。
+
+**アプリが削除・移動してよいのは次の 2 つだけ:**
+
+1. **自分が張った symlink** — リンク先が `~/.agents/skills/` 配下であることを
+   `resolvingSymlinksInPath` で検証したもののみ
+2. **`registry.json` に載っている実体** — `~/.agents/skills/<name>/`
+
+これ以外は一切触らない。特に **`registry.json` に無いスキル**
+（`vercel-labs/skills` が入れた `find-skills` など）は
+「外部管理」として表示するだけで、変更操作を提供しない（4.2 / 5.2）。
+
+**念のための二重チェック。** 上のホワイトリストに通っても、
+次のパスに一致する操作は無条件で拒否する:
+
+```
+auth.json, oauth_creds.json, settings.json,
+*.sqlite, ~/.claude.json, ~/.codex/config.toml
+```
+
+`~/.codex/auth.json` は認証トークンで、誤爆すると全ログインが飛ぶ。
+ホワイトリストの実装ミス 1 つで到達しうる場所なので、二重にする価値がある。
+
+ファイル削除を伴う操作は `rm` ではなく `FileManager.trashItem`（ゴミ箱へ移動）を使う。
+
+### 走査範囲のテスト
+
+**`Source` の全ケースを展開し、`projects` / `sessions` / `logs_` / `file-history` /
+`cache` / `archived_sessions` を含むパスが 1 つも出てこないことを assert する。**
+
+ここが破られると 3.4 / 3.5 / 9 の対策がすべて無意味になる。詳細は 10 章。
+
+---
+
+## 10. テスト戦略
+
+**テストは積極的に書く。** このアプリはユーザーのホームディレクトリを書き換え、
+symlink を張り、外部コマンドを実行する。壊れ方が「設定が消える」「エージェントが起動しなくなる」
+という取り返しのつかない形になるため、手で確認して済ませる領域ではない。
+
+前提は 3.8 の `Environment` 注入。**テストは一時ディレクトリに作った偽のホームだけを触り、
+実ユーザーの `~/.claude` には絶対に到達しない。**
+
+### 10.1 純粋関数（最も厚く書く）
+
+外部依存が無く高速。ここが一番壊れやすく、一番テストしやすい。
+
+| 対象 | 押さえるケース |
+|---|---|
+| **GitHub URL パース** | `/tree/main/skills/foo` / `/blob/` / 末尾スラッシュ / `.git` 付き / リポジトリ直下（`subdir` 無し） / **ブランチ名に `/` を含む**（`feature/x` は `tree/feature/x/skills/foo` となり `subdir` との境界が曖昧）/ 不正 URL |
+| **ペースト入力の種別判定** | `mcpServers` JSON / GitHub URL / `npx` コマンド行 / 前後の空白・改行付き / どれでもない文字列 |
+| **frontmatter パース** | 正常 / `---` 無し / CRLF / **4 KB 境界で frontmatter が切れる**（3.4 で先頭 4 KB しか読まないため）/ 本文中に `---` がある / `description` 欠落 |
+| **MCP スキーマ変換** | stdio（`command` + `args` + `env`）/ HTTP（`url` + `headers`）/ 各エージェント形式への往復変換で情報が落ちないこと |
+| **スコープ解決** | `absent` / `inherited` / `explicit` の判定。ユーザー全体とプロジェクトの両方に存在する場合 |
+| **更新判定** | sha 一致 / 不一致 / `pinned: true` は更新対象にしない / ETag 304 |
+| **バージョン文字列パース** | `2.1.236 (Claude Code)` / `codex-cli 0.153.2` / `0.46.0` / パース失敗時に「バージョン不明」へ落ちること |
+| **使用実績の抽出（3.9）** | `tool_use` の `Skill` / `mcp__*` を拾えること / 壊れた JSONL 行を飛ばして続行すること / `plugin:skill` 形式の分解 / **未集計と「未使用」を別の値として返すこと**（5.3） |
+| **MCP プロセスの所属判定（3.9）** | `ps` 出力から PPID を辿って Cursor / Claude / Codex に到達すること / 親が既に死んでいる孤児プロセス / どのエージェントにも辿り着かない場合に「不明」を返すこと |
+
+### 10.2 走査範囲（設計の生命線）
+
+**`Source` の全ケースを展開し、`projects` / `sessions` / `logs_` / `file-history` /
+`cache` / `archived_sessions` を含むパスが 1 つも出てこないことを assert する。**
+
+ここが破られると 3.4 / 3.5 / 9 の対策がすべて無意味になる。
+新しい `Source` を足した誰かが、このテストで止まるようにしておく。
+
+**`usageLog` ケースは別扱い（3.4 / 3.9）。** `projects` / `sessions` を読んでよい
+唯一の経路なので、**一覧スキャンの経路から `usageLog` が呼ばれないこと**を
+別途 assert する。ここが混ざると 3.4 の「129 MB を踏まない」が崩れる。
+
+### 10.3 ファイルシステム操作（偽ホームで実行）
+
+一時ディレクトリに `~/.claude/skills` などの構造を作って検証する。
+
+- **symlink を張る → 一覧に出る → 外す → 消える**（往復）
+- **無効化で実体が消えないこと** — `removeItem` が symlink だけを消し、
+  リンク先のスキル本体を巻き込まないこと。**最重要**
+- **無効化 → 再有効化の往復** — `~/.agents/skills/<name>` が退避ディレクトリへ移動し、
+  再有効化で元の場所に戻り、Claude symlink も張り直されること（3.2）
+- **ホワイトリストの外に出ないこと**（9 章） — `registry.json` に無いスキル
+  （外部管理）に削除・移動を試みると拒否されること。
+  リンク先が `~/.agents/skills/` 配下でない symlink も削除しないこと
+- **既に同名のファイル/ディレクトリがある場合に上書きしないこと**
+- **リンク切れ symlink の扱い** — `~/.claude/skills/codiff` が実際にこの状態にある。
+  クラッシュせず「リンク切れ」と表示できること
+- **二重チェックのパスに削除操作が到達しないこと**（`auth.json` など。9 章）
+- **zip 展開** — `subdir` だけが取り出されること / 一時ディレクトリが必ず後始末されること /
+  **`../` を含むエントリが展開先の外に出ないこと** — spike #13 で `ditto` の
+  安全性は確認済みだが、OS 更新で挙動が変わった時に気づくためリグレッションとして残す
+- **サイズ上限（50 MB）で中断されること**（3.3） — 上限超過時に
+  部分ダウンロードしたファイルが残らないこと
+
+### 10.4 CLI 呼び出し（フェイクで実行）
+
+`Environment.run` を差し替え、**実際の CLI は起動しない**。
+
+- `claude mcp add` に渡す引数が正しく組み立てられること（特に `--` 以降の扱い）
+- 終了コード非 0 のときにエラーを握り潰さず UI に出すこと
+- **標準出力が壊れた JSON でもクラッシュしないこと**
+- タイムアウトで固まらないこと
+
+### 10.5 ゴールデンテスト
+
+実機から採取して匿名化した設定ファイルを `Tests/Fixtures/` に置き、パースできることを検証する。
+アプリが読む対象は他社製品の出力であり、**予告なく書式が変わる**。
+CLI を更新して壊れたことに気づける唯一の手段になる。
+
+```
+Tests/Fixtures/
+  claude/.claude.json           mcpServers と 98 KB ぶんの同居キー
+  cursor/mcp.json               stdio 形式
+  codex/mcp-list.json           codex mcp list --json の出力
+  claude/installed_plugins.json user + local × 5 の重複ケース
+  claude/known_marketplaces.json autoUpdate: true を含む
+  claude/session.jsonl          Skill / mcp__ の tool_use を含む（3.9）
+  ps/snapshot.txt               MCP が親子 3 段になっている実物（3.9）
+```
+
+### 10.6 書かないもの
+
+- SwiftUI ビューのスナップショットテスト — 壊れやすく、得るものが少ない
+- 実際の CLI を起動する統合テスト — 環境依存で CI に載らない。手動確認に回す
+- ネットワークを実際に叩くテスト — GitHub のレート制限（60/時）を食う
+
+---
+
+## 11. 実装順序
+
+### v1 — Skills（実装済み）
+
+実装で判明し、設計に反映した事実:
+
+| 発見 | 反映先 |
+|---|---|
+| `URL.path()` はパーセントエンコードする。App Support は必ず空白を含むため `FileManager` が全滅する | 全箇所 `path(percentEncoded: false)`。空白入りパスの回帰テスト 2 件 |
+| completion handler 付き `downloadTask` はデリゲートの進捗を無効化する | 3.3。デリゲート駆動に変更（74 秒 → 0.1 秒） |
+| **304 もレート制限を消費する**（GitHub の従来の記載と異なる） | 7.3。守っているのは repo 単位の束ねとスロットル |
+| リンク切れ symlink を「有効」と表示していた | `Skill.isLoadable`。ディレクトリに在ることと読み込まれることは別 |
+| SwiftUI の `@Environment` と `ManageArmsCore.Environment` が衝突する | 使用側で `@SwiftUI.Environment` と修飾 |
+| Grid に固定幅列を足すと可変列が 0 まで潰れる | 名前列に `minWidth` |
+
+
+Skills は「追加・更新・スコープ表示・配布」の 4 機能すべてを
+1 リソースで通しで検証できる唯一の対象。動く実装（`update-skills.py`）も既にある。
+スコープは 5.2 の通り v1 では読み取り表示のみ。
+
+0. **`Environment` 注入（3.8）とテスト土台** — 偽ホームで動くテストが書ける状態を先に作る。
+   ここを後回しにすると、以降のテストが実ユーザーの `~/.claude` を触りに行く
+1. **エージェント検出（3.7）** — ログインシェル経由の `PATH` 解決と 4 状態の判定。
+   **Finder から起動して検出できることを必ず確認する**（ターミナル実行では罠が露見しない）
+2. `Source` 列挙とホワイトリストスキャン + 走査範囲テスト（10.2）
+3. 一覧 UI（マトリクス表示、スコープセレクタ、非活性列）
+4. 実体配置 + Claude symlink による有効化 / 無効化（**spike #11 の二重読み込み確認を含む**）
+5. zip 取得による追加（URL ペースト）
+6. `registry.json` + ETag による更新チェックと差分表示
+
+各ステップは 10 章の該当テストとセットで進める。テストを後追いにしない。
+
+### v2 — Subagents / Plugins（実装済み）
+
+**Subagents**: 実体は `~/Library/Application Support/ManageArms/agents/<name>.md`。
+共有ルートの慣習が無いため **symlink は 2 本**（`~/.claude/agents/` と `~/.cursor/agents/`）。
+Cursor は Skills では 9 ルートを走査するが、**Subagent は `.cursor/agents` しか読まない**（実測）。
+
+識別子は**ファイル名**で、frontmatter の `name` ではない。ズレると有効化 / 無効化が
+ファイルを見つけられなくなる。
+
+**Plugins**: `claude plugin list --json` / `codex plugin list --json` を読む。
+`installed_plugins.json` を直接読むより CLI の出力の方が scope と projectPath が揃っている。
+**書き込みはしない** — 更新は各 CLI が持ち、`autoUpdate` の衝突も避けられる（7.5）。
+
+実測で重複検出が発火:
+
+```
+[claude] ponytail@ponytail v4.9.0 scope=local auto=true → auto-free
+[claude] ponytail@ponytail v4.9.0 scope=local auto=true → reborn
+[claude] ponytail@ponytail v4.9.0 scope=local auto=true → terminal-for-ai-cli
+[claude] ponytail@ponytail v4.9.0 scope=user  auto=true
+⚠️ 3 プロジェクトに重複導入
+```
+
+**種別フィルタを追加した。** 26 件のスキルの下にプラグインが埋もれるため、
+すべて / Skills / Subagents / Plugins で絞り込む（存在する種別だけ出す）。
+
+### v2.5 — 使用実績の集計（実装済み）
+
+`UsageScanner` + `registry.usage` + 5.3 の 1 列。実測値:
+
+```
+全走査   1.27 秒（~/.claude/projects 140 MB / 147 ファイル）
+増分     0.002 秒（mtime で絞り込み）
+検出     8 件（うち ponytail はプラグイン名の逆引き）
+```
+
+実装で判明し、設計に反映した事実:
+
+| 発見 | 反映先 |
+|---|---|
+| **読めるログは Claude のものだけ。** Cursor 専用スキル 26 件が全部「未使用」と出た | `ResourceRow.usageObservable`。観測範囲外は `─` にして「未使用」と混ぜない（5.3） |
+| 合成された `Codable` は欠けたキーを既定値で埋めない。`usage` を足した瞬間、旧 `registry.json` が読めず**導入済みスキルの取得元が全部飛ぶ** | `Registry.init(from:)` を明示し `decodeIfPresent`。以後フィールドを足しても壊れない |
+| `ISO8601DateFormatter` は `Sendable` でなく `static` に置けない | 日付解析を「名前が取れた行」の後ろに移し、その場で生成（全履歴で数十回） |
+| `inout` は `Task.detached` に渡せない | `refreshed(_:env:)` は値を返す。全走査は数秒かかりメインスレッドでは回せない |
+| `#expect` の中の `allSatisfy(\.isEmpty)` はマクロが `rethrows` と誤解して展開に失敗する | `MCPTests`。マクロの外で評価する |
+
+**Codex は対象外のまま。** `~/.codex/sessions/**/rollout-*.jsonl` は
+`type: function_call` を使う別形式で、スキル呼び出しの表現が未確認（spike #15）。
+**対応するまで「Codex では未使用」とは表示しない** — 観測できないことと
+使われていないことは違う。
+
+### v3 — MCP（実装済み）
+
+CLI 委譲 + Cursor の `mcp.json` 直接編集 + 実行中プロセス検出（3.9）+ ピン留め（7.2）。
+実測:
+
+```
+ps 1 回で 1155 プロセスを 0.2 秒で走査
+● chrome-devtools — Cursor · 稼働 22:05 · pid 87431
+npm: chrome-devtools-mcp@latest → @1.8.0 に固定
+```
+
+実装で判明し、設計に反映した事実:
+
+| 発見 | 反映先 |
+|---|---|
+| **Codex は Cursor の拡張の中に入っていることがある**（`~/.cursor/extensions/openai.chatgpt-…/bin/…/codex`）。パスに `cursor` が含まれるため、先に Cursor 判定すると取り違える | `ProcessScanner.agent(ofCommand:)` は**実行ファイル名を先に見る** |
+| 1 つの MCP が `npm exec` → 本体 → watchdog の 3 プロセスに分かれる | 一致した集合の中で**親を持たないもの**を起点にする。稼働時間もそれが正しい |
+| `npx` / `node` で照合すると無関係なプロセスに当たる | 共通語と 3 文字以下を除外。**手掛かりが残らなければ照合しない** — 誤って「実行中」と出すより無害 |
+| 列を 1 つ足したらウィンドウ右端で操作列が切れた | 最小幅 1000 → 1160 |
+
+**プロセス検出は「登録と実態のズレ」の可視化そのもの。**
+設定ファイルを読むだけでは「登録されているのに起動していない」は絶対に分からない。
+
+ピン留めは `remove` → `add` で登録し直す（`claude mcp` に差し替えが無いため）。
+**`add` が失敗したら元の定義で入れ直す** — 中途半端に消えている方が害が大きい。
+
+### v4 — 権限（実装済み）
+
+Hooks / Commands / Rules は対象外に決まった（1 章）ため、v4 は権限画面のみ。
+実測で 371 件 / 11 プロジェクト、うち使い捨て 22 件・重複 75 件を検出（8 章）。
+
+実装で判明し、設計に反映した事実:
+
+| 発見 | 反映先 |
+|---|---|
+| プロジェクトのパスは**動的**で `Source` の静的列挙に載らない | `UsageScanner` と同じく専用の入り口にする。プロジェクト一覧は `~/.claude.json` の `projects` キーから取る（`~/.claude/projects/` の 140 MB は読まない） |
+| `settings.json` は `WriteGuard.deniedNames` に入っている | `WriteGuard` は削除・移動用。書き換えは別操作なので `PermissionWriter` に専用ガードを置いた |
+| `permissions` の隣に `enabledPlugins` / `hooks` / `extraKnownMarketplaces` が同居 | ルート辞書を読んで `permissions` だけ差し替える（`MCPManager.editCursor` と同じ形） |
+| テストの偽ホームで、`~/.claude.json` の `projects`（絶対パス）を home 確定前に組み立てて全滅した | フィクスチャを `(URL) -> [String: String]` のクロージャ形にした |
+| macOS の `/var` → `/private/var` symlink で `isInside` が偽陰性になる | 実 home は symlink ではないので実害なし。`isInside` は fail-closed なので拒否側に倒れる。テスト側で解決 |
+
+---
+
+## 12. spike の結果と未検証項目
+
+### 解決済み（2026-09-05 実測）
+
+| # | 項目 | 結果 |
+|---|---|---|
+| 1 | Cursor が symlink されたスキルを辿るか / 同期マネージャに消されないか | **問い自体が消えた。** Cursor は `~/.agents/skills` を含む 9 ルートを走査するため、`~/.cursor/skills-cursor/` に何も置かない。同期マネージャと関わらない（3.2） |
+| 2 | Codex が symlink されたスキルを辿るか | **✅ 辿る。** `codex debug prompt-input` で symlink 版・実体コピー版の両方が `<skills_instructions>` に載ることを確認。さらに `~/.agents/skills` を第 2 ルート（`r1`）として読むため symlink すら不要 |
+| — | Claude が symlink を辿るか | **✅ 辿る。** `~/.claude/skills/` に symlink を張った瞬間、起動中セッションのスキル一覧に反映された |
+| — | GUI アプリの `PATH` 問題 | **✅ 確定。** 3 CLI すべて launchd の `PATH` では見つからない。起動中の Cursor Helper も `PATH=/usr/bin:/bin:/usr/sbin:/sbin` で動いている（3.7） |
+| — | MCP の実行中検出と所属エージェント特定 | **✅ 可能。** `chrome-devtools-mcp` が独立プロセスとして常駐。PPID を辿ると `Cursor Helper: mcp-process` → `Cursor.app` に到達し、どのエージェントが掴んでいるか確定できる（3.9） |
+| — | Skills の使用実績がログから取れるか | **✅ 取れる。** `~/.claude/projects/*/*.jsonl` に `{'skill': 'artifact-design'}` がタイムスタンプ付きで残る。Codex も `~/.codex/sessions/**/rollout-*.jsonl` と同形式。メタデータ走査は 147 ファイルで **6 ms**（3.9） |
+| 9 | `.skill-lock.json` を registry として流用するか | **決定: 流用しない。** 自前 `registry.json` を持ち、`.skill-lock.json` は読み取り専用（4.1） |
+| 13 | `ditto -xk` の Zip Slip 耐性 | **✅ 安全。** `../escaped.txt` / `a/../../escaped2.txt` を含む zip を展開したところ、`../` が除去され全て展開先の内側に着地。脱出なし。自前検証は不要（3.3） |
+
+検証に使った道具（実装時のデバッグにも使う）:
+
+- **`codex debug prompt-input`** — API を呼ばずにモデルへ渡るプロンプトを JSON で出力する。
+  スキルルートと読み込み済みスキルが全部見える
+- **Cursor のスキルルート配列** — `/Applications/Cursor.app/Contents/Resources/app/out/` を
+  文字列検索すると走査対象がそのまま出てくる
+
+### 未検証
+
+| # | 項目 | 影響 |
+|---|---|---|
+| 3 | `codex mcp add` の引数仕様（現在 0 件登録のため未確認） | MCP 実装時 |
+| ~~4~~ | ~~`~/.codex/hooks.json` の `trusted_hash`~~ | **不要になった。** Hooks は対象外（1 章） |
+| 5 | `claude plugin list` が更新の有無を出力するか | 出さない場合は marketplace 側を見る |
+| 6 | Gemini CLI に Skills 相当があるか（`~/.gemini` には無い） | 対応表の確定 |
+| 7 | 実行中の Claude Code / Codex プロセス検出（`pgrep`）が必要か | 設定書き換え時の競合警告。**プロセス名が `Cursor` ではないため `pgrep -x` は使えない**（実測）。`pgrep -f` を使う |
+| 8 | `$SHELL -l -c 'echo $PATH'` が全環境で機能するか（fish / nushell） | 失敗時は手動パス指定へ誘導（3.7） |
+| 10 | `~/.cursor/cloud-skills/` / `~/.grok/skills/` の扱い | 対応表に載せるか |
+| 11 | Cursor が同一スキルを二重に読まないか — 実体 `~/.agents/skills/` と Claude 用 symlink `~/.claude/skills/` の両方を走査するため、重複排除の有無を確認 | v1 の symlink 実装（11 章ステップ 4） |
+| 12 | Plugin の scope 移動（local → user）を `claude plugin` CLI が対応しているか | 5.2 の「ユーザー全体に昇格」ボタンの実現性。v2 着手前に確認 |
+| 14 | Cursor の使用実績ログの形式（`~/.cursor/projects/` / `ai-tracking/`） | 3.9 の最終使用日を Cursor 列にも出せるか。出せなければ Cursor だけ空欄 |
+| 15 | Plugin 由来の skill / command を使用実績から逆引きできるか（実測では `ponytail:ponytail-review` と `plugin:skill` 形式で記録されていた） | 3.9 の Plugin 行の最終使用日。命名規則が全プラグインで一貫しているか要確認 |
+
+---
+
+## 付録: 実測データ（2026-09-05）
+
+判断の根拠。数値が大きく変わったら設計を見直す。
+
+```
+~/.cursor   1.6 GB   extensions 1.6G / projects 18M / skills-cursor 320K
+~/.codex    163 MB   logs_2.sqlite 44M / sessions 20M / cache 16M / skills 508K
+~/.claude   160 MB   projects 129M (145 セッション / 20 プロジェクト)
+                     file-history 17M / plugins 12M
+~/.claude.json  96 KB
+~/.gemini       80 KB
+```
+
+- CLI: `claude` `codex` `gemini` は導入済み。`cursor-agent` は無し
+- MCP 登録数: Cursor に `chrome-devtools` 1 件のみ。Codex は 0 件
+- Skills: `~/.claude/skills/codiff`（Codiff.app が張った symlink・現在リンク切れ）、
+  `~/.cursor/skills-cursor/` に 26 件
+- Plugins: `swift-lsp@claude-plugins-official`（user）、
+  `ponytail@ponytail` v4.9.0（local × 5 プロジェクト）
+- 使用実績: インストール済みスキル 26 件に対し、Claude のログに残るのは 7 件（3.9）
+- プロジェクト側: `.claude/` を持つプロジェクト 12 件
