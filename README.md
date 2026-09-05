@@ -13,10 +13,12 @@ The design document is [DESIGN.md](DESIGN.md) (Japanese).
 
 | | |
 |---|---|
-| **One matrix** | 4 resource kinds × 4 agents. "Unsupported" and "not detected" are shown differently — an empty cell should never have to be guessed at |
+| **One screen per agent** | Pick an agent in the sidebar and you see only what that agent carries. **What you installed yourself comes first — plugins and MCP servers included, with a note on where they are managed — and whatever ships with the agent is folded away** |
 | **Add** | Paste a GitHub URL; the contents are fetched and shown. Nothing is installed until you confirm |
-| **Enable / disable** | Disabling parks the resource aside instead of deleting it, so it can always be turned back on |
+| **Enable / disable / delete** | Disabling parks the resource aside; deleting moves it to the Trash. Either way it can be brought back |
+| **Adopt** | A skill you installed yourself can be brought under management without moving a single file |
 | **Update** | Review the `SKILL.md` diff before applying. Pin a resource to stop updates when upstream changes direction |
+| **Scope** | A tab for "all projects", one per project, and one for what ships with the agent — with a warning when the same thing is installed both ways |
 | **Usage** | Last-used dates gathered from session logs. For MCP, which servers are running *right now* |
 | **Permission cleanup** | Remove machine-specific and cross-project duplicate entries from `permissions.allow` |
 
@@ -39,7 +41,7 @@ The project is a Swift Package — there is no `.xcodeproj` (open `Package.swift
 directly).
 
 ```bash
-swift test                  # unit tests (241)
+swift test                  # unit tests (268)
 swift build                 # compile check
 
 # The distributable form is a hand-assembled .app bundle.
@@ -75,7 +77,7 @@ Sources/
 ├── ManageArmsCore/     scanning, install, update, usage, permissions — the tested layer.
 │                       External dependencies are injected through Environment
 │                       (a struct of closures, not a protocol)
-└── ManageArms/         SwiftUI shell (Resources / Permissions / Agents)
+└── ManageArms/         SwiftUI shell (Home / one screen per agent / Permissions)
 Localization/           ja / en. Keys are the Japanese strings themselves
 Resources/              Info.plist / entitlements / app icon
 Scripts/                .app assembly, DMG, CHANGELOG cutting, invariant checks
