@@ -475,6 +475,16 @@ struct RemovalCommandTests {
         #expect(row("automate", kind: .skill, roots: [".cursor/skills-cursor"],
                     origin: .bundled).removalCommand(agent: .cursor) == nil)
     }
+
+    /// リソース名は他ツールが書いたファイル由来で、`runCleanup` は組み立てた文字列を
+    /// `sh -c` に渡す。素で埋めると任意コマンドが走る。
+    @Test("名前にシェルの特殊文字が入っていても引用される")
+    func quotesHostileNames() {
+        #expect(row("a; rm -rf ~", kind: .plugin).removalCommand(agent: .claude)
+                == "claude plugin remove 'a; rm -rf ~' -s user")
+        #expect(row("$(id)", kind: .skill, roots: [".agents/skills"])
+                    .removalCommand(agent: .claude) == "rm -rf ~/.agents/skills/'$(id)'")
+    }
 }
 
 /// DESIGN.md 5.2 — プロジェクトからの一括削除。

@@ -117,8 +117,8 @@ public struct ResourceRow: Identifiable, Sendable {
         switch kind {
         case .plugin:
             guard let cli = agent.cliName else { return nil }
-            guard let project else { return "\(cli) plugin remove \(name) -s user" }
-            return "cd \(Self.quote(project)) && \(cli) plugin remove \(name) -s local"
+            guard let project else { return "\(cli) plugin remove \(Self.arg(name)) -s user" }
+            return "cd \(Self.quote(project)) && \(cli) plugin remove \(Self.arg(name)) -s local"
         case .mcp:
             // Cursor に CLI は無い。設定ファイルを出す（3.1）。
             guard var argv = MCPCommand.remove(name, from: agent) else {
@@ -128,9 +128,9 @@ public struct ResourceRow: Identifiable, Sendable {
                 if let i = argv.firstIndex(of: "-s"), i + 1 < argv.count {
                     if let mcpScope { argv[i + 1] = mcpScope } else { argv.removeSubrange(i...(i + 1)) }
                 }
-                return "cd \(Self.quote(project)) && " + argv.joined(separator: " ")
+                return "cd \(Self.quote(project)) && " + argv.map(Self.arg).joined(separator: " ")
             }
-            return argv.joined(separator: " ")
+            return argv.map(Self.arg).joined(separator: " ")
         case .skill, .subagent:
             let suffix = kind == .subagent ? ".md" : ""
             let dir = kind == .subagent ? "agents" : "skills"
@@ -138,8 +138,18 @@ public struct ResourceRow: Identifiable, Sendable {
                 return "rm -rf \(Self.quote("\(project)/.claude/\(dir)/\(name)\(suffix)"))"
             }
             guard let root = roots.first(where: { $0.hasPrefix(".") }) else { return nil }
-            return "rm -rf ~/\(root)/\(name)\(suffix)"
+            return "rm -rf ~/\(root)/" + Self.arg(name + suffix)
         }
+    }
+
+    /// シェルに渡す 1 語。**リソース名は他ツールが書いたファイル由来**で、
+    /// `;` や `$(…)` を含みうる。`runCleanup` はこの文字列を `sh -c` に渡すので、
+    /// 素で埋めると任意コマンドが走る。安全な語はそのまま出す（コピーして読む前提）。
+    static func arg(_ word: String) -> String {
+        let safe = !word.isEmpty && word.allSatisfy {
+            $0.isASCII && ($0.isLetter || $0.isNumber || "@._-+:/".contains($0))
+        }
+        return safe ? word : quote(word)
     }
 
     /// パスに空白が入る（`~/Free Projects/...`）。素で出すと動かないコマンドになる。
