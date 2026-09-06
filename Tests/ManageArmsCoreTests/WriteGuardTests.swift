@@ -124,3 +124,54 @@ struct WriteGuardTests {
         }
     }
 }
+
+/// **作成方向のホワイトリスト**（DESIGN.md 9 章）。
+/// `assertMutable` は削除・移動しか守らないので、取得物が名乗った名前が
+/// そのままパス要素になる経路をここで塞ぐ。判定は純粋関数（10.1）。
+@Suite("名前の検査")
+struct ResourceNameTests {
+
+    @Test("パスとして解決される名前は拒否する", arguments: [
+        "../../.claude/skills/evil",
+        "..",
+        ".",
+        "a/b",
+        "a\\b",
+        "/etc/passwd",
+        ".hidden",
+        "",
+        "apps/web:deploy",
+        "with:colon",
+        "line\nbreak",
+        "nul\u{0}byte",
+    ])
+    func rejectsUnsafe(_ name: String) {
+        #expect(!WriteGuard.isValidName(name), "\(name) が通ってしまった")
+        #expect(throws: WriteGuard.Denial.invalidName(name)) {
+            try WriteGuard.assertValidName(name)
+        }
+    }
+
+    /// 保護対象のファイル名は、スキル名としても名乗らせない（`deniedNames` の再利用）。
+    @Test("保護対象の名前は拒否する", arguments: [
+        "auth.json", "settings.json", ".claude.json", "config.toml", "logs.sqlite",
+    ])
+    func rejectsDenied(_ name: String) {
+        #expect(!WriteGuard.isValidName(name))
+    }
+
+    /// **文字種は絞らない。** 実在するスキル名を弾く方が実害になる。
+    @Test("実在する形の名前は通る", arguments: [
+        "pdf", "artifact-design", "web_deploy", "skill.v2", "日本語スキル", "a-1",
+    ])
+    func acceptsReal(_ name: String) throws {
+        #expect(WriteGuard.isValidName(name))
+        try WriteGuard.assertValidName(name)
+    }
+
+    @Test("255 バイトを超える名前は拒否する")
+    func rejectsTooLong() {
+        #expect(!WriteGuard.isValidName(String(repeating: "a", count: 256)))
+        #expect(WriteGuard.isValidName(String(repeating: "a", count: 255)))
+    }
+}

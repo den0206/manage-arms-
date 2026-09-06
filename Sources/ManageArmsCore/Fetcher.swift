@@ -73,7 +73,9 @@ public enum Fetcher {
                 throw Failure.subdirNotFound(source.subdir ?? "/")
             }
 
-            let candidates = identify(base)
+            // ディレクトリ名由来の候補も含めて、最後にもう一度名前を検査する。
+            // ここを通った名前だけが `Installer` でパスに使われる（9 章の作成方向）。
+            let candidates = identify(base).filter { WriteGuard.isValidName($0.name) }
             guard !candidates.isEmpty else { throw Failure.nothingRecognized }
             return Staging(root: root, source: source, candidates: candidates)
         } catch {
@@ -227,7 +229,10 @@ public enum Fetcher {
                 return found + [Candidate(kind: .skill, name: base.lastPathComponent,
                                           description: nil, localURL: base)]
             }
-            return found + [Candidate(kind: .skill, name: matter.name ?? base.lastPathComponent,
+            // **frontmatter の `name` は取得先が書いた文字列**で、こちらの管理下にない。
+            // パス要素として使えない名前（`../` を含む等）はディレクトリ名に落とす。
+            let declared = matter.name.flatMap { WriteGuard.isValidName($0) ? $0 : nil }
+            return found + [Candidate(kind: .skill, name: declared ?? base.lastPathComponent,
                                       description: matter.description, localURL: base)]
         }
 

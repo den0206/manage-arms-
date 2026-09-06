@@ -26,6 +26,10 @@ public enum Installer {
         guard candidate.kind == .skill || candidate.kind == .subagent else {
             throw Failure.unsupportedKind(candidate.kind)
         }
+        // **作成もガードを通す。** `WriteGuard.assertMutable` は削除・移動しか守らないため、
+        // ここを素通しにすると取得先の名乗り 1 つで管理ルートの外へ書ける（9 章）。
+        // `Fetcher` でも弾いているが、`deniedNames` と同じ理由で二重にする。
+        try WriteGuard.assertValidName(candidate.name)
         let isSubagent = candidate.kind == .subagent
 
         let fm = FileManager.default

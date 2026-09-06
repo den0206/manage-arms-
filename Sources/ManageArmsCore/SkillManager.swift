@@ -80,6 +80,7 @@ enum ManagedLifecycle {
     static func link(_ name: String, kind: Kind, env: Environment,
                      registry: Registry) throws {
         let fm = FileManager.default
+        try WriteGuard.assertValidName(name)
         let layout = layout(name, kind: kind, env: env)
         for link in layout.links {
             if WriteGuard.isSymlink(link) {
@@ -97,6 +98,7 @@ enum ManagedLifecycle {
     static func enable(_ name: String, kind: Kind, env: Environment,
                        registry: inout Registry) throws {
         let fm = FileManager.default
+        try WriteGuard.assertValidName(name)
         let layout = layout(name, kind: kind, env: env)
         if !fm.fileExists(atPath: layout.store.path(percentEncoded: false)) {
             guard fm.fileExists(atPath: layout.parked.path(percentEncoded: false)) else {
@@ -114,14 +116,20 @@ enum ManagedLifecycle {
         try registry.save(env: env)
     }
 
+    /// **前提の検査を全部先に済ませてから壊す。**
+    /// 以前は symlink を先に外していたため、その後の `guard` で throw すると
+    /// 「Claude からは消えたのに registry は有効のまま」という、
+    /// 画面から追えない食い違いが残った（`Updater.apply` と同じ規律に揃える）。
+    ///
+    /// 破壊の順序は **実体の退避 → symlink の解除**。逆にすると、途中で失敗したときに
+    /// 「リンクが無いだけ」の見えない状態になる。この順なら残るのはリンク切れで、
+    /// 一覧が「読み込めません」として拾える（`ResourceRow.isUnusable`）。
     static func disable(_ name: String, kind: Kind, env: Environment,
                         registry: inout Registry) throws {
         let fm = FileManager.default
+        try WriteGuard.assertValidName(name)
         let layout = layout(name, kind: kind, env: env)
-        for link in layout.links where WriteGuard.isSymlink(link) {
-            try WriteGuard.assertMutable(link, env: env, registry: registry)
-            try fm.removeItem(at: link)
-        }
+
         guard fm.fileExists(atPath: layout.store.path(percentEncoded: false)) else {
             throw SkillManager.Failure.notFound(name)
         }
@@ -129,9 +137,15 @@ enum ManagedLifecycle {
         guard !fm.fileExists(atPath: layout.parked.path(percentEncoded: false)) else {
             throw SkillManager.Failure.alreadyExists(layout.parked.path(percentEncoded: false))
         }
+        let links = layout.links.filter(WriteGuard.isSymlink)
+        for link in links {
+            try WriteGuard.assertMutable(link, env: env, registry: registry)
+        }
+
         try fm.createDirectory(at: layout.parked.deletingLastPathComponent(),
                                withIntermediateDirectories: true)
         try fm.moveItem(at: layout.store, to: layout.parked)
+        for link in links { try fm.removeItem(at: link) }
         var entry = registry.entry(named: name, kind: kind) ?? Registry.Entry(name: name, kind: kind)
         entry.disabled = true
         registry.upsert(entry)
@@ -142,20 +156,25 @@ enum ManagedLifecycle {
     static func remove(_ name: String, kind: Kind, env: Environment,
                        registry: inout Registry) throws -> URL? {
         let fm = FileManager.default
+        try WriteGuard.assertValidName(name)
         let layout = layout(name, kind: kind, env: env)
-        for link in layout.links where WriteGuard.isSymlink(link) {
-            try WriteGuard.assertMutable(link, env: env, registry: registry)
-            try fm.removeItem(at: link)
-        }
-        var trashed: URL?
-        for url in [layout.store, layout.parked]
-        where fm.fileExists(atPath: url.path(percentEncoded: false)) {
+
+        // `disable` と同じ理由で、検査を全部先に済ませてから壊す。
+        let links = layout.links.filter(WriteGuard.isSymlink)
+        let bodies = [layout.store, layout.parked]
+            .filter { fm.fileExists(atPath: $0.path(percentEncoded: false)) }
+        guard !bodies.isEmpty else { throw SkillManager.Failure.notFound(name) }
+        for url in links + bodies {
             try WriteGuard.assertMutable(url, env: env, registry: registry)
+        }
+
+        for link in links { try fm.removeItem(at: link) }
+        var trashed: URL?
+        for url in bodies {
             var result: NSURL?
             try fm.trashItem(at: url, resultingItemURL: &result)
             trashed = result as URL?
         }
-        guard trashed != nil else { throw SkillManager.Failure.notFound(name) }
         registry.resources.removeAll { $0.name == name && $0.kind == kind.rawValue }
         try registry.save(env: env)
         return trashed

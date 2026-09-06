@@ -15,6 +15,8 @@ public enum WriteGuard {
         case outsideManagedRoots(String)
         /// registry.json に載っていない。他ツールが入れたもの（外部管理）。
         case notInRegistry(String)
+        /// 取得物が名乗った名前がパス要素として使えない（`..` / `/` を含む等）。
+        case invalidName(String)
 
         public var description: String {
             switch self {
@@ -26,6 +28,8 @@ public enum WriteGuard {
                 "\(p) は manage-arms の管理外です"
             case .notInRegistry(let n):
                 "\(n) は他のツールが管理しています。manage-arms からは変更できません"
+            case .invalidName(let n):
+                "\(n) は名前として使えません（取得元の指定を確認してください）"
             }
         }
     }
@@ -38,6 +42,35 @@ public enum WriteGuard {
         "settings.local.json", ".claude.json", "config.toml", "mcp.json",
     ]
     static let deniedExtensions: Set<String> = ["sqlite", "sqlite-wal", "sqlite-shm"]
+
+    /// 取得物が名乗った名前を、そのままパス要素に使ってよいか。**純粋関数**（10.1）。
+    ///
+    /// **名前は取得先リポジトリの `SKILL.md` frontmatter 由来**で、こちらの管理下にない。
+    /// `../../../.claude` のような名前を `skillStore.appending(path:)` に渡すと
+    /// FileManager がパスを解決するため、管理ルートの外へ書けてしまう。
+    /// `assertMutable` は**削除・移動**しか守らないので、9 章のホワイトリストには
+    /// 作成方向の穴が空く。ここがその穴を塞ぐ。
+    ///
+    /// 落とすのは危険なものだけで、文字種は絞らない — 実在するスキル名を
+    /// 勝手に弾くと、正しい取得物が入らなくなる方の事故になる。
+    public static func isValidName(_ name: String) -> Bool {
+        guard !name.isEmpty, name.utf8.count <= 255 else { return false }
+        guard name != ".", name != ".." else { return false }
+        guard !name.hasPrefix(".") else { return false }        // 隠しファイルを作らせない
+        guard !name.contains("/"), !name.contains("\\") else { return false }
+        // `apps/web:deploy` の区切り。名前に含むと修飾名と区別できなくなる。
+        guard !name.contains(":") else { return false }
+        // 改行や NUL を含む名前は、表示にもパスにも使えない。
+        guard !name.unicodeScalars.contains(where: {
+            $0.properties.generalCategory == .control
+        }) else { return false }
+        return !isDenied(URL(filePath: name))
+    }
+
+    /// 通らなければ throw する。**作成の直前に必ず通す。**
+    public static func assertValidName(_ name: String) throws {
+        guard isValidName(name) else { throw Denial.invalidName(name) }
+    }
 
     /// 削除・移動してよいか。通らなければ throw する。
     ///
