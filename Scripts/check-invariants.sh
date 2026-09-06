@@ -34,11 +34,13 @@ fi
 # 新しいファイルで無防備に removeItem を書くと、ホワイトリストを迂回して
 # ユーザーの ~/.claude や ~/.agents を消しうる。
 #   SkillManager / Updater … WriteGuard.assertMutable を必ず呼ぶ
+#   PermissionWriter       … 自分が作ったバックアップの世代刈り。
+#                            WriteGuard.assertAppBackup を必ず呼ぶ
 #   Fetcher / Installer    … 一時ディレクトリのみを触る（ユーザーデータ外）
 #   InstallLocationGuard   … /Applications へ自分自身をコピーする際の失敗ロールバック。
 #                            消すのは直前に自分が作ったバンドルだけで、ユーザーの資源ではない
 LEAKS=$(grep -rnE 'removeItem|moveItem|createSymbolicLink|trashItem' Sources/ --include='*.swift' \
-        | grep -vE '/(SkillManager|Updater|Fetcher|Installer|InstallLocationGuard)\.swift:' \
+        | grep -vE '/(SkillManager|Updater|PermissionWriter|Fetcher|Installer|InstallLocationGuard)\.swift:' \
         | grep -vE ':[0-9]+:[[:space:]]*//')
 if [ -n "$LEAKS" ]; then
     fail "削除・移動が WriteGuard を通る経路の外に漏れています（DESIGN.md 9 章）" "$LEAKS"
@@ -46,13 +48,26 @@ else
     echo "✓ 削除・移動は WriteGuard を通る経路に限定されています"
 fi
 
-# WriteGuard を通す 2 ファイルが、実際に assertMutable を呼んでいることも確かめる
+# WriteGuard を通すファイルが、実際にガードを呼んでいることも確かめる
 # （上の許可リストに載せただけで中身が空、という抜けを塞ぐ）。
 for f in SkillManager Updater; do
     if ! grep -q 'WriteGuard.assertMutable' "Sources/ManageArmsCore/$f.swift"; then
         fail "$f.swift が WriteGuard.assertMutable を呼んでいません（削除・移動の許可リストに載っているのに無防備）"
     fi
 done
+if ! grep -q 'WriteGuard.assertAppBackup' Sources/ManageArmsCore/PermissionWriter.swift; then
+    fail "PermissionWriter.swift が WriteGuard.assertAppBackup を呼んでいません（削除の許可リストに載っているのに無防備）"
+fi
+
+# --- 2b. 作成もガードを通す（DESIGN.md 9 章）------------------------------------
+# assertMutable は削除・移動しか守らない。取得物が名乗った名前をそのまま
+# パス要素にすると、`../` ひとつで管理ルートの外へ書ける（作成方向の穴）。
+for f in Installer SkillManager; do
+    if ! grep -q 'WriteGuard.assertValidName' "Sources/ManageArmsCore/$f.swift"; then
+        fail "$f.swift が WriteGuard.assertValidName を呼んでいません（取得物の名前が無検証でパスになります）"
+    fi
+done
+echo "✓ 取得物の名前は作成前に検査されています"
 
 # --- 3. ローカライズ（ja / en のキー集合が一致すること）------------------------
 plutil -lint Localization/*.lproj/*.strings >/dev/null || {

@@ -79,7 +79,23 @@ public enum UsageScanner {
             updated.usage.scannedSources[source.id] = startedAt
         }
         updated.usage.scannedUpTo = startedAt
+        updated.usage.lastUsed = bounded(updated.usage.lastUsed)
         return updated
+    }
+
+    /// `lastUsed` に残す件数の上限。
+    ///
+    /// **唯一の永続ファイルを単調増加させない**（DESIGN.md 4.1 / 9 章）。
+    /// キーは「そのとき使われた名前」なので、消したリソースの分も残り続ける。
+    /// 消えたものを消えたと知る術がここには無い（一覧は別経路）ので、
+    /// 件数で頭を押さえて古い方から捨てる — 用途は「最終使用日」の表示だけで、
+    /// 古い記録ほど画面に出ても意味が薄い。
+    static let historyLimit = 2000
+
+    static func bounded(_ lastUsed: [String: Date]) -> [String: Date] {
+        guard lastUsed.count > historyLimit else { return lastUsed }
+        let kept = lastUsed.sorted { $0.value > $1.value }.prefix(historyLimit)
+        return Dictionary(uniqueKeysWithValues: kept.map { ($0.key, $0.value) })
     }
 
     /// 1 ファイル読む。`mappedIfSafe` で最大 10 MB のログでも RSS に載せない（9 章）。

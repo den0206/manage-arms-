@@ -97,7 +97,12 @@ public enum Updater {
             throw error
         }
 
-        entry.sha = preview.newSha ?? entry.sha
+        // **古い sha を残さない。** `?? entry.sha` にしていたため、取得元の sha が
+        // 分からないまま適用すると「更新があります」が出続けた
+        // （`UpdateChecker.status` は `sha != latest` を「遅れている」と読む）。
+        // 分からないなら nil。`status` は sha 不明を `upToDate` として扱う
+        // — いま入れたばかりの中身に「更新あり」と言うより正しい。
+        entry.sha = preview.newSha
         registry.upsert(entry)
         try registry.save(env: env)
         preview.discard()

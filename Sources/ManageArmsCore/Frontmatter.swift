@@ -26,7 +26,32 @@ public enum FrontmatterParser {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return .missing }
         defer { try? handle.close() }
         let data = (try? handle.read(upToCount: headBytes)) ?? Data()
-        return parse(String(decoding: data, as: UTF8.self))
+        return parse(String(decoding: droppingPartialScalar(data), as: UTF8.self))
+    }
+
+    /// 末尾で切れた UTF-8 の断片を落とす。**日本語の description は 3 バイト**なので、
+    /// 4 KB 境界が字の途中に落ちると `String(decoding:)` が U+FFFD を置き、
+    /// 説明文の最後の 1 字が「�」になる。読めない断片は最初から渡さない。
+    static func droppingPartialScalar(_ data: Data) -> Data {
+        // 先頭バイトから続きの長さが決まる。継続バイトは 0b10xx_xxxx。
+        var trailing = 0
+        for byte in data.reversed() {
+            if byte & 0b1100_0000 != 0b1000_0000 {
+                let expected: Int
+                switch byte {
+                case 0x00...0x7F: expected = 1
+                case 0xC0...0xDF: expected = 2
+                case 0xE0...0xEF: expected = 3
+                case 0xF0...0xF7: expected = 4
+                default:          return data      // 不正なバイト列。触らず渡す
+                }
+                // 揃っていればそのまま、足りなければ末尾の断片を落とす。
+                return trailing + 1 >= expected ? data : data.dropLast(trailing + 1)
+            }
+            trailing += 1
+            if trailing > 3 { return data }        // 継続バイトが続きすぎ。触らない
+        }
+        return data
     }
 
     public static func parse(_ text: String) -> FrontmatterResult {

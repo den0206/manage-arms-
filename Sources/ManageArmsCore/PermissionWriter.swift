@@ -28,7 +28,8 @@ public enum PermissionWriter {
         }
     }
 
-    /// 書き換えてよいファイルか。**通らなければ throw**。
+    /// 書き換えてよいファイルか（名前と `.claude` 直下であること）。
+    /// **通らなければ throw**。
     public static func assertWritable(_ file: URL) throws {
         let path = file.standardized.path(percentEncoded: false)
         guard PermissionScanner.fileNames.contains(file.lastPathComponent) else {
@@ -39,10 +40,26 @@ public enum PermissionWriter {
         }
     }
 
+    /// 実際の書き込み経路で使う版。**`.claude` という名前のディレクトリは
+    /// どこにでも作れる**ので、その親がホームか既知プロジェクトであることまで見る。
+    /// 上のコメントが宣言していた条件 2「`~/.claude/` か `<project>/.claude/` の直下」は
+    /// これで初めて満たされる。
+    static func assertWritable(_ file: URL, under roots: [URL]) throws {
+        try assertWritable(file)
+        let base = file.standardized.deletingLastPathComponent().deletingLastPathComponent()
+        guard roots.contains(where: {
+            $0.standardizedFileURL.path == base.standardizedFileURL.path
+        }) else {
+            throw Denial.notInClaudeDir(file.standardized.path(percentEncoded: false))
+        }
+    }
+
     /// 指定したエントリを消す。ファイル単位にまとめて 1 回ずつ書く。
     public static func remove(_ entries: [PermissionEntry], env: Environment) throws {
+        // 読んだ場所以外は書かない。`PermissionScanner` が走査するのと同じ集合。
+        let roots = [env.home] + ProjectScan.projectPaths(in: env).map { URL(filePath: $0) }
         for (file, group) in Dictionary(grouping: entries, by: \.file) {
-            try assertWritable(file)
+            try assertWritable(file, under: roots)
             try edit(file, env: env) { permissions in
                 for bucket in PermissionEntry.Bucket.allCases {
                     let doomed = Set(group.filter { $0.bucket == bucket }.map(\.value))
@@ -74,16 +91,55 @@ public enum PermissionWriter {
         try encoded.write(to: file, options: .atomic)
     }
 
+    static let backupDirectory = "permission-backups"
+
+    /// 設定ファイル 1 つあたりに残す世代数。
+    ///
+    /// **際限なく増やさない**（DESIGN.md 9 章 / CLAUDE.md「ストレージの規律」）。
+    /// リソース管理アプリが自分でディスクを汚したら本末転倒で、以前はここが
+    /// 編集のたびに 1 ファイル増え続け、消す導線も無かった。
+    /// 目的は「直前の編集に戻せること」なので、数世代あれば足りる。
+    static let generations = 5
+
+    /// 区切りは `__`。**slug には `-` が入る**（パスの `/` を潰したもの）ので、
+    /// `-` で区切ると同じ設定ファイルの世代をまとめられない。
+    static let stampSeparator = "__"
+
     /// バックアップはアプリの保存領域に置く。**他人のディレクトリを汚さない。**
     /// `<proj>/.claude/settings.local.json.bak` を作ると git status に出てしまう。
     static func backup(_ data: Data, of file: URL, env: Environment) throws {
-        let dir = env.appSupport.appending(path: "permission-backups")
+        let dir = env.appSupport.appending(path: backupDirectory)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let stamp = ISO8601DateFormatter().string(from: env.now())
             .replacingOccurrences(of: ":", with: "-")
-        let slug = file.standardized.path(percentEncoded: false)
+        let slug = Self.slug(of: file)
+        try data.write(to: dir.appending(path: "\(stamp)\(stampSeparator)\(slug)"),
+                       options: .atomic)
+        try prune(slug: slug, in: dir, env: env)
+    }
+
+    static func slug(of file: URL) -> String {
+        file.standardized.path(percentEncoded: false)
             .replacingOccurrences(of: "/", with: "-")
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-        try data.write(to: dir.appending(path: "\(stamp)-\(slug)"), options: .atomic)
+    }
+
+    /// 同じ設定ファイルの古い世代を落とす。**消すのは自分が作ったものだけ** —
+    /// `WriteGuard.assertAppBackup` を通してから消す（9 章）。
+    ///
+    /// 区切りを持たない名前は 0.1.0 が書いた旧形式なので**触らない**。
+    /// 帰属を判定できないものを消すのは、このアプリが一番やってはいけないこと。
+    static func prune(slug: String, in dir: URL, env: Environment) throws {
+        let fm = FileManager.default
+        let suffix = stampSeparator + slug
+        let mine = ((try? fm.contentsOfDirectory(atPath: dir.path(percentEncoded: false))) ?? [])
+            .filter { $0.hasSuffix(suffix) }
+            .sorted()                                  // 先頭が ISO8601 なので辞書順 = 古い順
+        guard mine.count > generations else { return }
+        for name in mine.dropLast(generations) {
+            let url = dir.appending(path: name)
+            try WriteGuard.assertAppBackup(url, env: env)
+            try fm.removeItem(at: url)
+        }
     }
 }
