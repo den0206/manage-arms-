@@ -77,6 +77,9 @@ final class AppModel {
     var isPinning = false
     var isMutating = false
     private var isRefreshingActivity = false
+    /// 走査中に来た再読み込みの依頼。終わってから 1 回だけ流す。
+    private var pendingReload = false
+    private var pendingReloadForcesCLI = false
     var isCleaning = false
     /// 一括削除シートの中身。nil で閉じる。
     var cleanup: [CleanupItem]?
@@ -149,16 +152,24 @@ final class AppModel {
         duplicateCounts = [:]
         cleanup = nil
         discardPreview()
+        CLIScan.clear()          // CLI の結果も持ち越さない（3.5 の例外を閉じる）
     }
 
-    /// キャッシュしない（DESIGN.md 3.5）。毎回読み直す。
-    /// 走査は数十ファイル + CLI 数回で終わるが、CLI が node 起動を伴うため
-    /// メインスレッドは塞がない。
-    func reload() {
-        guard !isLoading else { return }
+    /// ファイル走査はキャッシュしない（DESIGN.md 3.5）。毎回読み直す。
+    /// CLI 呼び出しだけは `CLIScan` が数分間引く（3.5 が明示的に求めている）。
+    ///
+    /// `forceCLI` は明示的な再読み込みと、こちらが設定を書き換えた直後に立てる。
+    /// **走っている最中の依頼は捨てない** — 捨てると、操作直後の `reload` が
+    /// 進行中の走査と重なったときに一覧が古いまま残る。
+    func reload(forceCLI: Bool = false) {
+        guard !isLoading else {
+            pendingReload = true
+            pendingReloadForcesCLI = pendingReloadForcesCLI || forceCLI
+            return
+        }
         isLoading = true
         Task {
-            let loaded = await Self.loadOffMain()
+            let loaded = await Self.loadOffMain(forceCLI: forceCLI)
             inventory = loaded
             refreshActivity()
             permissions = await Task.detached {
@@ -167,6 +178,27 @@ final class AppModel {
             duplicateCounts = PermissionScanner.duplicates(permissions)
                 .mapValues(\.count)
             isLoading = false
+            if pendingReload {
+                pendingReload = false
+                let force = pendingReloadForcesCLI
+                pendingReloadForcesCLI = false
+                reload(forceCLI: force)
+            }
+        }
+    }
+
+    /// **ファイルを触る操作の共通形。** 実体の移動・コピーはディレクトリ丸ごとになるので、
+    /// メインアクターの上でやると UI が止まる（`removeExisting` だけがこの形だった）。
+    private func mutate(_ work: @escaping @Sendable () throws -> Void) {
+        guard !isMutating else { return }
+        isMutating = true
+        Task {
+            let failure = await Task.detached { () -> String? in
+                do { try work(); return nil } catch { return "\(error)" }
+            }.value
+            if let failure { errorMessage = failure }   // 握り潰さず UI に出す
+            isMutating = false
+            reload(forceCLI: true)
         }
     }
 
@@ -175,26 +207,22 @@ final class AppModel {
     func removePermissions(_ entries: [PermissionEntry]) {
         guard !entries.isEmpty, !isEditingPermissions else { return }
         isEditingPermissions = true
-        do {
-            try PermissionWriter.remove(entries, env: .live)
-        } catch {
-            errorMessage = "\(error)"
+        Task {
+            let failure = await Task.detached { () -> String? in
+                do { try PermissionWriter.remove(entries, env: .live); return nil }
+                catch { return "\(error)" }
+            }.value
+            if let failure { errorMessage = failure }
+            isEditingPermissions = false
+            reload()
         }
-        isEditingPermissions = false
-        reload()
     }
 
     /// 有効/無効は全エージェント一括（DESIGN.md 3.2）。
     /// エージェント別の on/off は Cursor / Codex が共有ルートを直読みするため不可能。
     func toggle(_ row: ResourceRow) {
         guard row.isManaged, !isChecking, !isAnalyzing else { return }
-        do {
-            try Inventory.toggle(row, env: .live)
-            reload()
-        } catch {
-            // 握り潰さず UI に出す。
-            errorMessage = "\(error)"
-        }
+        mutate { try Inventory.toggle(row, env: .live) }
     }
 
     /// 一括削除（DESIGN.md 5.2）。**表示したコマンドをそのまま実行する** —
@@ -211,7 +239,7 @@ final class AppModel {
             if !failures.isEmpty { errorMessage = failures.joined(separator: "\n") }
             isCleaning = false
             cleanup = nil
-            reload()
+            reload(forceCLI: true)
         }
     }
 
@@ -219,12 +247,7 @@ final class AppModel {
     /// registry に載っているものだけ — 他ツールが入れたものは WriteGuard が弾く。
     func remove(_ row: ResourceRow) {
         guard row.isManaged, !isChecking, !isAnalyzing else { return }
-        do {
-            try Inventory.remove(row, env: .live)
-            reload()
-        } catch {
-            errorMessage = "\(error)"
-        }
+        mutate { try Inventory.remove(row, env: .live) }
     }
 
     /// 明示的な「更新を確認」。起動時の自動チェックはしない（DESIGN.md 7.3）。
@@ -260,15 +283,22 @@ final class AppModel {
         }
     }
 
+    /// 差分を確認したうえでの適用。**失敗したらシートを閉じない** —
+    /// 閉じると staging への参照が切れ、一時ディレクトリを片付ける手が無くなる。
     func applyPreview() {
-        guard let preview else { return }
-        do {
-            var registry = try Registry.read(env: .live)
-            try Updater.apply(preview, env: .live, registry: &registry)
-            self.preview = nil
-            reload()
-        } catch {
-            errorMessage = "\(error)"
+        guard let preview, !isMutating else { return }
+        isMutating = true
+        Task {
+            let failure = await Task.detached { () -> String? in
+                do {
+                    var registry = try Registry.read(env: .live)
+                    try Updater.apply(preview, env: .live, registry: &registry)
+                    return nil
+                } catch { return "\(error)" }
+            }.value
+            if let failure { errorMessage = failure } else { self.preview = nil }
+            isMutating = false
+            reload(forceCLI: true)
         }
     }
 
@@ -307,7 +337,7 @@ final class AppModel {
                 guard let server = try MCPScanner.read(agent, env: .live).first(where: { $0.name == row.name }),
                       !server.isProtected else { throw MCPScanner.ReadFailure("MCPサーバーが見つからないか保護されています") }
                 try await MCPPin.pin(server, in: [agent], env: .live)
-                reload()
+                reload(forceCLI: true)
             } catch {
                 errorMessage = "\(error)"
             }
@@ -316,15 +346,14 @@ final class AppModel {
 
     /// 上流が方針転換した時に更新を止める（7.4）。
     func togglePin(_ row: ResourceRow) {
-        guard var entry = inventory.registry.entry(named: row.name, kind: row.kind) else { return }
-        entry.pinned.toggle()
-        do {
+        let (name, kind) = (row.name, row.kind)
+        // 行の情報ではなく registry を読み直す（`pin` と同じ理由）。
+        mutate {
             var registry = try Registry.read(env: .live)
+            guard var entry = registry.entry(named: name, kind: kind) else { return }
+            entry.pinned.toggle()
             registry.upsert(entry)
             try registry.save(env: .live)
-            reload()
-        } catch {
-            errorMessage = "\(error)"
         }
     }
 
@@ -367,7 +396,7 @@ final class AppModel {
             var registry = try Registry.read(env: .live)
             registry.update(agent, change)
             try registry.save(env: .live)
-            reload()
+            reload(forceCLI: true)      // 検出のやり直しを間隔で待たせない
         } catch { errorMessage = "\(error)" }
     }
 
@@ -377,10 +406,17 @@ final class AppModel {
         let definitions = inventory.mcpServers
         Task {
             let snapshot = await Task.detached { ProcessScanner.snapshot(env: .live) }.value
+            // **エージェントごとに 1 回だけ突き合わせる。** 行ごとに呼ぶと
+            // 行数 × サーバー数 × プロセス数 になる（実測 1155 プロセス・3 秒ごと）。
+            let live = await Task.detached {
+                definitions.mapValues { ProcessScanner.running($0, in: snapshot) }
+            }.value
             for index in inventory.rows.indices {
-                guard let owner = inventory.rows[index].ownerAgent, inventory.rows[index].kind == .mcp else { continue }
-                let live = ProcessScanner.running(definitions[owner] ?? [], in: snapshot)
-                let match = live[inventory.rows[index].name]
+                guard let owner = inventory.rows[index].ownerAgent,
+                      inventory.rows[index].kind == .mcp else { continue }
+                let match = live[owner]?[inventory.rows[index].name]
+                // 所属を辿れなかったものは出さない。**間違った持ち主を名乗るのは
+                // 分からないより悪い**（DESIGN.md 3.9）。
                 inventory.rows[index].running = match?.owner == owner ? match : nil
             }
             isRefreshingActivity = false
@@ -398,13 +434,13 @@ final class AppModel {
                     return nil
                 } catch { return "\(error)" }
             }.value
-            errorMessage = failure
+            if let failure { errorMessage = failure }
             isMutating = false
-            reload()
+            reload(forceCLI: true)
         }
     }
 
-    private nonisolated static func loadOffMain() async -> Inventory {
-        await Task.detached { Inventory.load(env: .live) }.value
+    private nonisolated static func loadOffMain(forceCLI: Bool) async -> Inventory {
+        await Task.detached { Inventory.load(env: .live, forceCLI: forceCLI) }.value
     }
 }

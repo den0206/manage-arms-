@@ -188,7 +188,9 @@ struct ContentView: View {
             .disabled(model.isChecking)
         }
         ToolbarItem(placement: .primaryAction) {
-            Button { model.reload() } label: {
+            // 明示的な再読み込みは CLI の間引き（DESIGN.md 3.5）も飛ばす。
+            // 押したのに変わらないなら、このボタンは何のためにあるのか分からない。
+            Button { model.reload(forceCLI: true) } label: {
                 Image(systemName: "arrow.clockwise")
                     .symbolEffect(.rotate, isActive: model.isLoading && !Motion.reduced)
             }

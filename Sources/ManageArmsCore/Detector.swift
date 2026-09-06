@@ -86,3 +86,114 @@ public enum Detector {
         return nil
     }
 }
+
+/// CLI 呼び出しの間引き。DESIGN.md 3.5。
+///
+/// ファイル走査はアクティブ化のたびに走らせてよいが、**CLI は node 起動を伴い秒単位**。
+/// 1 回の `Inventory.load` は `which` × 3・`--version` × 3・`codex mcp list --json`・
+/// `claude/codex plugin list --json` で **10 プロセス**を起こす。これが
+/// `didBecomeActive` のたびに走ると、アプリに戻るだけで数秒固まる。
+///
+/// **不変条件5「キャッシュしない」の例外はここだけ。** 3.5 が
+/// 「CLI 呼び出しは前回から一定間隔（数分）空いた時だけ再実行する」と定めており、
+/// これはその実装。ファイル由来の結果は 1 つも持たない — 抱えるのは
+/// CLI に訊かないと分からないことだけで、ウィンドウを閉じたら捨てる
+/// （`AppModel.releaseForBackground` が `clear()` を呼ぶ）。
+public enum CLIScan {
+
+    /// 再実行までの間隔。DESIGN.md 3.5 の「数分」。
+    public static let interval: TimeInterval = 180
+
+    /// CLI に訊かないと分からないものだけ。ファイル由来の結果は入れない。
+    public struct Snapshot: Sendable {
+        public var at: Date
+        public var agents: [Agent: Detection]
+        /// `Agent.mcpSource` が `.cli` のエージェントの分だけ。
+        public var mcp: [Agent: [MCPServer]]
+        public var plugins: [InstalledPlugin]
+        public var issues: [String]
+        /// 取り直しの要否を決める入力。**これが変わったら間隔を待たない** —
+        /// 管理対象の切り替えや CLI パスの手動指定は、押した直後に効かないと
+        /// 「設定したのに変わらない」に見える。
+        var key: Key
+    }
+
+    /// 走査結果が依存する入力。**`home` を含めるのが要**（10.3）—
+    /// テストは偽のホームごとに別の結果を見る必要があり、
+    /// ここを落とすと 1 つのテストの結果が別のテストに漏れる。
+    struct Key: Hashable, Sendable {
+        let home: String
+        let enabled: Set<Agent>
+        let overrides: [Agent: String]
+
+        init(env: Environment, registry: Registry) {
+            home = env.home.standardized.path(percentEncoded: false)
+            enabled = Set(Agent.allCases.filter { registry.setting($0).enabled })
+            overrides = registry.cliOverrides
+        }
+    }
+
+    /// **1 枠ではなく key ごとに持つ。** 実利用ではホームが 1 つなので実質 1 件だが、
+    /// 1 枠だと偽ホームを使う並列テストが互いの結果を追い出し合う（10.3）。
+    private final class Store: @unchecked Sendable {
+        /// 上限。ここに載るのは小さな構造体だけで、超えたら古い方から捨てる。
+        static let capacity = 64
+
+        private let lock = NSLock()
+        private var snapshots: [Key: Snapshot] = [:]
+
+        func value(_ key: Key) -> Snapshot? { lock.withLock { snapshots[key] } }
+
+        func set(_ snapshot: Snapshot) {
+            lock.withLock {
+                snapshots[snapshot.key] = snapshot
+                guard snapshots.count > Self.capacity else { return }
+                let oldest = snapshots.min { $0.value.at < $1.value.at }?.key
+                oldest.map { snapshots.removeValue(forKey: $0) }
+            }
+        }
+
+        func clear() { lock.withLock { snapshots.removeAll() } }
+    }
+
+    private static let store = Store()
+
+    /// 前回から `interval` 以内で設定も変わっていなければ、そのまま返す。
+    /// `force` は明示的な再読み込みと、こちらが設定を書き換えた直後に使う。
+    public static func snapshot(env: Environment, registry: Registry,
+                                force: Bool = false) -> Snapshot {
+        let key = Key(env: env, registry: registry)
+        if !force, let cached = store.value(key),
+           env.now().timeIntervalSince(cached.at) < interval {
+            return cached
+        }
+        let fresh = scan(env: env, registry: registry, key: key)
+        store.set(fresh)
+        return fresh
+    }
+
+    /// ウィンドウを閉じたら捨てる（3.5 / 9 章）。次に開いたときは取り直す。
+    public static func clear() { store.clear() }
+
+    private static func scan(env: Environment, registry: Registry, key: Key) -> Snapshot {
+        var agents = Detector.detectAll(env: env, overrides: key.overrides)
+        for agent in Agent.allCases where !key.enabled.contains(agent) {
+            agents[agent] = .disabled
+        }
+        var mcp: [Agent: [MCPServer]] = [:]
+        var plugins: [InstalledPlugin] = []
+        var issues: [String] = []
+        for agent in Agent.allCases where agents[agent]?.isActive == true {
+            if case .cli = agent.mcpSource {
+                do { mcp[agent] = try MCPScanner.read(agent, env: env) }
+                catch { issues.append("\(agent.displayName) MCP: \(error)") }
+            }
+            if agent == .claude || agent == .codex {
+                do { plugins += try PluginScanner.read(agent, env: env) }
+                catch { issues.append("\(agent.displayName) Plugins: \(error)") }
+            }
+        }
+        return Snapshot(at: env.now(), agents: agents, mcp: mcp,
+                        plugins: plugins, issues: issues, key: key)
+    }
+}

@@ -376,27 +376,31 @@ public struct Inventory: Sendable {
         }
     }
 
-    /// 読み取りだけで組み立てる。キャッシュしない（DESIGN.md 3.5）。
-    public static func load(env: Environment) -> Inventory {
+    /// 読み取りだけで組み立てる。**ファイル走査はキャッシュしない**（DESIGN.md 3.5）。
+    ///
+    /// CLI 由来の結果だけは `CLIScan` が数分だけ持つ（3.5 が明示的に求めている間引き）。
+    /// `forceCLI` は明示的な再読み込みと、こちらが設定を書き換えた直後に立てる —
+    /// 押した操作が反映されないのは、待たされるより悪い。
+    public static func load(env: Environment, forceCLI: Bool = false) -> Inventory {
         let registry = Registry.load(env: env)
         // 手動指定のパスと有効/無効は registry.json が持つ（3.7）。
         // 無効にしたエージェントは走査そのものをしない。
-        var agents = Detector.detectAll(env: env, overrides: registry.cliOverrides)
-        for agent in Agent.allCases where !registry.setting(agent).enabled {
-            agents[agent] = .disabled
-        }
+        let cli = CLIScan.snapshot(env: env, registry: registry, force: forceCLI)
+        let agents = cli.agents
         let used = registry.usage.lastUsed
         let projects = ProjectScan.load(env: env, registry: registry)
-        var issues: [String] = []
+        var issues = cli.issues
         do { try Registry.assertReadable(env: env) } catch { issues.append("Registry: \(error)") }
         var servers: [Agent: [MCPServer]] = [:]
-        var plugins: [InstalledPlugin] = []
+        let plugins = cli.plugins
         for agent in Agent.allCases where agents[agent]?.isActive == true {
-            do { servers[agent] = try MCPScanner.read(agent, env: env) }
-            catch { issues.append("\(agent.displayName) MCP: \(error)") }
-            if agent == .claude || agent == .codex {
-                do { plugins += try PluginScanner.read(agent, env: env) }
-                catch { issues.append("\(agent.displayName) Plugins: \(error)") }
+            // 設定ファイル直読みは毎回やる。**アプリ自身が `~/.cursor/mcp.json` を書く**ので、
+            // ここを間引くと自分の書き込みが数分反映されない（3.1 / 不変条件5）。
+            if case .cli = agent.mcpSource {
+                servers[agent] = cli.mcp[agent] ?? []
+            } else {
+                do { servers[agent] = try MCPScanner.read(agent, env: env) }
+                catch { issues.append("\(agent.displayName) MCP: \(error)") }
             }
         }
         let rows = skillRows(env: env, agents: agents, registry: registry, projects: projects)
