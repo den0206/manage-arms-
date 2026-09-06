@@ -7,7 +7,7 @@ AI コーディングエージェント（Claude Code / Cursor / Codex / Gemini 
 - **プラットフォーム**: macOS 26 以降 / SwiftUI
 - **配布**: DMG の直配布（App Sandbox 非対応のため App Store 不可）。13 章
 - **状態**: **v1〜v4 実装済み**（Skills / Subagents / Plugins / 使用実績 / MCP / 権限）、
-  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト 292 件
+  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト 297 件
 - **実装**: SPM パッケージ。`swift test` / `CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh`
   （`.xcodeproj` は不要。実 CLI・実ネットワークを使う確認は `MANUAL=1 swift test`）
 - **作業の進め方**: [CLAUDE.md](CLAUDE.md)。利用者向けの入口は [README.md](README.md)
@@ -668,6 +668,7 @@ Cursor は使っているかもしれず、こちらに見えていないだけ�
 |---|---|
 | `{"mcpServers": {...}}` | MCP。公式サイトの JSON をそのままコピペできる（最頻の導線） |
 | `https://github.com/owner/repo/tree/main/skills/foo` | `repo` / `branch` / `subdir` に分解して zip 取得 → 中身で種別判定 |
+| `https://skills.sh/owner/repo/skill` | カタログページ。`owner/repo` だけ採る（下記） |
 | `npx -y foo-mcp` などのコマンド行 | MCP のコマンドとして解釈 |
 
 種別判定は取得した中身を見る: `SKILL.md` があれば Skill、
@@ -679,6 +680,12 @@ Cursor は使っているかもしれず、こちらに見えていないだけ�
 （vercel-labs/skills）だけでなく `skills/<category>/<name>`（mattpocock/skills）もあるので
 **3 段までたどる**。Subagent の判定は指されたディレクトリ直下だけで行う —
 下層の `.md` まで frontmatter を読むと、ただの文書が候補に混ざる。
+
+skills.sh のようなカタログは配布元ではない。実体は GitHub にあるので `owner/repo` に翻訳する。
+`skills.sh/<owner>/<repo>/<skill>` の 3 番目は**ディレクトリ名であってパスではない**
+（`grilling` の実体は `skills/productivity/grilling`）ため subdir にはできず、
+候補一覧の初期絞り込みにだけ使う。ページの HTML から GitHub リンクを拾う方法は採らない —
+ページ構造の変更で静かに壊れるうえ、取得物の中身以外から推測しない方針に反する。
 
 **自動では入れない。** README からのコマンド抽出は必ず外すため、勝手にインストールすると
 初心者ほど詰む。

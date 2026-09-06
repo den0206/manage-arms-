@@ -12,6 +12,7 @@ final class AddModel {
     var agent: Agent = .claude
     var name = ""
     var marketplace = ""
+    var filter = ""
     private(set) var staged: Staging?
     private(set) var isBusy = false
     private var generation = UUID()
@@ -25,10 +26,20 @@ final class AddModel {
     }
     var servers: [MCPServer] { (try? PasteInput.mcpServers(text, name: name)) ?? [] }
 
+    /// 一致が無ければ全件返す。絞り込みで行き止まりにしない。
+    func visible(_ candidates: [Candidate]) -> [Candidate] {
+        let query = filter.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return candidates }
+        let hit = candidates.filter { $0.name.lowercased().contains(query) }
+        return hit.isEmpty ? candidates : hit
+    }
+
     func syncFields() {
         discard()
         if case .github(let s) = interpretation {
             repo = s.repo; branch = s.branch ?? ""; subdir = s.subdir ?? ""
+            // カタログ URL のスキル名は subdir にできないので、候補一覧の初期絞り込みに使う。
+            filter = GitHubURL.skillHint(text) ?? ""
         } else if case .mcpJSON = interpretation { kind = .mcp }
         else if case .command = interpretation { kind = .mcp }
     }
@@ -126,7 +137,11 @@ struct AddSheet: View {
                             }.textFieldStyle(.roundedBorder)
                         }
                         if let staged = add.staged {
-                            ForEach(Array(staged.candidates.enumerated()), id: \.offset) { _, candidate in
+                            if staged.candidates.count > 1 {
+                                TextField("候補を絞り込む", text: $add.filter)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+                            ForEach(Array(add.visible(staged.candidates).enumerated()), id: \.offset) { _, candidate in
                                 HStack {
                                     VStack(alignment: .leading) {
                                         Text(candidate.name).font(.headline)
@@ -147,6 +162,9 @@ struct AddSheet: View {
                                     }
                                 }.padding(10).background(.quinary, in: RoundedRectangle(cornerRadius: 8))
                             }
+                        } else if !add.text.isEmpty && add.source == nil {
+                            Text("このURLからは取得元を決められません。配布元のGitHubのURLを貼り付けてください。")
+                                .font(.caption).foregroundStyle(.orange)
                         } else {
                             Text("GitHubのURLを貼り付けて「内容を確認」を押してください。")
                                 .font(.caption).foregroundStyle(.secondary)

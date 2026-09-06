@@ -206,6 +206,8 @@
 "取得元の詳細" = "Source details";
 "Pluginとして追加…" = "Add as a plugin…";
 "GitHubのURLを貼り付けて「内容を確認」を押してください。" = "Paste a GitHub URL and select Review contents.";
+"このURLからは取得元を決められません。配布元のGitHubのURLを貼り付けてください。" = "This URL does not identify a source. Paste the GitHub URL it is published from.";
+"候補を絞り込む" = "Filter candidates";
 "追加先" = "Destination";
 "適用範囲：選択したエージェントのユーザー全体" = "Scope: user-wide for the selected agent";
 "外部サービスやローカルツールへの接続を追加します。" = "Connect external services or local tools.";

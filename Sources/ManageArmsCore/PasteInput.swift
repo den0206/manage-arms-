@@ -105,7 +105,10 @@ public enum GitHubURL {
     ///   .../tree/main                               (ブランチのみ)
     ///   .../tree/main/skills/foo                    (サブディレクトリ)
     ///   .../blob/main/skills/foo/SKILL.md           (ファイル指定 → 親を採る)
+    ///   https://skills.sh/owner/repo/skill           (カタログ → owner/repo を採る)
     public static func parse(_ raw: String) -> GitHubSource? {
+        if let catalog = catalog(raw) { return catalog.source }
+
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.hasPrefix("github.com/") || text.hasPrefix("www.github.com/") {
             text = "https://" + text
@@ -145,4 +148,31 @@ public enum GitHubURL {
             branchAmbiguous: !parts.isEmpty
         )
     }
+
+    /// skills.sh のようなカタログページ。配布しているのは GitHub なので owner/repo を採る。
+    ///
+    /// `skills.sh/<owner>/<repo>/<skill>` の 3 番目は**ディレクトリ名であってパスではない**
+    /// （`grilling` の実体は `skills/productivity/grilling`）ので subdir にはできない。
+    /// 取得後の候補一覧を絞り込むヒントとしてだけ返す。
+    /// ページの HTML から GitHub リンクを拾う方法は採らない — ページ構造の変更で
+    /// 静かに壊れるうえ、取得物の中身以外から推測しない方針（6 章）に反する。
+    static func catalog(_ raw: String) -> (source: GitHubSource, skill: String?)? {
+        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.hasPrefix("skills.sh/") || text.hasPrefix("www.skills.sh/") {
+            text = "https://" + text
+        }
+        guard let url = URL(string: text),
+              let host = url.host()?.lowercased(),
+              host == "skills.sh" || host == "www.skills.sh",
+              url.scheme == "https" || url.scheme == "http"
+        else { return nil }
+
+        let parts = url.path().split(separator: "/").map(String.init)
+        guard parts.count >= 2, !parts[0].isEmpty, !parts[1].isEmpty else { return nil }
+        return (GitHubSource(repo: "\(parts[0])/\(parts[1])"),
+                parts.count >= 3 ? parts[2] : nil)
+    }
+
+    /// カタログ URL に含まれるスキル名。候補一覧の初期絞り込みに使う。
+    public static func skillHint(_ raw: String) -> String? { catalog(raw)?.skill }
 }

@@ -68,10 +68,33 @@ struct GitHubURLTests {
         #expect(GitHubURL.parse("https://github.com/o/r/tree/main")?.branchAmbiguous == false)
     }
 
+    /// skills.sh はカタログであって配布元ではない。owner/repo だけ採る。
+    @Test("skills.sh のカタログ URL は owner/repo に翻訳する")
+    func catalogURL() {
+        #expect(GitHubURL.parse("https://www.skills.sh/mattpocock/skills/grilling")
+                == GitHubSource(repo: "mattpocock/skills"))
+        #expect(GitHubURL.parse("https://skills.sh/mattpocock/skills")
+                == GitHubSource(repo: "mattpocock/skills"))
+        #expect(GitHubURL.parse("skills.sh/mattpocock/skills/grilling")
+                == GitHubSource(repo: "mattpocock/skills"))
+    }
+
+    /// 3 番目のセグメントはディレクトリ名であってパスではない
+    /// （実体は skills/productivity/grilling）。subdir にはせず絞り込みに使う。
+    @Test("カタログ URL のスキル名は subdir にせずヒントとして返す")
+    func catalogSkillHint() {
+        #expect(GitHubURL.parse("https://www.skills.sh/mattpocock/skills/grilling")?.subdir == nil)
+        #expect(GitHubURL.skillHint("https://www.skills.sh/mattpocock/skills/grilling")
+                == "grilling")
+        #expect(GitHubURL.skillHint("https://www.skills.sh/mattpocock/skills") == nil)
+        #expect(GitHubURL.skillHint("https://github.com/o/r/tree/main/skills/foo") == nil)
+    }
+
     @Test("GitHub 以外は受けない", arguments: [
         "https://gitlab.com/o/r", "https://example.com/o/r",
         "https://github.com/onlyowner", "https://github.com/", "not a url",
         "ftp://github.com/o/r", "https://github.com.evil.com/o/r",
+        "https://skills.sh/onlyowner", "https://skills.sh.evil.com/o/r",
     ])
     func rejects(_ input: String) {
         #expect(GitHubURL.parse(input) == nil)

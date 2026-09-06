@@ -12,6 +12,11 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 
 ### Added
 
+- Catalog URLs such as `skills.sh/<owner>/<repo>/<skill>` are accepted in the Add sheet and
+  resolved to the GitHub repository they are published from. The skill name in the URL is a
+  directory name rather than a path, so it pre-fills the candidate filter instead of being
+  used as a subdirectory.
+- A filter field over the candidate list when a fetched repository offers more than one item.
 - Per-agent switches on Home: turn an agent off to drop it from the sidebar and stop scanning its
   MCP servers and plugins. Nothing on disk is touched — the switch only changes what manage-arms
   looks at.
@@ -108,6 +113,8 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
   repository carrying `.claude-plugin/plugin.json` stopped the search entirely — its skills are
   now listed alongside the plugin. Subagent detection still looks only at the directory you
   pointed at.
+- The Add sheet now explains why a pasted URL was rejected instead of leaving the button disabled
+  with no reason.
 - Keep same-named resources separate by kind and MCP/plugin registrations separate by agent;
   pin MCP versions only for the selected agent and preserve unrelated Cursor settings.
 - Refuse malformed configuration overwrites and protect bundled paths and links from deletion.
