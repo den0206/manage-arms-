@@ -36,9 +36,13 @@ public enum PermissionScanner {
     static let fileNames = ["settings.json", "settings.local.json"]
 
     public static func scan(env: Environment) -> [PermissionEntry] {
+        scan(projects: ProjectScan.projectPaths(in: env), env: env)
+    }
+
+    public static func scan(projects: [String], env: Environment) -> [PermissionEntry] {
         var found = read(file: env.home.appending(path: ".claude/settings.json"),
                          project: nil, env: env)
-        for path in Source.projectPaths(in: env) {
+        for path in projects {
             for name in fileNames {
                 found += read(file: URL(filePath: path).appending(path: ".claude/\(name)"),
                               project: path, env: env)

@@ -68,7 +68,9 @@ final class AppModel {
             let loaded = await Self.loadOffMain()
             inventory = loaded
             refreshActivity()
-            permissions = await Task.detached { PermissionScanner.scan(env: .live) }.value
+            permissions = await Task.detached {
+                PermissionScanner.scan(projects: loaded.projectScan.projects, env: .live)
+            }.value
             duplicateCounts = PermissionScanner.duplicates(permissions)
                 .mapValues(\.count)
             isLoading = false
@@ -94,13 +96,7 @@ final class AppModel {
     func toggle(_ row: ResourceRow) {
         guard row.isManaged, !isChecking, !isAnalyzing else { return }
         do {
-            var registry = try Registry.read(env: .live)
-            switch (row.kind, row.isDisabled) {
-            case (.subagent, true):  try SubagentManager.enable(row.name, env: .live, registry: &registry)
-            case (.subagent, false): try SubagentManager.disable(row.name, env: .live, registry: &registry)
-            case (_, true):          try SkillManager.enable(row.name, env: .live, registry: &registry)
-            case (_, false):         try SkillManager.disable(row.name, env: .live, registry: &registry)
-            }
+            try Inventory.toggle(row, env: .live)
             reload()
         } catch {
             // 握り潰さず UI に出す。
@@ -116,18 +112,8 @@ final class AppModel {
         guard !targets.isEmpty, !isCleaning else { return }
         isCleaning = true
         Task {
-            let failures = await Task.detached { () -> [String] in
-                targets.compactMap { item in
-                    // 書き込みは CLI に委譲する（3.1）。cd が要るので sh 経由で渡す。
-                    do {
-                        if item.kind == .plugin {
-                            try PluginManager.remove(item.name, from: .claude, project: item.project, env: .live)
-                        } else if item.kind == .mcp {
-                            try MCPManager.removeProject(item.name, project: item.project, env: .live)
-                        }
-                        return nil
-                    } catch { return "\(item.name): \(error)" }
-                }
+            let failures = await Task.detached {
+                Inventory.runCleanup(targets, env: .live)
             }.value
             if !failures.isEmpty { errorMessage = failures.joined(separator: "\n") }
             isCleaning = false
@@ -141,12 +127,7 @@ final class AppModel {
     func remove(_ row: ResourceRow) {
         guard row.isManaged, !isChecking, !isAnalyzing else { return }
         do {
-            var registry = try Registry.read(env: .live)
-            if row.kind == .subagent {
-                try SubagentManager.remove(row.name, env: .live, registry: &registry)
-            } else {
-                try SkillManager.remove(row.name, env: .live, registry: &registry)
-            }
+            try Inventory.remove(row, env: .live)
             reload()
         } catch {
             errorMessage = "\(error)"
@@ -319,18 +300,8 @@ final class AppModel {
         Task {
             let failure = await Task.detached { () -> String? in
                 do {
-                    if let file {
-                        try SkillManager.removeExisting(file, kind: row.kind, project: project, env: .live)
-                    } else if row.kind == .plugin {
-                        try PluginManager.remove(row.name, from: agent, project: project, env: .live)
-                    } else if row.kind == .mcp {
-                        if let project {
-                            guard agent == .claude else { throw MCPScanner.ReadFailure("このプロジェクト範囲には対応していません") }
-                            try MCPManager.removeProject(row.name, project: project, env: .live)
-                        } else {
-                            try MCPManager.remove(row.name, from: agent, env: .live)
-                        }
-                    }
+                    try Inventory.removeExisting(row, agent: agent, project: project,
+                                                 file: file, env: .live)
                     return nil
                 } catch { return "\(error)" }
             }.value

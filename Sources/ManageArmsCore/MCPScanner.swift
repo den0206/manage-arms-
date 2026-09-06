@@ -67,8 +67,12 @@ public enum MCPScanner {
     /// 取り違えるとユーザー全体の同名サーバーを消す。
     /// 承認済みか（`enabledMcpjsonServers`）までは見ない。登録の有無だけを出す。
     public static func byProject(env: Environment) -> [String: [String: String]] {
+        byProject(projects: ProjectScan.projectPaths(in: env), env: env)
+    }
+
+    static func byProject(projects: [String], env: Environment) -> [String: [String: String]] {
         var out: [String: [String: String]] = [:]
-        for path in Source.projectPaths(in: env) {
+        for path in projects {
             for name in fromJSON(URL(filePath: path).appending(path: ".mcp.json"),
                                  key: "mcpServers").map(\.name) {
                 out[path, default: [:]][name] = "project"

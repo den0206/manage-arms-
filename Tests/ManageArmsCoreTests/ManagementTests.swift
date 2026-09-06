@@ -110,7 +110,12 @@ struct ManagementTests {
         #expect(throws: (any Error).self) { try WriteGuard.assertUserArtifact(env.home.appending(path: ".codex/skills"), kind: .skill, env: env) }
         let personal = env.home.appending(path: ".codex/skills/personal")
         try WriteGuard.assertUserArtifact(personal, kind: .skill, env: env)
-        let trashed = try SkillManager.removeExisting(personal, kind: .skill, env: env)
+        let row = ResourceRow(name: "personal", kind: .skill, summary: nil, detail: "",
+                              state: [:], origin: .user, isDisabled: false,
+                              roots: [".codex/skills"])
+        #expect(row.removableFiles(agent: .codex, env: env) == [personal])
+        let trashed = try Inventory.removeExisting(row, agent: .codex, project: nil,
+                                                   file: personal, env: env)
         defer { if let trashed { try? FileManager.default.removeItem(at: trashed) } }
         #expect(!FileManager.default.fileExists(atPath: personal.path))
         #expect(FileManager.default.fileExists(atPath: builtin.appending(path: "SKILL.md").path))
@@ -206,6 +211,6 @@ struct ManagementTests {
         var registry = Registry()
         registry.projects = [env.home.appending(path: "project").path]
         try registry.save(env: env)
-        #expect(Source.projectPaths(in: env) == registry.projects)
+        #expect(ProjectScan.projectPaths(in: env) == registry.projects)
     }
 }

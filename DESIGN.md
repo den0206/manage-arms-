@@ -562,7 +562,7 @@ struct Resource {
 | Plugins | `installed_plugins.json` scope: `user` | — | scope: `local` + `projectPath` |
 | Permissions | `~/.claude/settings.json` | `<proj>/.claude/settings.json` | `settings.local.json`（実際はここに集中） |
 
-**プロジェクトの一覧は `~/.claude.json` の `projects` キーから取る**（`Source.projectPaths`）。
+**プロジェクトの一覧は `~/.claude.json` の `projects` キーから取る**（`ProjectScan.projectPaths`）。
 パスが動的で静的列挙にできない、3.4 の唯一の例外。読むのは各プロジェクトの
 `.claude/skills` / `.claude/agents` / `.mcp.json` / `.claude/settings*.json` **だけ**で、
 `~/.claude/projects/`（140 MB のセッションログ）とは別物。
@@ -573,7 +573,7 @@ Claude Code はプロジェクト直下だけでなく、作業ディレクト�
 `.claude/skills` も読む（monorepo のパッケージが自前のスキルを持てる）。
 直下しか見ないと、その分が画面から完全に消える。
 
-3.4 のホワイトリストを広げるので、上限を固定で持つ（`Source.projectSkillRoots`）:
+3.4 のホワイトリストを広げるので、上限を固定で持つ（`ProjectScan.skillRoots`）:
 **プロジェクト直下から 3 段まで**、隠しディレクトリと依存物の置き場
 （`node_modules` / `Pods` / `vendor` / `target` / `dist` / `build` / `out`）には降りない。
 途中で読むのはディレクトリ名だけで、`.claude/skills` 以外は一切開かない。
@@ -1483,7 +1483,7 @@ Hooks / Commands / Rules は対象外に決まった（1 章）ため、v4 は�
 | 常時非活性のスコープセレクタが「壊れている」ように見える | v1 で選べない以上、出さない（5.2） |
 | `isManaged` で畳んだら、**ユーザーが自分で入れた `ponytail@ponytail` が「ほかのツールが入れたもの」に埋もれた** | 畳む基準を「自分で入れたか」に変えた（`ResourceRow.Origin`） |
 | リンク切れの `codiff` がどのエージェントの画面にも出なくなった（`state` が全部 `absent` のため） | `ResourceRow.roots` で置き場から拾い、`isUnusable` として警告付きで出す |
-| **プロジェクト配下を走査しておらず、4 プロジェクト 15 件のスキルと project スコープの MCP が 1 件も出ていなかった** | `ProjectScan`（`Source.projectPaths` 経由）。行が無いものは作る |
+| **プロジェクト配下を走査しておらず、4 プロジェクト 15 件のスキルと project スコープの MCP が 1 件も出ていなかった** | `ProjectScan.projectPaths` 経由。行が無いものは作る |
 | ユーザー全体とプロジェクトを 1 つの表に混ぜ、行のバッジで区別させたら読めなかった。縦に積み直しても長すぎた | スコープをタブにして、同時に見せる表を 1 つにした（`Inventory.scoped(for:)`） |
 | 自分で入れたスキルが「表示だけ」で、切り替えも削除もできないまま | 既知の配置ルート直下のものは 1 件ずつゴミ箱へ移せる（`SkillManager.removeExisting`、15 章） |
 | プロジェクトの分を消すコマンドが既定スコープ（`-s user`）のままで、**ユーザー全体を消す**ものになっていた | スコープと `cd` をコマンドに焼き込む（`ResourceRow.removalCommand`） |
@@ -1702,7 +1702,7 @@ DMG を開いてそのまま起動されることが実際に起きる。その�
   毎回行わない。常駐しない。表示は「起動検出／起動未確認」で、HTTP接続や不明な所属を
   「停止」と断定しない。MCPの実際の呼び出し開始・終了イベントの検知は未実装。
 - プロジェクト設定の走査対象は `~/.claude.json` の `projects` キーだけから採る
-  （`Source.projectPaths`）。ホーム全体を再帰走査しない。**手で足す導線は置かない** —
+  （`ProjectScan.projectPaths`）。ホーム全体を再帰走査しない。**手で足す導線は置かない** —
   Claude で一度でも開いたフォルダは自動で載るため、実測 19 件をすべて拾えており、
   ボタンは一度も使われないまま「足せるのに外せない設定」になっていた。
   `Registry.projects` は既に値がある人のために読み取りだけ残す。

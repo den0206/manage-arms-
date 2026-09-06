@@ -417,7 +417,7 @@ struct ProjectScopeTests {
             .appending(path: "manage-arms-noproj-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         let env = Environment.test(home: home)
-        #expect(Source.projectPaths(in: env).isEmpty)
+        #expect(ProjectScan.projectPaths(in: env).isEmpty)
         #expect(ProjectScan.load(env: env).paths("x", kind: .skill).isEmpty)
     }
 }

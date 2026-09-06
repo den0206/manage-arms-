@@ -139,7 +139,7 @@ public struct ResourceRow: Identifiable, Sendable {
             if let project {
                 // `apps/web:deploy` はサブディレクトリの `.claude/skills` に居る。
                 // 素で埋めると存在しないパスを消せと言うことになる。
-                let (sub, leaf) = Source.splitQualified(name)
+                let (sub, leaf) = ProjectScan.splitQualified(name)
                 let base = sub.isEmpty ? project : "\(project)/\(sub)"
                 return "rm -rf \(Self.quote("\(base)/.claude/\(dir)/\(leaf)\(suffix)"))"
             }
@@ -180,6 +180,26 @@ public struct ResourceRow: Identifiable, Sendable {
         case .plugin: true
         case .mcp:    mcpScope == "local"      // project スコープは <proj>/.mcp.json の中
         case .skill, .subagent: false          // リポジトリの中のファイル
+        }
+    }
+
+    /// UI にファイル配置と安全判定を再実装させない。
+    public func removableFiles(agent: Agent, project: String? = nil,
+                               env: Environment) -> [URL] {
+        guard kind == .skill || kind == .subagent else { return [] }
+        let suffix = kind == .subagent ? ".md" : ""
+        let (subdir, leaf) = ProjectScan.splitQualified(name)
+        let candidates: [URL]
+        if let project {
+            let dir = kind == .skill ? ".claude/skills" : ".claude/agents"
+            candidates = [URL(filePath: project)
+                .appending(path: subdir.isEmpty ? dir : "\(subdir)/\(dir)")]
+        } else {
+            let allowed = kind == .skill ? agent.skillRoots : agent.subagentRoots
+            candidates = roots.filter(allowed.contains).map { env.home.appending(path: $0) }
+        }
+        return candidates.map { $0.appending(path: leaf + suffix) }.filter {
+            (try? WriteGuard.assertUserArtifact($0, kind: kind, project: project, env: env)) != nil
         }
     }
 
@@ -262,6 +282,61 @@ public struct Inventory: Sendable {
         }
     }
 
+    public static func toggle(_ row: ResourceRow, env: Environment) throws {
+        var registry = try Registry.read(env: env)
+        switch (row.kind, row.isDisabled) {
+        case (.subagent, true):  try SubagentManager.enable(row.name, env: env, registry: &registry)
+        case (.subagent, false): try SubagentManager.disable(row.name, env: env, registry: &registry)
+        case (.skill, true):     try SkillManager.enable(row.name, env: env, registry: &registry)
+        case (.skill, false):    try SkillManager.disable(row.name, env: env, registry: &registry)
+        default:                 throw Installer.Failure.unsupportedKind(row.kind)
+        }
+    }
+
+    @discardableResult
+    public static func remove(_ row: ResourceRow, env: Environment) throws -> URL? {
+        var registry = try Registry.read(env: env)
+        switch row.kind {
+        case .subagent: return try SubagentManager.remove(row.name, env: env, registry: &registry)
+        case .skill:    return try SkillManager.remove(row.name, env: env, registry: &registry)
+        default:        throw Installer.Failure.unsupportedKind(row.kind)
+        }
+    }
+
+    @discardableResult
+    public static func removeExisting(_ row: ResourceRow, agent: Agent, project: String?,
+                                      file: URL? = nil, env: Environment) throws -> URL? {
+        if let file {
+            return try SkillManager.removeExisting(file, kind: row.kind, project: project, env: env)
+        } else if row.kind == .plugin {
+            try PluginManager.remove(row.name, from: agent, project: project, env: env)
+        } else if row.kind == .mcp {
+            if let project {
+                guard agent == .claude else {
+                    throw MCPScanner.ReadFailure("このプロジェクト範囲には対応していません")
+                }
+                try MCPManager.removeProject(row.name, project: project, env: env)
+            } else {
+                try MCPManager.remove(row.name, from: agent, env: env)
+            }
+        }
+        return nil
+    }
+
+    public static func runCleanup(_ items: [CleanupItem], env: Environment) -> [String] {
+        items.filter(\.executable).compactMap { item in
+            do {
+                if item.kind == .plugin {
+                    try PluginManager.remove(item.name, from: .claude,
+                                             project: item.project, env: env)
+                } else if item.kind == .mcp {
+                    try MCPManager.removeProject(item.name, project: item.project, env: env)
+                }
+                return nil
+            } catch { return "\(item.name): \(error)" }
+        }
+    }
+
     /// スコープごとに分ける（DESIGN.md 8 章）。
     ///
     /// **1 つの表にユーザー全体とプロジェクトを混ぜない。**
@@ -305,7 +380,7 @@ public struct Inventory: Sendable {
             agents[agent] = .disabled
         }
         let used = registry.usage.lastUsed
-        let projects = ProjectScan.load(env: env)
+        let projects = ProjectScan.load(env: env, registry: registry)
         var issues: [String] = []
         do { try Registry.assertReadable(env: env) } catch { issues.append("Registry: \(error)") }
         var servers: [Agent: [MCPServer]] = [:]
@@ -513,10 +588,12 @@ public struct Inventory: Sendable {
 /// プロジェクト単位に入っているもの（DESIGN.md 5.1 / 8 章）。
 ///
 /// **プロジェクトのパスは動的で `Source` の静的列挙に載らない**ので、
-/// `PermissionScanner` と同じ入り口（`Source.projectPaths`）を使い、
+/// project の列挙・Skill の探索・MCP scope をこの module に集約し、
 /// 各プロジェクトの `.claude/skills` / `.claude/agents` / `.mcp.json` **だけ**を読む。
 /// 読むのは frontmatter の 4 KB まで（9 章）。実測 19 プロジェクトで 15 スキル。
 public struct ProjectScan: Sendable {
+    /// `~/.claude.json` と既存 registry から得た、信頼するプロジェクト一覧。
+    public var projects: [String] = []
     /// 種別 → 名前 → プロジェクトの絶対パス。
     var byKind: [Kind: [String: [String]]] = [:]
     /// プロジェクトにしか無いものの説明。一覧に出すために持つ。
@@ -526,6 +603,61 @@ public struct ProjectScan: Sendable {
     var mcpScopes: [String: [String: String]] = [:]
 
     public init() {}
+
+    /// **静的列挙にできない唯一の例外。** `~/.claude.json` の `projects` と、
+    /// 旧版が registry に残したプロジェクトだけを使う（DESIGN.md 3.4 / 5.1 / 15）。
+    public static func projectPaths(in env: Environment) -> [String] {
+        projectPaths(in: env, registry: Registry.load(env: env))
+    }
+
+    static func projectPaths(in env: Environment, registry: Registry) -> [String] {
+        var paths = Set(registry.projects)
+        if let data = try? Data(contentsOf: env.home.appending(path: ".claude.json")),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let projects = object["projects"] as? [String: Any] {
+            paths.formUnion(projects.keys)
+        }
+        return paths.sorted()
+    }
+
+    /// プロジェクト直下から 3 段までの `.claude/skills` だけを読む。
+    /// ponytail: 深さ 3 + 固定の除外名。取りこぼす配置が出たら実測して見直す。
+    public static func skillRoots(_ project: String) -> [(prefix: String, url: URL)] {
+        var found: [(prefix: String, url: URL)] = []
+        walk(URL(filePath: project), prefix: "", depth: skillDepth, into: &found)
+        return found
+    }
+
+    /// `apps/web:deploy` → (`apps/web`, `deploy`)。修飾されていなければ左は空。
+    public static func splitQualified(_ name: String) -> (subdir: String, name: String) {
+        guard let i = name.lastIndex(of: ":") else { return ("", name) }
+        return (String(name[name.startIndex..<i]), String(name[name.index(after: i)...]))
+    }
+
+    static let skillDepth = 3
+    static let notWalked: Set<String> = ["node_modules", "Pods", "vendor", "target",
+                                         "dist", "build", "out"]
+
+    static func walk(_ dir: URL, prefix: String, depth: Int,
+                     into found: inout [(prefix: String, url: URL)]) {
+        let fm = FileManager.default
+        let skills = dir.appending(path: ".claude/skills")
+        var isDir: ObjCBool = false
+        if fm.fileExists(atPath: skills.path(percentEncoded: false), isDirectory: &isDir),
+           isDir.boolValue {
+            found.append((prefix, skills))
+        }
+        guard depth > 0 else { return }
+        let children = (try? fm.contentsOfDirectory(atPath: dir.path(percentEncoded: false)))?
+            .filter { !$0.hasPrefix(".") && !notWalked.contains($0) }.sorted() ?? []
+        for child in children {
+            let url = dir.appending(path: child)
+            guard fm.fileExists(atPath: url.path(percentEncoded: false), isDirectory: &isDir),
+                  isDir.boolValue else { continue }
+            walk(url, prefix: prefix.isEmpty ? child : "\(prefix)/\(child)",
+                 depth: depth - 1, into: &found)
+        }
+    }
 
     public func paths(_ name: String, kind: Kind) -> [String] {
         byKind[kind]?[name] ?? []
@@ -544,13 +676,18 @@ public struct ProjectScan: Sendable {
     }
 
     public static func load(env: Environment) -> ProjectScan {
+        load(env: env, registry: Registry.load(env: env))
+    }
+
+    static func load(env: Environment, registry: Registry) -> ProjectScan {
         var scan = ProjectScan()
-        let mcp = MCPScanner.byProject(env: env)
-        for path in Source.projectPaths(in: env) {
+        scan.projects = projectPaths(in: env, registry: registry)
+        let mcp = MCPScanner.byProject(projects: scan.projects, env: env)
+        for path in scan.projects {
             let root = URL(filePath: path)
-            // サブディレクトリの `.claude/skills` も読む（`Source.projectSkillRoots`）。
+            // サブディレクトリの `.claude/skills` も読む。
             var byName: [String: [(prefix: String, description: String?)]] = [:]
-            for (prefix, dir) in Source.projectSkillRoots(path) {
+            for (prefix, dir) in skillRoots(path) {
                 for skill in SkillScanner.scan(root: dir, rootLabel: path) where skill.isLoadable {
                     byName[skill.name, default: []].append((prefix, skill.description))
                 }

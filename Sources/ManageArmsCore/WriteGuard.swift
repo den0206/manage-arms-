@@ -81,13 +81,13 @@ public enum WriteGuard {
         try assertNotBundled(url, env: env)
         let roots: [URL]
         if let project {
-            guard Source.projectPaths(in: env).contains(project) else {
+            guard ProjectScan.projectPaths(in: env).contains(project) else {
                 throw Denial.outsideManagedRoots(url.path)
             }
             // 許可ルートは走査と同じ集合にする。ここだけルート直下に絞ると、
             // 一覧には出るのに削除だけ「保護対象」と嘘をつくことになる。
             roots = kind == .skill
-                ? Source.projectSkillRoots(project).map(\.url)
+                ? ProjectScan.skillRoots(project).map(\.url)
                 : [URL(filePath: project).appending(path: ".claude/agents")]
         } else {
             let labels = kind == .skill ? Agent.allCases.flatMap(\.skillRoots) : Agent.allCases.flatMap(\.subagentRoots)
