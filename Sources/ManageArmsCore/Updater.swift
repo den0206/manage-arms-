@@ -28,9 +28,12 @@ public enum Updater {
         case candidateMissing(String)
         public var description: String {
             switch self {
-            case .notManaged(let n):       "\(n) は取得元が分からないため更新できません"
-            case .pinned(let n):           "\(n) は固定中です"
-            case .candidateMissing(let n): "取得したアーカイブに \(n) が見つかりません"
+            case .notManaged(let n):
+                String(localized: "\(n) は取得元が分からないため更新できません")
+            case .pinned(let n):
+                String(localized: "\(n) は固定中です")
+            case .candidateMissing(let n):
+                String(localized: "取得したアーカイブに \(n) が見つかりません")
             }
         }
     }

@@ -7,16 +7,6 @@ public enum UpdateStatus: Equatable, Sendable {
     case available(sha: String)
     /// 上流が方針転換した時に固定する（7.4）。遅れていても更新しない。
     case pinned(behind: Bool)
-
-    public var label: String {
-        switch self {
-        case .unmanaged:            "—"
-        case .unknown:              "未確認"
-        case .upToDate:             "最新"
-        case .available:            "更新あり"
-        case .pinned(let behind):   behind ? "固定中（更新あり）" : "固定中"
-        }
-    }
 }
 
 /// DESIGN.md 7.3 — GitHub API は未認証で 60 リクエスト/時。素朴に作ると詰む。
@@ -116,10 +106,13 @@ public enum UpdateChecker {
         public var description: String {
             switch self {
             case .rateLimited:
-                "GitHub API のレート制限に達しました（未認証は 60 リクエスト/時）。時間をおいてください"
-            case .notFound(let key):    "\(key) が見つかりません。リポジトリ名かブランチ名を確認してください"
-            case .http(let code):       "GitHub API が HTTP \(code) を返しました"
-            case .malformedResponse:    "GitHub API の応答を解釈できませんでした"
+                String(localized: "GitHub API のレート制限に達しました（未認証は 60 リクエスト/時）。時間をおいてください")
+            case .notFound(let key):
+                String(localized: "\(key) が見つかりません。リポジトリ名かブランチ名を確認してください")
+            case .http(let code):
+                String(localized: "GitHub API が HTTP \(code) を返しました")
+            case .malformedResponse:
+                String(localized: "GitHub API の応答を解釈できませんでした")
             }
         }
     }

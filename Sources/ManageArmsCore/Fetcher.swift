@@ -38,12 +38,15 @@ public enum Fetcher {
         public var description: String {
             switch self {
             case .tooLarge(let repo, let bytes):
-                "\(repo) のアーカイブが大きすぎます（\(bytes / 1024 / 1024) MB、上限 50 MB）"
-            case .downloadFailed(let m):  "ダウンロードに失敗しました: \(m)"
-            case .extractFailed(let m):   "展開に失敗しました: \(m)"
-            case .subdirNotFound(let p):  "\(p) がアーカイブ内に見つかりません"
+                String(localized: "\(repo) のアーカイブが大きすぎます（\(bytes / 1024 / 1024) MB、上限 50 MB）")
+            case .downloadFailed(let m):
+                String(localized: "ダウンロードに失敗しました: \(m)")
+            case .extractFailed(let m):
+                String(localized: "展開に失敗しました: \(m)")
+            case .subdirNotFound(let p):
+                String(localized: "\(p) がアーカイブ内に見つかりません")
             case .nothingRecognized:
-                "SKILL.md も plugin.json も見つかりません。対応していない形式です"
+                String(localized: "SKILL.md も plugin.json も見つかりません。対応していない形式です")
             }
         }
     }

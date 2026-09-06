@@ -20,8 +20,10 @@ public enum PermissionWriter {
 
         public var description: String {
             switch self {
-            case .notASettingsFile(let p): "\(p) は権限設定ファイルではありません"
-            case .notInClaudeDir(let p):   "\(p) は .claude ディレクトリの中にありません"
+            case .notASettingsFile(let p):
+                String(localized: "\(p) は権限設定ファイルではありません")
+            case .notInClaudeDir(let p):
+                String(localized: "\(p) は .claude ディレクトリの中にありません")
             }
         }
     }

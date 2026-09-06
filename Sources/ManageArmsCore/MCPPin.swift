@@ -15,11 +15,12 @@ public enum MCPPin {
 
         public var description: String {
             switch self {
-            case .notFloating(let n): "\(n) は既にバージョンが固定されています"
+            case .notFloating(let n):
+                String(localized: "\(n) は既にバージョンが固定されています")
             case .notNPM(let n):
-                "\(n) は npm パッケージではないため、固定するバージョンを調べられません"
+                String(localized: "\(n) は npm パッケージではないため、固定するバージョンを調べられません")
             case .lookupFailed(let p, let s):
-                "npm レジストリから \(p) の版を取得できませんでした（HTTP \(s)）"
+                String(localized: "npm レジストリから \(p) の版を取得できませんでした（HTTP \(s)）")
             }
         }
     }

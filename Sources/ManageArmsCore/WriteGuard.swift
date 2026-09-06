@@ -21,15 +21,15 @@ public enum WriteGuard {
         public var description: String {
             switch self {
             case .deniedPath(let p):
-                "\(p) は保護対象です"
+                String(localized: "\(p) は保護対象です")
             case .symlinkOutsideStore(let p):
-                "\(p) は manage-arms が張った symlink ではありません"
+                String(localized: "\(p) は manage-arms が張った symlink ではありません")
             case .outsideManagedRoots(let p):
-                "\(p) は manage-arms の管理外です"
+                String(localized: "\(p) は manage-arms の管理外です")
             case .notInRegistry(let n):
-                "\(n) は他のツールが管理しています。manage-arms からは変更できません"
+                String(localized: "\(n) は他のツールが管理しています。manage-arms からは変更できません")
             case .invalidName(let n):
-                "\(n) は名前として使えません（取得元の指定を確認してください）"
+                String(localized: "\(n) は名前として使えません（取得元の指定を確認してください）")
             }
         }
     }

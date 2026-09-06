@@ -109,8 +109,10 @@ public enum MCPManager {
         case alreadyExists(String)
         public var description: String {
             switch self {
-            case .unsupported(let a): "\(a.displayName) は MCP に対応していません"
-            case .alreadyExists(let n): "\(n) は既に登録されています"
+            case .unsupported(let a):
+                String(localized: "\(a.displayName) は MCP に対応していません")
+            case .alreadyExists(let n):
+                String(localized: "\(n) は既に登録されています")
             }
         }
     }

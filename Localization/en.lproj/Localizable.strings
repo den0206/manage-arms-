@@ -305,3 +305,45 @@
 "システムに合わせる" = "Match system";
 "ライト" = "Light";
 "ダーク" = "Dark";
+
+/* Core errors and status text */
+"%@ は保護対象です" = "%@ is protected";
+"%@ は manage-arms が張った symlink ではありません" = "%@ is not a symlink created by manage-arms";
+"%@ は manage-arms の管理外です" = "%@ is outside what manage-arms manages";
+"%@ は他のツールが管理しています。manage-arms からは変更できません" = "%@ is managed by another tool. manage-arms cannot change it.";
+"%@ は名前として使えません（取得元の指定を確認してください）" = "%@ cannot be used as a name (check the source you specified)";
+"%@ に既に別のものがあります。上書きしません" = "Something else is already at %@. Not overwriting.";
+"%@ は既に入っています" = "%@ is already installed";
+"%@ の追加はまだ対応していません" = "Adding %@ is not supported yet";
+"%@ のアーカイブが大きすぎます（%lld MB、上限 50 MB）" = "The archive for %1$@ is too large (%2$lld MB, limit 50 MB)";
+"ダウンロードに失敗しました: %@" = "Download failed: %@";
+"展開に失敗しました: %@" = "Extraction failed: %@";
+"%@ がアーカイブ内に見つかりません" = "%@ was not found in the archive";
+"SKILL.md も plugin.json も見つかりません。対応していない形式です" = "No SKILL.md or plugin.json found. This format is not supported.";
+"%@ は取得元が分からないため更新できません" = "%@ cannot be updated because its source is unknown";
+"%@ は固定中です" = "%@ is pinned";
+"取得したアーカイブに %@ が見つかりません" = "%@ was not found in the downloaded archive";
+"%@ は MCP に対応していません" = "%@ does not support MCP";
+"%@ は既に登録されています" = "%@ is already registered";
+"%@ は既にバージョンが固定されています" = "%@ is already pinned to a version";
+"%@ は npm パッケージではないため、固定するバージョンを調べられません" = "%@ is not an npm package, so there is no version to pin";
+"npm レジストリから %@ の版を取得できませんでした（HTTP %lld）" = "Could not look up the version of %1$@ in the npm registry (HTTP %2$lld)";
+"GitHub API のレート制限に達しました（未認証は 60 リクエスト/時）。時間をおいてください" = "Hit the GitHub API rate limit (60 requests/hour when unauthenticated). Please try again later.";
+"%@ が見つかりません。リポジトリ名かブランチ名を確認してください" = "%@ was not found. Check the repository and branch name.";
+"GitHub API が HTTP %lld を返しました" = "The GitHub API returned HTTP %lld";
+"GitHub API の応答を解釈できませんでした" = "Could not parse the GitHub API response";
+"%@ は権限設定ファイルではありません" = "%@ is not a permission settings file";
+"%@ は .claude ディレクトリの中にありません" = "%@ is not inside a .claude directory";
+"`%@` が終了コード %lld で失敗: %@" = "`%1$@` failed with exit code %2$lld: %3$@";
+
+/* Row details built in Core */
+"⚠️ %@@latest — 起動ごとに最新を取得（サイレントに壊れる可能性）" = "⚠️ %@@latest — fetches the newest build on every launch (can break silently)";
+"バージョン固定済み" = "Version pinned";
+"⚠️ %lld プロジェクトに重複導入" = "⚠️ Installed separately in %lld projects";
+"このプロジェクト" = "This project";
+"自動更新" = "Auto-update";
+"無効化（退避中）" = "Disabled (parked)";
+"%@（リンク切れ）" = "%@ (broken link)";
+"%@（SKILL.md なし）" = "%@ (no SKILL.md)";
+"%@（frontmatter が 4 KB を超過）" = "%@ (frontmatter exceeds 4 KB)";
+"%@（frontmatter なし）" = "%@ (no frontmatter)";
