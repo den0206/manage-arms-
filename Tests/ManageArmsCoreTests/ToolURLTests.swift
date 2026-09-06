@@ -133,17 +133,29 @@ struct ToolURLTests {
 
     // MARK: - 設定
 
-    @Test("検知の設定は既定 OFF で、既定値は registry.json に書き出さない")
+    @Test("検知と常駐は既定 ON で、既定値は registry.json に書き出さない")
     func settingDefaults() throws {
         var registry = Registry()
-        #expect(!registry.detectsBrowserURLs)
-        let off = try Registry.encoder.encode(registry)
-        #expect(!String(decoding: off, as: UTF8.self).contains("browserDetection"))
+        #expect(registry.detectsBrowserURLs)
+        #expect(registry.staysInMenuBar)
+        let clean = try Registry.encoder.encode(registry)
+        #expect(!String(decoding: clean, as: UTF8.self).contains("browserDetection"))
+        #expect(!String(decoding: clean, as: UTF8.self).contains("menuBar"))
 
-        registry.browserDetection = true
-        let on = try Registry.encoder.encode(registry)
-        #expect(String(decoding: on, as: UTF8.self).contains("\"browserDetection\" : true"))
-        let restored = try Registry.decoder.decode(Registry.self, from: on)
-        #expect(restored.detectsBrowserURLs)
+        // OFF は利用者が決めたことなので書き出し、読み直しても OFF のまま。
+        registry.browserDetection = false
+        registry.menuBar = false
+        let off = try Registry.encoder.encode(registry)
+        let restored = try Registry.decoder.decode(Registry.self, from: off)
+        #expect(!restored.detectsBrowserURLs)
+        #expect(!restored.staysInMenuBar)
+    }
+
+    @Test("設定を足す前の registry.json は既定（ON）で読める")
+    func settingMigration() throws {
+        let old = Data(#"{"resources":[],"repos":{},"projects":[]}"#.utf8)
+        let registry = try Registry.decoder.decode(Registry.self, from: old)
+        #expect(registry.detectsBrowserURLs)
+        #expect(registry.staysInMenuBar)
     }
 }

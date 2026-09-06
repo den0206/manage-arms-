@@ -12,13 +12,19 @@ public struct Registry: Codable, Equatable, Sendable {
     /// エージェントごとの手動設定（3.7）。キーは `Agent.rawValue`。
     /// **検出結果は保存しない** — 保存してよいのは利用者が決めたことだけ。
     public var agents: [String: AgentSetting] = [:]
-    /// ブラウザで開いた Tool のページを検知して通知するか（DESIGN.md 6 章）。
+    /// ブラウザで開いた Tool のページを検知するか（DESIGN.md 6 章）。
     /// **Optional なのは既定値を書き出さないため** — 触っていない利用者の
     /// registry.json に意味の無い行を増やさない。
     public var browserDetection: Bool?
+    /// ウィンドウを閉じてもメニューバーに残るか（DESIGN.md 3.5）。同上で Optional。
+    public var menuBar: Bool?
 
-    /// 既定は OFF。ブラウザ制御の許可（TCC）を伴うので、黙って始めない。
-    public var detectsBrowserURLs: Bool { browserDetection ?? false }
+    /// 既定は ON。メニューバー常駐が既定になったので、検知はアプリの主機能として動く。
+    /// 許可（TCC）は最初に既知ブラウザが前面へ来たときに求め、拒否されたら OFF に戻す。
+    public var detectsBrowserURLs: Bool { browserDetection ?? true }
+
+    /// 既定は ON。OFF にすると最後のウィンドウを閉じた時点でプロセスごと終了する。
+    public var staysInMenuBar: Bool { menuBar ?? true }
 
     /// 既定は「有効・自動検出のまま」。エントリが無いエージェントもこれになるので、
     /// 対応エージェントが増えたときは何も書かなくても自動で並ぶ。
@@ -84,7 +90,7 @@ public struct Registry: Codable, Equatable, Sendable {
     public init() {}
 
     enum CodingKeys: String, CodingKey {
-        case resources, repos, usage, projects, agents, browserDetection
+        case resources, repos, usage, projects, agents, browserDetection, menuBar
     }
 
     /// **欠けているキーは既定値で埋める。**
@@ -100,6 +106,7 @@ public struct Registry: Codable, Equatable, Sendable {
         usage = try container.decodeIfPresent(Usage.self, forKey: .usage) ?? Usage()
         agents = try container.decodeIfPresent([String: AgentSetting].self, forKey: .agents) ?? [:]
         browserDetection = try container.decodeIfPresent(Bool.self, forKey: .browserDetection)
+        menuBar = try container.decodeIfPresent(Bool.self, forKey: .menuBar)
     }
 
     public func setting(_ agent: Agent) -> AgentSetting { agents[agent.rawValue] ?? AgentSetting() }
