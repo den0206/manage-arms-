@@ -118,3 +118,33 @@ struct FrontmatterTests {
         #expect(FrontmatterParser.read(file) == .truncated)
     }
 }
+
+/// 先頭 4 KB しか読まない設計の副作用（DESIGN.md 9 章 / 10.1）。
+@Suite("4 KB 境界")
+struct FrontmatterBoundaryTests {
+
+    /// **日本語は 1 字 3 バイト。** 境界が字の途中に落ちると
+    /// `String(decoding:)` が U+FFFD を置き、説明文の最後の 1 字が「�」になる。
+    @Test("末尾で切れた UTF-8 の断片は捨てる")
+    func dropsPartialScalar() {
+        let full = Data("あい".utf8)                    // 6 バイト
+        #expect(FrontmatterParser.droppingPartialScalar(full) == full)
+        for cut in 1...2 {                              // 「い」を途中で切る
+            let partial = full.dropLast(cut)
+            let cleaned = FrontmatterParser.droppingPartialScalar(Data(partial))
+            #expect(String(decoding: cleaned, as: UTF8.self) == "あ",
+                    "\(cut) バイト欠けで置換文字が残った")
+        }
+    }
+
+    @Test("ASCII の途中では何も落とさない")
+    func keepsASCII() {
+        let data = Data("name: demo".utf8)
+        #expect(FrontmatterParser.droppingPartialScalar(data) == data)
+    }
+
+    @Test("空でも落ちない")
+    func handlesEmpty() {
+        #expect(FrontmatterParser.droppingPartialScalar(Data()).isEmpty)
+    }
+}

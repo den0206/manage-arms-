@@ -19,11 +19,9 @@ public enum PluginScanner {
     /// **エージェントを直書きせず `Agent.allCases` を回す。** `default` を置かないので、
     /// エージェントが増えたらここがコンパイルエラーになり、読み取り経路の要否を必ず決めさせる。
     public static func scan(env: Environment) -> [InstalledPlugin] {
-        let auto = autoUpdateMarketplaces(env: env)
-        return Agent.allCases.flatMap { agent -> [InstalledPlugin] in
+        Agent.allCases.flatMap { agent -> [InstalledPlugin] in
             switch agent {
-            case .claude: claude(env: env, autoUpdate: auto)
-            case .codex:  codex(env: env)
+            case .claude, .codex: (try? read(agent, env: env)) ?? []
             // Cursor は `~/.cursor/plugins/` を持つが読み取り経路が未実測（3.7 — 推測で埋めない）。
             case .cursor, .gemini: []
             }
@@ -40,10 +38,6 @@ public enum PluginScanner {
         return Set(object.compactMap { key, value in
             (value as? [String: Any])?["autoUpdate"] as? Bool == true ? key : nil
         })
-    }
-
-    static func claude(env: Environment, autoUpdate: Set<String>) -> [InstalledPlugin] {
-        (try? read(.claude, env: env)) ?? []
     }
 
     public static func read(_ agent: Agent, env: Environment) throws -> [InstalledPlugin] {
@@ -71,8 +65,6 @@ public enum PluginScanner {
             return plugin
         }
     }
-
-    static func codex(env: Environment) -> [InstalledPlugin] { (try? read(.codex, env: env)) ?? [] }
 
     /// 同一プラグインが複数プロジェクトに個別インストールされている状態を見つける。
     /// **このアプリ最大の見せ場**（DESIGN.md 5.2）。

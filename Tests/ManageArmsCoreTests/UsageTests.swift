@@ -328,3 +328,30 @@ struct UsageTests {
         #expect(try Registry.decoder.decode(Registry.self, from: data) == registry)
     }
 }
+
+/// DESIGN.md 4.1 / 9 章 — **唯一の永続ファイルを単調増加させない。**
+@Suite("使用実績の件数")
+struct UsageHistoryTests {
+
+    func history(_ count: Int) -> [String: Date] {
+        Dictionary(uniqueKeysWithValues: (0..<count).map {
+            ("skill-\($0)", Date(timeIntervalSince1970: TimeInterval($0)))
+        })
+    }
+
+    @Test("上限までは何も落とさない")
+    func keepsAllUnderLimit() {
+        let all = history(UsageScanner.historyLimit)
+        #expect(UsageScanner.bounded(all).count == UsageScanner.historyLimit)
+    }
+
+    @Test("上限を超えたら古い方から落とす")
+    func dropsOldest() {
+        let all = history(UsageScanner.historyLimit + 10)
+        let kept = UsageScanner.bounded(all)
+        #expect(kept.count == UsageScanner.historyLimit)
+        // 新しい方（添字が大きいほど新しい）が残る
+        #expect(kept["skill-\(UsageScanner.historyLimit + 9)"] != nil, "最新が落ちた")
+        #expect(kept["skill-0"] == nil, "最古が残っている")
+    }
+}

@@ -141,6 +141,22 @@ struct PermissionTests {
         }
     }
 
+    /// **`.claude` という名前のディレクトリはどこにでも作れる。**
+    /// 名前だけ見ていると、走査もしていない場所の設定を書き換えうる。
+    @Test("読んでいない場所の .claude は拒否する")
+    func rejectsUnknownRoot() throws {
+        let home = URL(filePath: "/tmp/x")
+        let known = [home, URL(filePath: "/tmp/x/work/app")]
+        try PermissionWriter.assertWritable(
+            home.appending(path: ".claude/settings.json"), under: known)
+        try PermissionWriter.assertWritable(
+            URL(filePath: "/tmp/x/work/app/.claude/settings.local.json"), under: known)
+        #expect(throws: PermissionWriter.Denial.self) {
+            try PermissionWriter.assertWritable(
+                URL(filePath: "/tmp/x/Downloads/untrusted/.claude/settings.json"), under: known)
+        }
+    }
+
     // MARK: - 削除（10.3 偽ホームで実行）
 
     /// **`permissions` 以外のキーを壊さないこと。**
@@ -239,5 +255,130 @@ struct PermissionTests {
             }
         }
         #expect(PermissionScanner.fileNames == ["settings.json", "settings.local.json"])
+    }
+}
+
+/// DESIGN.md 9 章 / CLAUDE.md「ストレージの規律」。
+/// **リソース管理アプリが自分でディスクを汚したら本末転倒。**
+/// 以前はここが編集のたびに 1 ファイル増え続け、消す導線も無かった。
+@Suite("権限バックアップの世代")
+struct PermissionBackupTests {
+
+    /// 進められる時計。`Environment.test` の `now` は epoch 0 固定なので、
+    /// そのままだと世代のファイル名が全部同じになって上書きしてしまう。
+    final class Clock: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = Date(timeIntervalSince1970: 0)
+        func now() -> Date { lock.withLock { value } }
+        func advance() { lock.withLock { value = value.addingTimeInterval(60) } }
+    }
+
+    func backupNames(_ env: Environment) -> [String] {
+        let dir = env.appSupport.appending(path: PermissionWriter.backupDirectory)
+        return ((try? FileManager.default.contentsOfDirectory(
+            atPath: dir.path(percentEncoded: false))) ?? []).sorted()
+    }
+
+    /// 同じ偽ホームを何度も編集できる小さな道具立て。
+    struct Session {
+        let env: Environment
+        let root: URL
+        let entry: PermissionEntry
+        let clock: Clock
+
+        /// 1 回の編集 = 1 世代。時計を進めないとファイル名が衝突して上書きになる。
+        func edit(times count: Int) throws {
+            for _ in 0..<count {
+                clock.advance()
+                try PermissionWriter.remove([entry], env: env)
+            }
+        }
+    }
+
+    func session() throws -> Session {
+        let (base, root) = try PermissionTests.fixture { _ in [
+            ".claude/settings.json": #"{"permissions":{"allow":["WebSearch"]}}"#,
+        ] }
+        let clock = Clock()
+        var env = base
+        env.now = { clock.now() }
+        let entry = try #require(PermissionScanner.scan(projects: [], env: env).first)
+        return Session(env: env, root: root, entry: entry, clock: clock)
+    }
+
+    @Test("編集のたびに増え続けない（上限まで刈る）")
+    func keepsBoundedGenerations() throws {
+        let s = try session()
+        defer { try? FileManager.default.removeItem(at: s.root) }
+        try s.edit(times: PermissionWriter.generations + 4)
+        #expect(backupNames(s.env).count == PermissionWriter.generations)
+    }
+
+    /// **残すのは新しい方。** 目的は「直前の編集に戻せること」なので、
+    /// 古い方から捨てないと意味が無い。
+    @Test("残るのは新しい世代")
+    func keepsNewest() throws {
+        let s = try session()
+        defer { try? FileManager.default.removeItem(at: s.root) }
+        try s.edit(times: PermissionWriter.generations + 2)
+        // 先頭が ISO8601 なので辞書順 = 古い順。時計は 1 回 60 秒進む。
+        let names = backupNames(s.env)
+        #expect(names.count == PermissionWriter.generations)
+        #expect(names.last?.hasPrefix("1970-01-01T00-07-00Z") == true, "最後の編集が消えている")
+        #expect(names.first?.hasPrefix("1970-01-01T00-03-00Z") == true, "古い方から捨てていない")
+    }
+
+    /// **帰属を判定できないものは消さない。** 0.1.0 が書いた旧形式の名前は
+    /// 区切り（`__`）を持たないので、世代刈りの対象にしない。
+    @Test("旧形式のバックアップには触らない")
+    func leavesLegacyAlone() throws {
+        let s = try session()
+        defer { try? FileManager.default.removeItem(at: s.root) }
+        try s.edit(times: 1)
+        let dir = s.env.appSupport.appending(path: PermissionWriter.backupDirectory)
+        let legacy = dir.appending(path: "1970-01-01T00-00-00Z-Users-me--claude-settings.json")
+        try Data("old".utf8).write(to: legacy)
+
+        try s.edit(times: PermissionWriter.generations + 3)
+        #expect(FileManager.default.fileExists(atPath: legacy.path(percentEncoded: false)),
+                "旧形式のバックアップを消してしまった")
+        // 自分の形式のものは上限まで刈られている
+        #expect(backupNames(s.env).count == PermissionWriter.generations + 1)
+    }
+
+    // MARK: - ガード
+
+    @Test("保存領域の外は消させない")
+    func guardsOutside() throws {
+        let s = try session()
+        defer { try? FileManager.default.removeItem(at: s.root) }
+        try s.edit(times: 1)
+        #expect(throws: WriteGuard.Denial.self) {
+            try WriteGuard.assertAppBackup(s.env.home.appending(path: ".claude/settings.json"),
+                                           env: s.env)
+        }
+    }
+
+    @Test("ディレクトリは消させない（中身ごと飛ぶ）")
+    func guardsDirectories() throws {
+        let s = try session()
+        defer { try? FileManager.default.removeItem(at: s.root) }
+        try s.edit(times: 1)
+        let dir = s.env.appSupport.appending(path: PermissionWriter.backupDirectory)
+            .appending(path: "nested")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        #expect(throws: WriteGuard.Denial.self) {
+            try WriteGuard.assertAppBackup(dir, env: s.env)
+        }
+    }
+
+    @Test("自分が作ったバックアップは通る")
+    func allowsOwnBackup() throws {
+        let s = try session()
+        defer { try? FileManager.default.removeItem(at: s.root) }
+        try s.edit(times: 1)
+        let dir = s.env.appSupport.appending(path: PermissionWriter.backupDirectory)
+        let name = try #require(backupNames(s.env).first)
+        try WriteGuard.assertAppBackup(dir.appending(path: name), env: s.env)
     }
 }

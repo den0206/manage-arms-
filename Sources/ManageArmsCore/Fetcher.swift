@@ -193,7 +193,9 @@ public enum Fetcher {
                              destination.path(percentEncoded: false)]
         let err = Pipe()
         process.standardError = err
-        process.standardOutput = Pipe()
+        // **読まないパイプを渡さない。** バッファが埋まると子プロセスが書き込みで止まる。
+        // `InstallLocationGuard.run` と同じく捨てる（`ditto -xk` は標準出力を使わない）。
+        process.standardOutput = FileHandle.nullDevice
         try process.run()
         let message = err.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
