@@ -12,6 +12,13 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 
 ### Added
 
+- Optional browser detection: while a window is open and a browser is frontmost, opening a
+  skill, plugin or subagent page in Safari, Chrome, Edge, Brave or Arc offers to add it, so
+  no URL has to be copied. Turn it on with the switch at the bottom of the sidebar; it is off
+  until you do, asks for permission to control the browser at that point, and turns itself off
+  if permission is declined. Pages are confirmed against `raw.githubusercontent.com` before you
+  are notified, notifications fall back to an in-window banner, and URLs are never stored.
+
 - Catalog URLs such as `skills.sh/<owner>/<repo>/<skill>` are accepted in the Add sheet and
   resolved to the GitHub repository they are published from. The skill name in the URL is a
   directory name rather than a path, so it pre-fills the candidate filter instead of being
@@ -107,6 +114,10 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
   by the app. That file is shared through git, so ManageArms shows the command instead.
 
 ### Fixed
+
+- Reserved skills.sh pages such as `skills.sh/about` and `skills.sh/agent/claude-code` are no
+  longer read as `<owner>/<repo>`, which sent the Add sheet off to fetch a repository that does
+  not exist.
 
 - Removing an MCP server or a plugin now confirms it is actually gone instead of trusting the
   CLI's exit code, and reports a failure when it is still there. Agent-default entries can report

@@ -77,4 +77,27 @@ else
     echo "✓ ローカライズのキー集合は ja / en で一致しています（$(grep -c '^"' Localization/ja.lproj/Localizable.strings) キー）"
 fi
 
+# --- 4. Apple Events の限定（DESIGN.md 3.5 の例外 / 6 章）------------------------
+# ブラウザの URL を読むのはこの機能だけ。ここが散ると「監視しない」という前提が
+# 静かに崩れ、利用者が見ているページをアプリの各所が読める状態になる。
+# 併せて Info.plist の usage description と entitlement も要る —
+# どちらか欠けると署名済みビルドでだけ落ちる（開発中は気づけない）。
+LEAKS=$(grep -rnE 'NSAppleScript|AESendMessage|kAEEventClass' Sources/ --include='*.swift' \
+        | grep -vE '/BrowserWatcher\.swift:' \
+        | grep -vE ':[0-9]+:[[:space:]]*//')
+if [ -n "$LEAKS" ]; then
+    fail "Apple Events の送信が BrowserWatcher.swift の外に漏れています（DESIGN.md 3.5 / 6 章）" "$LEAKS"
+else
+    echo "✓ Apple Events の送信は BrowserWatcher.swift に限定されています"
+fi
+
+if grep -q 'NSAppleScript' Sources/ManageArms/BrowserWatcher.swift 2>/dev/null; then
+    plutil -extract NSAppleEventsUsageDescription raw Resources/Info.plist >/dev/null 2>&1 \
+        || fail "Info.plist に NSAppleEventsUsageDescription がありません（Apple Events を送るアプリは macOS に落とされます）"
+    for e in Resources/ManageArms.entitlements Resources/ManageArms.debug.entitlements; do
+        plutil -extract 'com\.apple\.security\.automation\.apple-events' raw "$e" >/dev/null 2>&1 \
+            || fail "$e に com.apple.security.automation.apple-events がありません（Hardened Runtime 下で Apple Events が拒否されます）"
+    done
+fi
+
 exit $status
