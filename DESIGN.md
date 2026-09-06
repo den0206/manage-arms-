@@ -7,7 +7,7 @@ AI コーディングエージェント（Claude Code / Cursor / Codex / Gemini 
 - **プラットフォーム**: macOS 26 以降 / SwiftUI
 - **配布**: DMG の直配布（App Sandbox 非対応のため App Store 不可）。13 章
 - **状態**: **v1〜v4 実装済み**（Skills / Subagents / Plugins / 使用実績 / MCP / 権限）、
-  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト 273 件
+  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト 285 件
 - **実装**: SPM パッケージ。`swift test` / `CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh`
   （`.xcodeproj` は不要。実 CLI・実ネットワークを使う確認は `MANUAL=1 swift test`）
 - **作業の進め方**: [CLAUDE.md](CLAUDE.md)。利用者向けの入口は [README.md](README.md)
@@ -983,27 +983,24 @@ Cursor の MCP に `claude mcp remove chrome-devtools` を出すことになり�
 **コマンドをでっち上げない。** 存在しないサブコマンドを出すと、
 初心者はエラーの原因を自分の操作だと思う。
 
-### 管理下への取り込み（adopt）
+### 自分で入れたものの削除
 
-自分で入れたスキル / サブエージェントを、このアプリの管理下に移せる。
-**ファイルは 1 バイトも動かさない** — `registry.json` に 1 行足して
-Claude 用の symlink を張るだけ。これで `WriteGuard` が通り、
-有効/無効の切り替えと削除ができるようになる。
+取り込み（adopt）は**廃止した**。registry に載せてから消す、という
+遠回りをしなくても、ユーザーが自分で入れた Skill / Subagent は
+そのまま 1 件ずつゴミ箱へ移せる（15 章）。
 
 | 状態 | 扱い |
 |---|---|
-| 実体が `~/.agents/skills/`（Subagent は `appSupport/agents/`）にある | **取り込める。** 行に `このアプリで管理` を出す |
-| 実体が `~/.claude/skills/` など別の場所にある | **取り込まない。** 移動は手でやってもらう（`削除するには…` に手順を書く） |
-| MCP / Plugin | 取り込めない。書き込みは各 CLI に委譲している（3.1） |
-| エージェント同梱・プロジェクト限定 | 取り込めない |
+| 実体が既知の配置ルートの直下にある | **削除できる。** パスを 1 つ選ばせ、`WriteGuard.assertUserArtifact` で検証してゴミ箱へ移す |
+| エージェント同梱（`Agent.bundledSkillRoots` / `.codex/skills/.system`） | 削除しない。`同梱・変更不可` を出す |
+| Plugin 配下・リンクの向き先 | 削除しない。**リンクは外すが、その先の実体には触らない** |
+| MCP / Plugin | ファイルを消さず、各 CLI の削除コマンドに委譲する（3.1） |
 
-**勝手に実体を移動しない**のが要点。`~/.claude/skills/` の中身を
-`~/.agents/skills/` へ移すと、他ツールが張った symlink やユーザーの想定を壊す。
-取り込みは*元に戻せる操作*（registry の 1 行 + symlink 1 本）に閉じる。
-
-他ツールの symlink が `~/.claude/skills/<name>` に居座っている場合は
-`WriteGuard` が弾き、**registry への登録も巻き戻す**（横取りしない・半端に残さない）。
-取得元が分からないので**更新はできない**（`repo` が nil のままなので `.unknown`）。
+**完全削除しない。** `trashItem` でゴミ箱へ移すので Finder から戻せる。
+プロジェクト配下のファイルは git で共有されるので、確認ダイアログで
+「他のメンバーや別のマシンにも影響する」ことを明示する。
+まとめて消す一括削除シートは従来どおり**コマンドを見せるだけ**
+（`ResourceRow.isRemovalExecutable`、5.2）。
 
 ### 削除
 
@@ -1377,7 +1374,7 @@ Hooks / Commands / Rules は対象外に決まった（1 章）ため、v4 は�
 | リンク切れの `codiff` がどのエージェントの画面にも出なくなった（`state` が全部 `absent` のため） | `ResourceRow.roots` で置き場から拾い、`isUnusable` として警告付きで出す |
 | **プロジェクト配下を走査しておらず、4 プロジェクト 15 件のスキルと project スコープの MCP が 1 件も出ていなかった** | `ProjectScan`（`Source.projectPaths` 経由）。行が無いものは作る |
 | ユーザー全体とプロジェクトを 1 つの表に混ぜ、行のバッジで区別させたら読めなかった。縦に積み直しても長すぎた | スコープをタブにして、同時に見せる表を 1 つにした（`Inventory.scoped(for:)`） |
-| 自分で入れたスキルが「表示だけ」で、切り替えも削除もできないまま | 実体が置き場にあるものは `adopt` で管理下に取り込む（ファイルは動かさない） |
+| 自分で入れたスキルが「表示だけ」で、切り替えも削除もできないまま | 既知の配置ルート直下のものは 1 件ずつゴミ箱へ移せる（`SkillManager.removeExisting`、15 章） |
 | プロジェクトの分を消すコマンドが既定スコープ（`-s user`）のままで、**ユーザー全体を消す**ものになっていた | スコープと `cd` をコマンドに焼き込む（`ResourceRow.removalCommand`） |
 | 「消せない」とだけ書いてあるので、どうすれば消えるのか分からない | `削除するには…` で CLI コマンド or 実体パスを出してコピーさせる |
 | エージェントのアイコンが 4 つとも同じで、選択中がどれか分からない | 実物のアプリがあればそのアイコン、無ければエージェントごとの SF Symbol |
@@ -1564,3 +1561,41 @@ DMG を開いてそのまま起動されることが実際に起きる。その�
   `ponytail@ponytail` v4.9.0（local × 5 プロジェクト）
 - 使用実績: インストール済みスキル 26 件に対し、Claude のログに残るのは 7 件（3.9）
 - プロジェクト側: `.claude/` を持つプロジェクト 12 件
+
+## 15. 既存Toolの管理と互換性検証（2026-09-06）
+
+この節は、初期設計の「registry登録済みのみ削除」「CLIを案内するだけのMCP追加」
+「アクティブ化時だけの起動状態取得」を更新する。ユーザーの依頼に基づく仕様変更。
+
+- 追加画面は Skills/Subagents・MCP・Plugin を選択する。MCPはJSON、HTTP URL、
+  引用符付き起動コマンドを受け付ける。シェル展開はしない。MCPとPluginの導入先は
+  Agentごとに選び、ユーザー全体スコープに入れる。プロジェクトへの新規追加は未対応。
+- Pluginの追加はClaudeの `plugin install`、Codexの `plugin add` に委譲する。
+  配布元URLの登録とPluginの導入は別の操作で、後者が失敗しても前者は残ると表示する。
+  Cursor Pluginの読み書きには引き続き未対応。CLIの非対話導入に対応しないPluginは
+  CLIのエラーを表示する。任意のインストールスクリプトを自動承認しない。
+- ユーザーが既に入れたSkill/Subagentは、既知の配置ルートの直下の1件を指定して
+  ゴミ箱へ移せる。`WriteGuard.assertUserArtifact` で親ディレクトリと実パスを検証し、
+  同梱領域・Plugin配下へのリンクを拒否する。リンク先の実体は削除しない。
+  アプリ管理下の共有リソースは従来の切替を残し「共有先すべてで有効」と明示する。
+- 同梱SkillはCursorの既知ルートとCodex `.codex/skills/.system` を保護する。
+  MCP/Pluginで `isBuiltIn` / `managed` 等の保護メタデータを得た場合も変更を拒否する。
+  初回検出や公式配布元というだけでは同梱と推測しない。未知の同梱形式の判定には
+  Agent側が提供する情報の追加検証が必要。
+- MCP/Pluginの行はAgent別の識別子を持つ。registryは名前と種別の組で更新する。
+  MCPの固定は選択した1 Agentだけに作用し、Cursorではその他の設定キーを保持する。
+- 壊れたCursor JSONとregistryを空として上書きしない。CLI失敗・未対応のJSON形式を
+  「0件」と混同せず一覧の診断表示に出す。引数・環境変数・HTTPヘッダの保持を検証する。
+- ウィンドウが表示されている間だけ3秒間隔で `ps` を読む。設定一覧・CLIの全走査は
+  毎回行わない。常駐しない。表示は「起動検出／起動未確認」で、HTTP接続や不明な所属を
+  「停止」と断定しない。MCPの実際の呼び出し開始・終了イベントの検知は未実装。
+- registryの `projects` に明示選択したフォルダを記録できる。これはClaude形式の
+  プロジェクト設定の走査対象を追加する機能で、ホーム全体を再帰走査しない。
+- 通常の回帰テストに加え、`AgentCompatibilityTests` を明示実行できる。
+  子プロセスに一時HOMEと作業ディレクトリを与え、認証情報を引き継がない。
+  MCPの追加→一覧→削除、引数・環境変数・HTTPヘッダの保持とPluginのCLI契約を確認する。
+  Plugin本体のインストールやGUIの操作テストは含まない。
+- `Scripts/check-agent-compatibility.sh <claude|codex|gemini> [version]` は一時領域へ
+  指定CLIを取得して上記検証を実行する。CIは手動実行（workflow_dispatch）で最新版を検証する。
+  ローカルにあるCLIだけを使う場合は `COMPAT_AGENT=claude swift test --filter AgentCompatibilityTests`。
+  Cursorは偽設定によるテストと実機での確認を組み合わせる。

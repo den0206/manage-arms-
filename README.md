@@ -14,12 +14,12 @@ The design document is [DESIGN.md](DESIGN.md) (Japanese).
 | | |
 |---|---|
 | **One screen per agent** | Pick an agent in the sidebar and you see only what that agent carries. **What you installed yourself comes first — plugins and MCP servers included, with a note on where they are managed — and whatever ships with the agent is folded away** |
-| **Add** | Paste a GitHub URL; the contents are fetched and shown. Nothing is installed until you confirm |
-| **Enable / disable / delete** | Disabling parks the resource aside; deleting moves it to the Trash. Either way it can be brought back |
-| **Adopt** | A skill you installed yourself can be brought under management without moving a single file |
+| **Add** | Review skills from GitHub; add MCP using JSON, an endpoint URL, or a command; add plugins by name and marketplace. Choose the destination agent |
+| **Enable / disable / delete** | Toggle app-managed shared skills. Remove existing user tools by location or agent: files go to Trash; MCP and plugins are unregistered through their manager |
+| **Bundled protection** | Known bundled skill paths, tools with protection metadata, and links into plugin storage are protected |
 | **Update** | Review the `SKILL.md` diff before applying. Pin a resource to stop updates when upstream changes direction |
 | **Scope** | A tab for "all projects", one per project, and one for what ships with the agent — with a warning when the same thing is installed both ways, and bulk removal of the project copies |
-| **Usage** | Last-used dates gathered from session logs. For MCP, which servers are running *right now* |
+| **Usage** | Last-used dates from session logs. MCP processes checked every 3 seconds while a window is visible; this does not indicate an active tool call |
 | **Permission cleanup** | Remove machine-specific and cross-project duplicate entries from `permissions.allow` |
 
 ## Requirements
@@ -41,7 +41,7 @@ The project is a Swift Package — there is no `.xcodeproj` (open `Package.swift
 directly).
 
 ```bash
-swift test                  # unit tests (273)
+swift test                  # unit tests (285)
 swift build                 # compile check
 
 # The distributable form is a hand-assembled .app bundle.
@@ -110,3 +110,17 @@ notarization → DMG → GitHub Release. Setup and procedure are in
 
 **Signing and notarization are mandatory.** If any secret is missing the workflow stops
 immediately; an unsigned DMG is never produced.
+
+## Compatibility checks and limitations
+
+`Scripts/check-agent-compatibility.sh claude` (or `codex` / `gemini`) downloads the latest CLI
+into a temporary prefix, then verifies MCP registration, reading, removal, argument/environment/header
+preservation, and plugin CLI contracts in a disposable home without inherited credentials.
+An optional second argument selects a version. CI runs the same script daily and on demand.
+Normal `swift test` skips these live CLI checks.
+
+New MCP/plugin installations use user scope. Cursor plugin management, active tool-call events,
+and automatic classification of unknown bundled formats are not supported. A missing local process
+does not mean an HTTP MCP endpoint is stopped. Explicit project folders are scanned for Claude settings.
+Installing plugin payloads and interacting with the GUI still require separate checks.
+See [DESIGN.md, section 15](DESIGN.md) for the implementation boundaries.

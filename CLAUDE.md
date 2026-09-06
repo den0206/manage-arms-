@@ -9,6 +9,7 @@ AI コーディングエージェントの周辺リソース（MCP / Skills / Su
 | ファイル | 内容 |
 |---|---|
 | `DESIGN.md` | 設計の正本。中核の判断（3 章）・データモデル・スコープ・テスト戦略・実測データ |
+| `AGENTS.md` | Agent向けの入口。内容はこの `CLAUDE.md` を参照し、ルールを複製しない |
 | `README.md` / `README.ja.md` | 利用者・新規参加者向けの入口（英語が既定、日本語は対訳）。**片方だけ直さない** |
 | `.claude/commands/` | `/commit-by-feature`・`/review-for-merge`（このリポジトリ用のスラッシュコマンド） |
 | `docs/signing.md` | Developer ID 署名・公証のセットアップ手順と罠（人間が 1 回だけやる作業） |
@@ -42,14 +43,15 @@ CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh                            # .ap
    `SubagentScanner` / `Updater` は必ず `WriteGuard.assertMutable` を呼ぶ。
    `Fetcher` / `Installer` は一時ディレクトリのみ、`InstallLocationGuard` は
    直前に自分が `/Applications` へ作ったバンドルのみ。
+   既存ユーザーToolの削除は `WriteGuard.assertUserArtifact` で既知ルート直下を検証する。
    新しいファイルで無防備に `removeItem` を書くと `~/.claude` や `~/.agents` を消しうる。
 3. **`ja` と `en` のキー集合が一致していること** — 片方に足し忘れると、
    その文言だけ日本語のまま英語 UI に出る。
 4. **走査対象はホワイトリスト**（DESIGN 3.4）。除外リスト方式にしない。
    `Source` の列挙に無いパスは存在しても読まない。`projects` / `sessions` は
    使用実績の集計からのみ、`usageLog` ケース経由で読む。
-5. **常駐しない・キャッシュしない**（DESIGN 3.5）。FSEvents で監視せず、
-   アクティブ化のたびに読み直す。永続ファイルは `registry.json` 1 つだけ。
+5. **常駐しない・キャッシュしない**（DESIGN 3.5 / 15）。設定はアクティブ化時に再走査し、
+   ウィンドウ表示中だけ起動状態を3秒ごとに取得する。永続ファイルは `registry.json` 1 つだけ。
 
 ## ストレージ・メモリの規律（徹底する）
 
