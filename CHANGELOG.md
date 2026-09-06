@@ -10,6 +10,11 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 
 ## [Unreleased]
 
+### Changed
+
+- Refreshed the app icon: a calmer indigo backdrop with a colour-coded node for each agent, so
+  it stays readable at Dock and menu-bar sizes.
+
 ### Added
 
 - Optional browser detection: while a window is open and a browser is frontmost, opening a
