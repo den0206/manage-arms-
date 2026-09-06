@@ -33,13 +33,12 @@ fi
 # 削除・移動・symlink 作成は WriteGuard.assertMutable を通す経路だけに置く。
 # 新しいファイルで無防備に removeItem を書くと、ホワイトリストを迂回して
 # ユーザーの ~/.claude や ~/.agents を消しうる。
-#   SkillManager / SubagentScanner / Updater … WriteGuard.assertMutable を必ず呼ぶ
-#   Fetcher / Installer                      … 一時ディレクトリのみを触る（ユーザーデータ外）
-#   InstallLocationGuard                     … /Applications へ自分自身をコピーする際の
-#                                              失敗ロールバック。消すのは直前に自分が作った
-#                                              バンドルだけで、ユーザーの資源ではない
+#   SkillManager / Updater … WriteGuard.assertMutable を必ず呼ぶ
+#   Fetcher / Installer    … 一時ディレクトリのみを触る（ユーザーデータ外）
+#   InstallLocationGuard   … /Applications へ自分自身をコピーする際の失敗ロールバック。
+#                            消すのは直前に自分が作ったバンドルだけで、ユーザーの資源ではない
 LEAKS=$(grep -rnE 'removeItem|moveItem|createSymbolicLink|trashItem' Sources/ --include='*.swift' \
-        | grep -vE '/(SkillManager|SubagentScanner|Updater|Fetcher|Installer|InstallLocationGuard)\.swift:' \
+        | grep -vE '/(SkillManager|Updater|Fetcher|Installer|InstallLocationGuard)\.swift:' \
         | grep -vE ':[0-9]+:[[:space:]]*//')
 if [ -n "$LEAKS" ]; then
     fail "削除・移動が WriteGuard を通る経路の外に漏れています（DESIGN.md 9 章）" "$LEAKS"
@@ -47,9 +46,9 @@ else
     echo "✓ 削除・移動は WriteGuard を通る経路に限定されています"
 fi
 
-# WriteGuard を通す 3 ファイルが、実際に assertMutable を呼んでいることも確かめる
+# WriteGuard を通す 2 ファイルが、実際に assertMutable を呼んでいることも確かめる
 # （上の許可リストに載せただけで中身が空、という抜けを塞ぐ）。
-for f in SkillManager SubagentScanner Updater; do
+for f in SkillManager Updater; do
     if ! grep -q 'WriteGuard.assertMutable' "Sources/ManageArmsCore/$f.swift"; then
         fail "$f.swift が WriteGuard.assertMutable を呼んでいません（削除・移動の許可リストに載っているのに無防備）"
     fi

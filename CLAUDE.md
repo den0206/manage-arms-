@@ -39,8 +39,8 @@ CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh                            # .ap
    `Registry`（自分の `registry.json`）/ `MCPScanner`（`~/.cursor/mcp.json`）。
    ここが増えると「書き込みは各 CLI に委譲する」という中核の判断（DESIGN 3.1）が崩れ、
    実行中の Claude と競合してユーザーの全状態を壊しうる。
-2. **削除・移動・symlink 作成は `WriteGuard` を通る経路だけ** — `SkillManager` /
-   `SubagentScanner` / `Updater` は必ず `WriteGuard.assertMutable` を呼ぶ。
+2. **削除・移動・symlink 作成は `WriteGuard` を通る経路だけ** — Skill/Subagent の
+   共通 lifecycle を持つ `SkillManager` と `Updater` は必ず `WriteGuard.assertMutable` を呼ぶ。
    `Fetcher` / `Installer` は一時ディレクトリのみ、`InstallLocationGuard` は
    直前に自分が `/Applications` へ作ったバンドルのみ。
    既存ユーザーToolの削除は `WriteGuard.assertUserArtifact` で既知ルート直下を検証する。

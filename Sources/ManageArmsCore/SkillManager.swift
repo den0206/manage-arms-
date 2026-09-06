@@ -19,71 +19,18 @@ public enum SkillManager {
 
     /// 実体を置き場に戻し、Claude 用の symlink を張り直す。
     public static func enable(_ name: String, env: Environment, registry: inout Registry) throws {
-        let fm = FileManager.default
-        let store = env.skillStore.appending(path: name)
-        let parked = env.disabledStore.appending(path: name)
-
-        if !fm.fileExists(atPath: store.path(percentEncoded: false)) {
-            guard fm.fileExists(atPath: parked.path(percentEncoded: false)) else { throw Failure.notFound(name) }
-            try WriteGuard.assertMutable(parked, env: env, registry: registry)
-            try fm.createDirectory(at: env.skillStore, withIntermediateDirectories: true)
-            try fm.moveItem(at: parked, to: store)
-        }
-
-        try linkForClaude(name, env: env, registry: registry)
-
-        var entry = registry.entry(named: name, kind: .skill) ?? Registry.Entry(name: name, kind: .skill)
-        entry.disabled = false
-        registry.upsert(entry)
-        try registry.save(env: env)
+        try ManagedLifecycle.enable(name, kind: .skill, env: env, registry: &registry)
     }
 
     /// Claude symlink を外し、実体を退避ディレクトリへ移す。**実体は消さない。**
     public static func disable(_ name: String, env: Environment, registry: inout Registry) throws {
-        let fm = FileManager.default
-        let store = env.skillStore.appending(path: name)
-        let link = env.claudeSkills.appending(path: name)
-
-        // symlink だけを消す。リンク先の実体は巻き込まない。
-        // trashItem ではなく removeItem — ゴミ箱にリンク切れを残しても意味が無い。
-        if WriteGuard.isSymlink(link) {
-            try WriteGuard.assertMutable(link, env: env, registry: registry)
-            try fm.removeItem(at: link)
-        }
-
-        guard fm.fileExists(atPath: store.path(percentEncoded: false)) else { throw Failure.notFound(name) }
-        try WriteGuard.assertMutable(store, env: env, registry: registry)
-
-        let parked = env.disabledStore.appending(path: name)
-        guard !fm.fileExists(atPath: parked.path(percentEncoded: false)) else {
-            throw Failure.alreadyExists(parked.path(percentEncoded: false))
-        }
-        try fm.createDirectory(at: env.disabledStore, withIntermediateDirectories: true)
-        try fm.moveItem(at: store, to: parked)
-
-        var entry = registry.entry(named: name, kind: .skill) ?? Registry.Entry(name: name, kind: .skill)
-        entry.disabled = true
-        registry.upsert(entry)
-        try registry.save(env: env)
+        try ManagedLifecycle.disable(name, kind: .skill, env: env, registry: &registry)
     }
 
     /// Claude だけは共有ルートを読まないので symlink が要る（3.2）。
     /// Cursor / Codex は `~/.agents/skills` を直読みするため何もしない。
     static func linkForClaude(_ name: String, env: Environment, registry: Registry) throws {
-        let fm = FileManager.default
-        let link = env.claudeSkills.appending(path: name)
-        let target = env.skillStore.appending(path: name)
-
-        if WriteGuard.isSymlink(link) {
-            // 自分が張ったものだけ張り替える。他ツールの symlink は触らない。
-            try WriteGuard.assertMutable(link, env: env, registry: registry)
-            try fm.removeItem(at: link)
-        } else if fm.fileExists(atPath: link.path(percentEncoded: false)) {
-            throw Failure.alreadyExists(link.path(percentEncoded: false))   // 実体がある場合は上書きしない
-        }
-
-        try fm.createDirectory(at: env.claudeSkills, withIntermediateDirectories: true)
-        try fm.createSymbolicLink(at: link, withDestinationURL: target)
+        try ManagedLifecycle.link(name, kind: .skill, env: env, registry: registry)
     }
 }
 
@@ -102,25 +49,114 @@ extension SkillManager {
     /// 戻り値はゴミ箱に入った実体の位置（テストの後片付けに使う）。
     @discardableResult
     public static func remove(_ name: String, env: Environment, registry: inout Registry) throws -> URL? {
+        try ManagedLifecycle.remove(name, kind: .skill, env: env, registry: &registry)
+    }
+}
+
+/// Skill と Subagent に共通する guarded lifecycle。配置差だけを内側に持つ。
+enum ManagedLifecycle {
+    struct Layout {
+        let store: URL
+        let parked: URL
+        let links: [URL]
+    }
+
+    static func layout(_ name: String, kind: Kind, env: Environment) -> Layout {
+        if kind == .subagent {
+            return Layout(
+                store: env.agentStore.appending(path: "\(name).md"),
+                parked: env.disabledAgentStore.appending(path: "\(name).md"),
+                links: [env.home.appending(path: ".claude/agents/\(name).md"),
+                        env.home.appending(path: ".cursor/agents/\(name).md")]
+            )
+        }
+        return Layout(
+            store: env.skillStore.appending(path: name),
+            parked: env.disabledStore.appending(path: name),
+            links: [env.claudeSkills.appending(path: name)]
+        )
+    }
+
+    static func link(_ name: String, kind: Kind, env: Environment,
+                     registry: Registry) throws {
         let fm = FileManager.default
-        let link = env.claudeSkills.appending(path: name)
-        if WriteGuard.isSymlink(link) {
+        let layout = layout(name, kind: kind, env: env)
+        for link in layout.links {
+            if WriteGuard.isSymlink(link) {
+                try WriteGuard.assertMutable(link, env: env, registry: registry)
+                try fm.removeItem(at: link)
+            } else if fm.fileExists(atPath: link.path(percentEncoded: false)) {
+                throw SkillManager.Failure.alreadyExists(link.path(percentEncoded: false))
+            }
+            try fm.createDirectory(at: link.deletingLastPathComponent(),
+                                   withIntermediateDirectories: true)
+            try fm.createSymbolicLink(at: link, withDestinationURL: layout.store)
+        }
+    }
+
+    static func enable(_ name: String, kind: Kind, env: Environment,
+                       registry: inout Registry) throws {
+        let fm = FileManager.default
+        let layout = layout(name, kind: kind, env: env)
+        if !fm.fileExists(atPath: layout.store.path(percentEncoded: false)) {
+            guard fm.fileExists(atPath: layout.parked.path(percentEncoded: false)) else {
+                throw SkillManager.Failure.notFound(name)
+            }
+            try WriteGuard.assertMutable(layout.parked, env: env, registry: registry)
+            try fm.createDirectory(at: layout.store.deletingLastPathComponent(),
+                                   withIntermediateDirectories: true)
+            try fm.moveItem(at: layout.parked, to: layout.store)
+        }
+        try link(name, kind: kind, env: env, registry: registry)
+        var entry = registry.entry(named: name, kind: kind) ?? Registry.Entry(name: name, kind: kind)
+        entry.disabled = false
+        registry.upsert(entry)
+        try registry.save(env: env)
+    }
+
+    static func disable(_ name: String, kind: Kind, env: Environment,
+                        registry: inout Registry) throws {
+        let fm = FileManager.default
+        let layout = layout(name, kind: kind, env: env)
+        for link in layout.links where WriteGuard.isSymlink(link) {
             try WriteGuard.assertMutable(link, env: env, registry: registry)
             try fm.removeItem(at: link)
         }
+        guard fm.fileExists(atPath: layout.store.path(percentEncoded: false)) else {
+            throw SkillManager.Failure.notFound(name)
+        }
+        try WriteGuard.assertMutable(layout.store, env: env, registry: registry)
+        guard !fm.fileExists(atPath: layout.parked.path(percentEncoded: false)) else {
+            throw SkillManager.Failure.alreadyExists(layout.parked.path(percentEncoded: false))
+        }
+        try fm.createDirectory(at: layout.parked.deletingLastPathComponent(),
+                               withIntermediateDirectories: true)
+        try fm.moveItem(at: layout.store, to: layout.parked)
+        var entry = registry.entry(named: name, kind: kind) ?? Registry.Entry(name: name, kind: kind)
+        entry.disabled = true
+        registry.upsert(entry)
+        try registry.save(env: env)
+    }
 
-        // 有効なら実体置き場、無効なら退避先にある。どちらか片方だけが存在する。
+    @discardableResult
+    static func remove(_ name: String, kind: Kind, env: Environment,
+                       registry: inout Registry) throws -> URL? {
+        let fm = FileManager.default
+        let layout = layout(name, kind: kind, env: env)
+        for link in layout.links where WriteGuard.isSymlink(link) {
+            try WriteGuard.assertMutable(link, env: env, registry: registry)
+            try fm.removeItem(at: link)
+        }
         var trashed: URL?
-        for url in [env.skillStore.appending(path: name), env.disabledStore.appending(path: name)]
+        for url in [layout.store, layout.parked]
         where fm.fileExists(atPath: url.path(percentEncoded: false)) {
             try WriteGuard.assertMutable(url, env: env, registry: registry)
             var result: NSURL?
             try fm.trashItem(at: url, resultingItemURL: &result)
             trashed = result as URL?
         }
-        guard trashed != nil else { throw Failure.notFound(name) }
-
-        registry.resources.removeAll { $0.name == name && $0.kind == Kind.skill.rawValue }
+        guard trashed != nil else { throw SkillManager.Failure.notFound(name) }
+        registry.resources.removeAll { $0.name == name && $0.kind == kind.rawValue }
         try registry.save(env: env)
         return trashed
     }
