@@ -19,11 +19,17 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 
 ### Added
 
-- Optional browser detection: while a window is open and a browser is frontmost, opening a
-  skill, plugin or subagent page in Safari, Chrome, Edge, Brave or Arc offers to add it from a
-  bar at the top of the window, so no URL has to be copied. Turn it on with the switch at the
-  bottom of the sidebar; it is off until you do, asks for permission to control the browser at
-  that point, and turns itself off if permission is declined. No notification permission is
+- ManageArms now stays in the menu bar, so browser detection keeps working after you close the
+  window. Its icon turns green when something has been found; open the menu to add it or
+  dismiss it, or just navigate away — the icon goes back to normal when you leave the page.
+  Closing the window drops the scanned list from memory, and nothing is scanned
+  again until you open it. Turn residency off in Settings to go back to quitting on close.
+- A Settings screen in the sidebar (⌘, or the menu bar item) holding the menu bar and browser
+  detection switches.
+- Browser detection: opening a skill, plugin or subagent page in Safari, Chrome, Edge, Brave or
+  Arc while that browser is frontmost offers to add it, so no URL has to be copied. It is on by
+  default, asks for permission to control the browser the first time a browser comes to the
+  front, and turns itself off if permission is declined. No notification permission is
   requested. Pages are confirmed against `raw.githubusercontent.com` first, and URLs are never
   stored.
 
