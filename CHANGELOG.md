@@ -13,11 +13,12 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 ### Added
 
 - Optional browser detection: while a window is open and a browser is frontmost, opening a
-  skill, plugin or subagent page in Safari, Chrome, Edge, Brave or Arc offers to add it, so
-  no URL has to be copied. Turn it on with the switch at the bottom of the sidebar; it is off
-  until you do, asks for permission to control the browser at that point, and turns itself off
-  if permission is declined. Pages are confirmed against `raw.githubusercontent.com` before you
-  are notified, notifications fall back to an in-window banner, and URLs are never stored.
+  skill, plugin or subagent page in Safari, Chrome, Edge, Brave or Arc offers to add it from a
+  bar at the top of the window, so no URL has to be copied. Turn it on with the switch at the
+  bottom of the sidebar; it is off until you do, asks for permission to control the browser at
+  that point, and turns itself off if permission is declined. No notification permission is
+  requested. Pages are confirmed against `raw.githubusercontent.com` first, and URLs are never
+  stored.
 
 - Catalog URLs such as `skills.sh/<owner>/<repo>/<skill>` are accepted in the Add sheet and
   resolved to the GitHub repository they are published from. The skill name in the URL is a
