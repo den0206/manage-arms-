@@ -7,3 +7,6 @@ DerivedData/
 
 # リリース成果物（GitHub Release に添付するもの。リポジトリには入れない）
 *.dmg
+
+# ローカル専用のシークレット（GitHub Secrets へ投入するための一時ファイル）
+.secret
