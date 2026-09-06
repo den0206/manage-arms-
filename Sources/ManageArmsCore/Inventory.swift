@@ -292,16 +292,21 @@ public struct Inventory: Sendable {
     }
 
     /// 読み取りだけで組み立てる。キャッシュしない（DESIGN.md 3.5）。
-    public static func load(env: Environment, overrides: [Agent: String] = [:]) -> Inventory {
-        let agents = Detector.detectAll(env: env, overrides: overrides)
+    public static func load(env: Environment) -> Inventory {
         let registry = Registry.load(env: env)
+        // 手動指定のパスと有効/無効は registry.json が持つ（3.7）。
+        // 無効にしたエージェントは走査そのものをしない。
+        var agents = Detector.detectAll(env: env, overrides: registry.cliOverrides)
+        for agent in Agent.allCases where !registry.setting(agent).enabled {
+            agents[agent] = .disabled
+        }
         let used = registry.usage.lastUsed
         let projects = ProjectScan.load(env: env)
         var issues: [String] = []
         do { try Registry.assertReadable(env: env) } catch { issues.append("Registry: \(error)") }
         var servers: [Agent: [MCPServer]] = [:]
         var plugins: [InstalledPlugin] = []
-        for agent in Agent.allCases where agents[agent] != .undetected {
+        for agent in Agent.allCases where agents[agent]?.isActive == true {
             do { servers[agent] = try MCPScanner.read(agent, env: env) }
             catch { issues.append("\(agent.displayName) MCP: \(error)") }
             if agent == .claude || agent == .codex {
@@ -385,7 +390,7 @@ public struct Inventory: Sendable {
         -> ResourceRow.State
     {
         if !agent.supports(kind) { return .unsupported }   // 検出状態と独立
-        if detection == .undetected { return .undetected }
+        if !detection.isActive { return .undetected }
         return visible ? .explicit : .absent
     }
 

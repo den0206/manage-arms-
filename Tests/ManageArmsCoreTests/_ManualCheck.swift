@@ -36,6 +36,7 @@ struct ManualCheck {
             case .detected(let v, let p): text = "検出済み  \(v ?? "─")  \(p ?? "(CLI なし)")"
             case .configOnly:             text = "設定のみ（CLI が見つからない）"
             case .undetected:             text = "未検出"
+            case .disabled:               text = "管理対象外"
             }
             print(String(format: "  %-14@ %@", agent.displayName as NSString, text as NSString))
         }

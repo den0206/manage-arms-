@@ -254,6 +254,48 @@ final class AppModel {
         }
     }
 
+    /// エージェントを管理対象から外す / 戻す（DESIGN.md 3.7）。
+    /// **ファイルには一切触れない** — 表示と走査の対象から外すだけ。
+    func setAgent(_ agent: Agent, enabled: Bool) {
+        updateAgent(agent) { $0.enabled = enabled }
+    }
+
+    /// `PATH` から CLI を見つけられない環境の逃げ道（3.7 の 4 番目）。
+    /// 選ばせるのは実行ファイル 1 つだけ。ここで受け取ったパスは
+    /// 次回以降の検出でそのまま `--version` に渡る。
+    func chooseCLIPath(for agent: Agent) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.message = String(localized: "\(agent.displayName) の実行ファイルを選んでください")
+        // npm / uv が入れる CLI は `~/.local/bin` や `~/.bun/bin` にいる。
+        // 隠しディレクトリを開けないと、この逃げ道が一番必要な人に届かない。
+        panel.showsHiddenFiles = true
+        panel.directoryURL = ["/opt/homebrew/bin", "/usr/local/bin"]
+            .first { FileManager.default.fileExists(atPath: $0) }
+            .map { URL(filePath: $0) }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let path = url.path(percentEncoded: false)
+        guard FileManager.default.isExecutableFile(atPath: path) else {
+            errorMessage = String(localized: "選んだファイルは実行できません。CLI 本体を選んでください。")
+            return
+        }
+        updateAgent(agent) { $0.path = path }
+    }
+
+    func clearCLIPath(for agent: Agent) {
+        updateAgent(agent) { $0.path = nil }
+    }
+
+    private func updateAgent(_ agent: Agent, _ change: (inout Registry.AgentSetting) -> Void) {
+        do {
+            var registry = try Registry.read(env: .live)
+            registry.update(agent, change)
+            try registry.save(env: .live)
+            reload()
+        } catch { errorMessage = "\(error)" }
+    }
 
     func refreshActivity() {
         guard !isRefreshingActivity else { return }

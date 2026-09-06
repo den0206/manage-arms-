@@ -33,13 +33,27 @@
 "スキル・サブエージェントを追加する" = "Add a skill or subagent";
 "使いたいスキルの GitHub ページを開き、その URL をそのまま貼り付けてください。" = "Open the skill's page on GitHub and paste its URL here.";
 "中身を確認するまで何も入りません。追加したものは Claude Code / Cursor / Codex の全部から使えます。" = "Nothing is installed until you review the contents. Whatever you add works in Claude Code, Cursor and Codex.";
-"エージェントの検出状況" = "Detected agents";
 "~/%@（CLI なし・設定を直接読む）" = "~/%@ (no CLI — the config is read directly)";
 "~/%@ はあるが CLI が見つからない" = "~/%@ exists, but the CLI was not found";
 
+/* Agent list & per-agent settings (DESIGN 3.7) */
+"管理対象外" = "Not managed";
+"手動指定" = "Manual path";
+"CLI のパスを指定…" = "Set the CLI path…";
+"%@ の指定を解除" = "Clear the path for %@";
+"PATH から CLI を見つけられないときに、実行ファイルを直接指定します" = "Point manage-arms at the executable when it cannot be found on your PATH";
+"検出できたエージェントは自動で並びます。オフにしたものは一覧から外れるだけで、設定ファイルには触れません。" = "Detected agents are listed automatically. Switching one off only removes it from the lists — no config file is touched.";
+"オフにすると、このエージェントを一覧から外します（設定ファイルは変更しません）" = "Switch off to drop this agent from the lists (no config file is changed)";
+"インストールするか、CLI のパスを指定してください" = "Install it, or set the path to its CLI";
+"オンにすると一覧に戻ります" = "Switch it on to bring it back";
+"%@ は管理対象から外しています" = "%@ is not being managed";
+"ホームのエージェント一覧でオンに戻せます。" = "Switch it back on from the agent list on Home.";
+"インストールするか、ホームで CLI のパスを指定すると、ここに持っているスキルが並びます。" = "Install it — or set the path to its CLI on Home — and everything it carries will be listed here.";
+"%@ の実行ファイルを選んでください" = "Choose the %@ executable";
+"選んだファイルは実行できません。CLI 本体を選んでください。" = "That file is not executable. Choose the CLI itself.";
+
 /* Agent screen */
 "%@ が見つかりません" = "%@ was not found";
-"インストールすると、ここに持っているスキルが並びます。" = "Install it and everything it carries will be listed here.";
 "まだ何も入っていません" = "Nothing installed yet";
 "GitHub の URL を貼り付けるだけで追加できます。" = "Just paste a GitHub URL to add one.";
 "あなたが入れたものはまだありません。" = "You haven't installed anything yourself yet.";

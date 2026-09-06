@@ -12,6 +12,12 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 
 ### Added
 
+- Per-agent switches on Home: turn an agent off to drop it from the sidebar and stop scanning its
+  MCP servers and plugins. Nothing on disk is touched — the switch only changes what manage-arms
+  looks at.
+- A manual CLI path for agents that cannot be found on your `PATH`, set from the agent list on Home
+  and cleared from the same menu. A path that stops working falls back to `PATH` lookup instead of
+  reporting the agent as detected.
 - Guided MCP and plugin installation with an explicit agent destination, registration checks,
   direct removal of existing user tools, and protected indicators for recognized bundled tools.
 - Visible-window MCP process polling and scan diagnostics that distinguish failures from empty lists.

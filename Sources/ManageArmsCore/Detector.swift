@@ -10,8 +10,14 @@ public enum Detection: Equatable, Sendable {
     case configOnly
     /// CLI も設定ディレクトリも無い。
     case undetected
+    /// 利用者が管理対象から外した。検出結果ではなく意思表示なので、
+    /// **「未検出」と別の文言で出す** — 同じ灰色にすると「入れ直せば直る」と誤解する（3.7）。
+    case disabled
 
     public var isUsable: Bool { if case .detected = self { true } else { false } }
+
+    /// 走査・表示の対象か。未検出と無効はどちらも中身を読まない。
+    public var isActive: Bool { self != .undetected && self != .disabled }
 }
 
 public enum Detector {
@@ -37,7 +43,11 @@ public enum Detector {
             return hasConfig ? .detected(version: nil, path: nil) : .undetected
         }
 
-        guard let path = override ?? which(cli, env: env) else {
+        // 手動指定は毎回実在を確かめる。アンインストールや Homebrew の移動で消えても
+        // 「検出済み」のままになると、緑の表示のまま全操作が失敗する（3.7）。
+        // 消えていたら指定が無かったものとして `PATH` 解決に戻る。
+        let manual = override.flatMap { FileManager.default.isExecutableFile(atPath: $0) ? $0 : nil }
+        guard let path = manual ?? which(cli, env: env) else {
             return hasConfig ? .configOnly : .undetected
         }
         return .detected(version: version(of: path, env: env), path: path)

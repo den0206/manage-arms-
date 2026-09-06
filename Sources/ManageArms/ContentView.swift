@@ -73,7 +73,8 @@ struct ContentView: View {
         List(selection: $screen) {
             Label("ホーム", systemImage: "house").tag(Screen.home)
             Section("エージェント") {
-                ForEach(Agent.allCases) { agent in
+                // 管理対象から外したものは並べない。戻すのはホームの一覧から（3.7）。
+                ForEach(Agent.allCases.filter { model.inventory.agents[$0] != .disabled }) { agent in
                     AgentSidebarRow(
                         agent: agent,
                         detection: model.inventory.agents[agent] ?? .undetected,
@@ -170,7 +171,7 @@ struct AgentSidebarRow: View {
         HStack(spacing: 8) {
             Text(agent.displayName).lineLimit(1)
             Spacer(minLength: 4)
-            if detection == .undetected {
+            if !detection.isActive {
                 StatusDot(detection: detection)
             } else if count > 0 {
                 Text(count.formatted())
@@ -183,7 +184,7 @@ struct AgentSidebarRow: View {
                 StatusDot(detection: detection)
             }
         }
-        .opacity(detection == .undetected ? 0.55 : 1)
+        .opacity(detection.isActive ? 1 : 0.55)
         .animation(Motion.gentle, value: detection)
     }
 }
@@ -331,66 +332,128 @@ struct HomeView: View {
     /// 旧「エージェント」画面の中身（DESIGN.md 8 章）。専用画面を持つほどの情報量が無い。
     /// **押せばそのエージェントの画面へ行く** — 検出状況を見た次にやることはそれ。
     /// 囲みは 1 枚。4 枚のカードに分けると、4 行の表と同じ情報に 4 倍の縁が付く。
+    ///
+    /// 検出は自動（3.7）。ここに置く操作は、自動で決まらない 2 つだけ —
+    /// 管理対象から外す / `PATH` に無い CLI のパスを教える。
     private var agentList: some View {
         VStack(alignment: .leading, spacing: Theme.gap) {
-            Text("エージェントの検出状況").font(.headline)
+            Text("エージェント").font(.headline)
             VStack(spacing: 0) {
                 ForEach(Agent.allCases) { agent in
                     if agent != Agent.allCases.first { Divider() }
-                    AgentRow(agent: agent,
-                             detection: model.inventory.agents[agent] ?? .undetected,
-                             count: model.inventory.rows(for: agent)
-                                 .filter { $0.origin != .bundled }.count) {
+                    AgentRow(agent: agent, model: model) {
                         withAnimation(Motion.gentle) { screen = .agent(agent) }
                     }
                 }
+                Divider()
+                cliPathMenu
             }
             // 行の下敷きは四角なので、角丸で切り抜く。先頭と末尾の行にホバーすると
             // 囲みの角からはみ出す。
             .clipShape(RoundedRectangle(cornerRadius: Theme.radiusM))
             .card(padding: 0)
+            Text("検出できたエージェントは自動で並びます。オフにしたものは一覧から外れるだけで、設定ファイルには触れません。")
+                .font(.caption).foregroundStyle(.secondary)
         }
+    }
+
+    /// CLI が `PATH` で見つからないときの逃げ道（3.7 の 4 番目）。
+    /// 行ごとにボタンを置くと 4 行ぶんの飾りになるので、まとめて 1 か所に出す。
+    private var cliPathMenu: some View {
+        Menu {
+            ForEach(Agent.allCases.filter { $0.cliName != nil }) { agent in
+                Button(agent.displayName) { model.chooseCLIPath(for: agent) }
+            }
+            if !manuallyLocated.isEmpty {
+                Divider()
+                ForEach(manuallyLocated) { agent in
+                    Button("\(agent.displayName) の指定を解除") { model.clearCLIPath(for: agent) }
+                }
+            }
+        } label: {
+            Label("CLI のパスを指定…", systemImage: "plus.circle")
+                .font(.callout).foregroundStyle(Color.accentColor)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .help("PATH から CLI を見つけられないときに、実行ファイルを直接指定します")
+    }
+
+    private var manuallyLocated: [Agent] {
+        Agent.allCases.filter { model.inventory.registry.setting($0).path != nil }
     }
 }
 
 /// ホームのエージェント 1 行。検出状況（3.7 の 4 状態）を色と文で両方出す。
 /// **1 行に収める** — 名前・状態・バージョン・件数は、縦に積まなくても横に並ぶ。
+/// 右端のスイッチだけは行のボタンの外に出す（ボタンの中に入れると、
+/// 切り替えたつもりが画面遷移になる）。
 struct AgentRow: View {
     let agent: Agent
-    let detection: Detection
-    let count: Int
+    let model: AppModel
     let open: () -> Void
     @State private var hovering = false
 
-    private var enabled: Bool { detection != .undetected }
+    private var detection: Detection { model.inventory.agents[agent] ?? .undetected }
+    private var count: Int {
+        model.inventory.rows(for: agent).filter { $0.origin != .bundled }.count
+    }
+    private var enabled: Bool { detection.isActive }
 
     var body: some View {
-        Button(action: open) {
-            HStack(spacing: 8) {
-                Text(agent.displayName).font(.callout.weight(.medium))
-                StatusDot(detection: detection)
-                detail
-                    .font(.caption).foregroundStyle(.secondary)
-                    .lineLimit(1).truncationMode(.middle)
-                Spacer(minLength: 8)
-                if count > 0, enabled {
-                    Text(count.formatted())
-                        .font(.callout).monospacedDigit().foregroundStyle(.secondary)
+        HStack(spacing: 10) {
+            Button(action: open) {
+                HStack(spacing: 8) {
+                    Text(agent.displayName).font(.callout.weight(.medium))
+                    Spacer(minLength: 8)
+                    detail
+                        .font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                    if count > 0, enabled {
+                        Text(count.formatted())
+                            .font(.callout).monospacedDigit().foregroundStyle(.secondary)
+                    }
+                    status
+                    Image(systemName: "chevron.right")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                        .opacity(enabled ? 1 : 0)
                 }
-                Image(systemName: "chevron.right")
-                    .font(.caption2).foregroundStyle(.tertiary)
-                    .opacity(enabled ? 1 : 0)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 12).padding(.vertical, 9)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .opacity(enabled ? 1 : 0.55)
+            .disabled(!enabled)
+
+            Toggle(agent.displayName, isOn: .init(get: { detection != .disabled },
+                                                  set: { model.setAgent(agent, enabled: $0) }))
+                .toggleStyle(.switch).controlSize(.small)
+                .labelsHidden()
+                .help("オフにすると、このエージェントを一覧から外します（設定ファイルは変更しません）")
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 12).padding(.vertical, 9)
         .background(hovering && enabled ? AnyShapeStyle(.quaternary.opacity(0.4))
                                         : AnyShapeStyle(.clear))
-        .opacity(enabled ? 1 : 0.55)
         .animation(Motion.gentle, value: hovering)
         .onHover { hovering = $0 }
-        .disabled(!enabled)
+    }
+
+    /// 状態は色だけでなく文字でも出す（3.7）。「未検出」と「管理対象外」は別物。
+    /// **「有効」とは呼ばない** — 隣のスイッチと、スキルの有効/無効が既にその語を使っている。
+    @ViewBuilder
+    private var status: some View {
+        switch detection {
+        case .detected:
+            Pill(text: String(localized: "検出済み"), tint: .green, icon: "checkmark.circle.fill")
+        case .configOnly:
+            Pill(text: String(localized: "設定のみ"), tint: .orange)
+        case .undetected:
+            Pill(text: String(localized: "未検出"))
+        case .disabled:
+            Pill(text: String(localized: "管理対象外"))
+        }
     }
 
     @ViewBuilder
@@ -401,13 +464,20 @@ struct AgentRow: View {
             if version == nil, path == nil {
                 Text("~/\(agent.configDir)（CLI なし・設定を直接読む）")
             } else {
-                Text(verbatim: [version, path].compactMap { $0 }.joined(separator: "  "))
-                    .help(path ?? "")
+                HStack(spacing: 4) {
+                    if model.inventory.registry.setting(agent).path != nil {
+                        Pill(text: String(localized: "手動指定"))
+                    }
+                    Text(verbatim: [version, path].compactMap { $0 }.joined(separator: "  "))
+                }
+                .help(path ?? "")
             }
         case .configOnly:
             Text("~/\(agent.configDir) はあるが CLI が見つからない")
         case .undetected:
-            Text("未検出").foregroundStyle(.tertiary)
+            Text("インストールするか、CLI のパスを指定してください").foregroundStyle(.tertiary)
+        case .disabled:
+            Text("オンにすると一覧に戻ります").foregroundStyle(.tertiary)
         }
     }
 }
@@ -425,11 +495,17 @@ struct AgentPage: View {
 
     var body: some View {
         Group {
-            if detection == .undetected {
+            if detection == .disabled {
+                ContentUnavailableView {
+                    Label("\(agent.displayName) は管理対象から外しています", systemImage: "eye.slash")
+                } description: {
+                    Text("ホームのエージェント一覧でオンに戻せます。")
+                }
+            } else if detection == .undetected {
                 ContentUnavailableView {
                     Label("\(agent.displayName) が見つかりません", systemImage: "questionmark.folder")
                 } description: {
-                    Text("インストールすると、ここに持っているスキルが並びます。")
+                    Text("インストールするか、ホームで CLI のパスを指定すると、ここに持っているスキルが並びます。")
                 }
             } else if rows.isEmpty {
                 ContentUnavailableView {

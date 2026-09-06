@@ -93,6 +93,7 @@ struct StatusDot: View {
         case .detected:   .green
         case .configOnly: .orange
         case .undetected: .secondary.opacity(0.4)
+        case .disabled:   .secondary.opacity(0.4)
         }
     }
 
@@ -101,6 +102,7 @@ struct StatusDot: View {
         case .detected:   String(localized: "検出済み")
         case .configOnly: String(localized: "設定のみ")
         case .undetected: String(localized: "未検出")
+        case .disabled:   String(localized: "管理対象外")
         }
     }
 }
