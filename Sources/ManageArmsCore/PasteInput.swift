@@ -108,7 +108,34 @@ public enum GitHubURL {
     ///   https://skills.sh/owner/repo/skill           (カタログ → owner/repo を採る)
     public static func parse(_ raw: String) -> GitHubSource? {
         if let catalog = catalog(raw) { return catalog.source }
+        guard let parts = components(raw) else { return nil }
+        guard let branch = parts.branch else { return GitHubSource(repo: parts.repo) }
 
+        // ブランチ名に "/" を含むと境界が決まらない。先頭 1 個をブランチと仮定し、
+        // 確認画面で直せるよう印を付ける。
+        var path = parts.path
+        if parts.isFile { path = Array(path.dropLast()) }   // SKILL.md → 親ディレクトリ
+
+        return GitHubSource(
+            repo: parts.repo,
+            branch: branch,
+            subdir: path.isEmpty ? nil : path.joined(separator: "/"),
+            branchAmbiguous: !parts.path.isEmpty
+        )
+    }
+
+    /// URL を repo / branch / それ以降のパスに割る。`parse` は subdir だけを使うが、
+    /// ブラウザ検知（`ToolURL`）は blob のファイル名まで要る（`agents/foo.md` の実在確認）。
+    /// **同じ解釈を 2 か所に書かない。**
+    public struct Components: Equatable, Sendable {
+        public let repo: String
+        public let branch: String?
+        /// ブランチより後ろの全セグメント。blob ならファイル名を含む。
+        public let path: [String]
+        public let isFile: Bool
+    }
+
+    public static func components(_ raw: String) -> Components? {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.hasPrefix("github.com/") || text.hasPrefix("www.github.com/") {
             text = "https://" + text
@@ -129,24 +156,16 @@ public enum GitHubURL {
         let repo = "\(owner)/\(name)"
 
         guard let marker = parts.first, marker == "tree" || marker == "blob" else {
-            return parts.isEmpty ? GitHubSource(repo: repo) : nil
+            // /issues や /pulls はリポジトリの指定ではない。
+            return parts.isEmpty ? Components(repo: repo, branch: nil, path: [], isFile: false) : nil
         }
         let isFile = marker == "blob"
         parts.removeFirst()
-        guard let branch = parts.first else { return GitHubSource(repo: repo) }
+        guard let branch = parts.first else {
+            return Components(repo: repo, branch: nil, path: [], isFile: false)
+        }
         parts.removeFirst()
-
-        // ブランチ名に "/" を含むと境界が決まらない。先頭 1 個をブランチと仮定し、
-        // 確認画面で直せるよう印を付ける。
-        var path = parts
-        if isFile { path = Array(path.dropLast()) }   // SKILL.md → 親ディレクトリ
-
-        return GitHubSource(
-            repo: repo,
-            branch: branch,
-            subdir: path.isEmpty ? nil : path.joined(separator: "/"),
-            branchAmbiguous: !parts.isEmpty
-        )
+        return Components(repo: repo, branch: branch, path: parts, isFile: isFile)
     }
 
     /// skills.sh のようなカタログページ。配布しているのは GitHub なので owner/repo を採る。
@@ -168,10 +187,18 @@ public enum GitHubURL {
         else { return nil }
 
         let parts = url.path().split(separator: "/").map(String.init)
-        guard parts.count >= 2, !parts[0].isEmpty, !parts[1].isEmpty else { return nil }
+        guard parts.count >= 2, !parts[0].isEmpty, !parts[1].isEmpty,
+              !reserved.contains(parts[0].lowercased()) else { return nil }
         return (GitHubSource(repo: "\(parts[0])/\(parts[1])"),
                 parts.count >= 3 ? parts[2] : nil)
     }
+
+    /// skills.sh の予約パス。`skills.sh/agent/claude-code` は owner/repo ではないので、
+    /// repo として受けると存在しないリポジトリを取得しに行く。
+    static let reserved: Set<String> = [
+        "about", "agent", "agents", "api", "docs", "login", "new", "search",
+        "terms", "privacy", "_next", "favicon.ico",
+    ]
 
     /// カタログ URL に含まれるスキル名。候補一覧の初期絞り込みに使う。
     public static func skillHint(_ raw: String) -> String? { catalog(raw)?.skill }
