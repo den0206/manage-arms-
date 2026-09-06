@@ -133,6 +133,18 @@ struct ToolURLTests {
 
     // MARK: - 設定
 
+    @Test("外観は既定でシステム追従で、選んだときだけ registry.json に残る")
+    func appearanceSetting() throws {
+        var registry = Registry()
+        #expect(registry.appearance == nil)
+        #expect(!String(decoding: try Registry.encoder.encode(registry), as: UTF8.self)
+            .contains("appearance"))
+
+        registry.appearance = "dark"
+        let encoded = try Registry.encoder.encode(registry)
+        #expect(try Registry.decoder.decode(Registry.self, from: encoded).appearance == "dark")
+    }
+
     @Test("検知と常駐は既定 ON で、既定値は registry.json に書き出さない")
     func settingDefaults() throws {
         var registry = Registry()
