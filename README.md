@@ -41,7 +41,7 @@ The project is a Swift Package — there is no `.xcodeproj` (open `Package.swift
 directly).
 
 ```bash
-swift test                  # unit tests (302)
+swift test                  # unit tests (303)
 swift build                 # compile check
 
 # The distributable form is a hand-assembled .app bundle.

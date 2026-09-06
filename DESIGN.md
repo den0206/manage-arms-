@@ -7,7 +7,7 @@ AI コーディングエージェント（Claude Code / Cursor / Codex / Gemini 
 - **プラットフォーム**: macOS 26 以降 / SwiftUI
 - **配布**: DMG の直配布（App Sandbox 非対応のため App Store 不可）。13 章
 - **状態**: **v1〜v4 実装済み**（Skills / Subagents / Plugins / 使用実績 / MCP / 権限）、
-  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト 302 件
+  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト 303 件
 - **実装**: SPM パッケージ。`swift test` / `CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh`
   （`.xcodeproj` は不要。実 CLI・実ネットワークを使う確認は `MANUAL=1 swift test`）
 - **作業の進め方**: [CLAUDE.md](CLAUDE.md)。利用者向けの入口は [README.md](README.md)
@@ -962,7 +962,15 @@ Claude Code
 
 判定は `Inventory.origin`（純粋関数・テスト済み）。同梱ルートは
 `Agent.bundledSkillRoots` の 2 つだけで、**同名のものが自分の置き場にもあれば
-それは自分のもの**とする。MCP と Plugin は設定を書いたのがユーザー自身なので常に `user`。
+それは自分のもの**とする。MCP は設定を書いたのがユーザー自身なので常に `user`。
+
+Plugin だけは例外がある。**Codex は自社の既定プラグインを CLI が返す一覧に混ぜてくる**
+（`openai-curated-remote` の `plugin-management` / `openai-templates` /
+`deep-research-work`）。見分けるのは推測ではなく CLI が返すメタデータで、
+`installPolicy: INSTALLED_BY_DEFAULT` が付く（実測）。これを `bundled` として扱う —
+ユーザー全体に「削除」付きで並べると、自分で入れた分が埋もれるうえ、
+消してもエージェントが入れ直すものに削除ボタンを出すことになる
+（`codex plugin remove` は成功を返すが消えないことを実測で確認）。
 
 ### スコープの見せ方（5.1）— タブで 1 つずつ
 

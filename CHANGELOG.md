@@ -108,6 +108,10 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 
 ### Fixed
 
+- Codex plugins that ship installed by default (`installPolicy: INSTALLED_BY_DEFAULT`, the
+  `openai-curated-remote` set) are now grouped under Bundled and shown as protected. They were
+  listed user-wide with a Remove button, which buried the plugins you installed yourself and
+  offered to delete something the agent reinstalls.
 - Project skills in subdirectories are now listed. Claude Code loads `.claude/skills` from
   nested directories as well as the project root, so a monorepo package carrying its own skills
   was invisible in manage-arms. The walk stops three levels below the project root and skips

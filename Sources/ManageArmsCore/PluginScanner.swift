@@ -61,8 +61,13 @@ public enum PluginScanner {
                 scope: item["scope"] as? String ?? "user", projectPath: item["projectPath"] as? String,
                 enabled: item["enabled"] as? Bool ?? true,
                 autoUpdate: auto.contains(String(id.split(separator: "@").last ?? "")))
+            // Codex は自社の既定プラグイン（`openai-curated-remote` の 3 つ）に
+            // `installPolicy: INSTALLED_BY_DEFAULT` を付けて返す。実測済み。
+            // ユーザーが入れたものと混ぜない — 混ぜると自分で入れた分が埋もれ、
+            // 消してもエージェントが入れ直すものに「削除」を出すことになる（3.2 / 8 章）。
             plugin.isBundled = item["isBuiltIn"] as? Bool == true || item["managed"] as? Bool == true
                 || item["scope"] as? String == "managed"
+                || item["installPolicy"] as? String == "INSTALLED_BY_DEFAULT"
             return plugin
         }
     }

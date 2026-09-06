@@ -19,9 +19,13 @@ struct PluginScannerTests {
     """
 
     /// 実測した `codex plugin list --json` の形。
+    /// `installPolicy` は Codex の既定プラグインに付く（`INSTALLED_BY_DEFAULT`）。
     static let codexJSON = """
     {"installed":[{"pluginId":"plugin-management@openai-curated-remote",
-                   "name":"plugin-management","version":"0.1.0","enabled":true}],
+                   "name":"plugin-management","version":"0.1.0","enabled":true,
+                   "installPolicy":"INSTALLED_BY_DEFAULT","authPolicy":"ON_USE"},
+                  {"pluginId":"mine@my-marketplace",
+                   "name":"mine","version":"0.2.0","enabled":true}],
      "available":[{"pluginId":"gmail@openai-curated-remote"}]}
     """
 
@@ -45,9 +49,18 @@ struct PluginScannerTests {
     func readsBoth() throws {
         let found = PluginScanner.scan(env: try Self.env())
         #expect(found.filter { $0.agent == .claude }.count == 3)
-        #expect(found.filter { $0.agent == .codex }.count == 1)
+        #expect(found.filter { $0.agent == .codex }.count == 2)
         // available は導入済みではないので拾わない
         #expect(!found.contains { $0.id.hasPrefix("gmail") })
+    }
+
+    /// Codex の `openai-curated-remote` の 3 つはユーザーが入れたものではない。
+    /// ユーザー全体に「削除」付きで並べると、消してもエージェントが入れ直す。
+    @Test("installPolicy: INSTALLED_BY_DEFAULT は同梱として扱う")
+    func defaultInstalledIsBundled() throws {
+        let found = PluginScanner.scan(env: try Self.env()).filter { $0.agent == .codex }
+        #expect(found.first { $0.id.hasPrefix("plugin-management") }?.isBundled == true)
+        #expect(found.first { $0.id.hasPrefix("mine") }?.isBundled == false)
     }
 
     /// **このアプリ最大の見せ場**（5.2）。実測: ponytail が 5 プロジェクトに個別導入。
