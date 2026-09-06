@@ -7,5 +7,10 @@
          → Mac App Store は選択肢にならない。Developer ID 署名 + 公証で直配布する。 -->
     <key>com.apple.security.app-sandbox</key>
     <false/>
+    <!-- Hardened Runtime 下で Apple Events を送るのに要る（ブラウザ検知、DESIGN.md 6 章）。
+         これが無いと署名済みビルドでだけ errAEEventNotPermitted になり、
+         開発中は動くのに配布物で動かない、という一番見つけにくい壊れ方をする。 -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
 </dict>
 </plist>

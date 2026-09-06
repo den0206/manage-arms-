@@ -8,5 +8,7 @@
          配布／公証ビルドには絶対に含めないこと（公証が拒否される）。 -->
     <key>com.apple.security.get-task-allow</key>
     <true/>
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
 </dict>
 </plist>
