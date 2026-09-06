@@ -47,6 +47,11 @@
     <string>NSApplication</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <!-- ブラウザ検知（DESIGN.md 6 章）。設定を ON にしたときだけ Apple Events を送る。
+         **このキーが無いと macOS はイベント送信をアプリごと落とす。**
+         文言は Localization/*.lproj/InfoPlist.strings で翻訳する。 -->
+    <key>NSAppleEventsUsageDescription</key>
+    <string>ブラウザで開いているページの URL を読み取り、Skill や Plugin のページなら追加を提案します。URL は保存しません。</string>
     <key>NSHumanReadableCopyright</key>
     <string>© 2026 ManageArms</string>
 </dict>

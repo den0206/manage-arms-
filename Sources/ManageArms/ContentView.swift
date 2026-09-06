@@ -27,6 +27,11 @@ struct ContentView: View {
             sidebar
         } detail: {
             VStack(spacing: 0) {
+                if let lead = model.watcher.pending {
+                    BrowserLeadBanner(lead: lead,
+                                      add: { model.watcher.accept(lead) },
+                                      skip: { model.watcher.dismiss() })
+                }
                 if !model.inventory.issues.isEmpty {
                     DisclosureGroup("読み取りに失敗した項目があります") {
                         ForEach(model.inventory.issues, id: \.self) { Text($0).font(.caption).textSelection(.enabled) }
@@ -42,6 +47,16 @@ struct ContentView: View {
             Button("OK") { model.errorMessage = nil }
         } message: {
             Text(model.errorMessage ?? "")
+        }
+        // 通知の「追加する」から。URL を入れて取得まで済ませた状態で開く（6 章）。
+        // **自動では入れない** — 候補一覧を見せてから利用者が選ぶ。
+        .onChange(of: model.incomingLead) { _, lead in
+            guard let lead else { return }
+            add.text = lead.url
+            add.syncFields()
+            add.fetch()
+            showAdd = true
+            model.incomingLead = nil
         }
         .sheet(isPresented: $showAdd) {
             AddSheet(add: add) {
@@ -94,6 +109,29 @@ struct ContentView: View {
     /// 最後に何を読んだのか。**使用状況は明示的に集計する**（3.9）ので、
     /// 「まだ押していない」ことが分かる場所が要る。
     private var sidebarFooter: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            browserDetectionToggle
+            Divider()
+            usageFooter
+        }
+        .padding(.horizontal, 14).padding(.vertical, 8)
+    }
+
+    /// ブラウザ検知の ON/OFF（DESIGN.md 6 章）。設定画面は作らず、
+    /// 画面を切り替えても見える位置に 1 個だけ置く。
+    private var browserDetectionToggle: some View {
+        Toggle(isOn: .init(get: { model.detectsBrowserURLs },
+                           set: { model.setBrowserDetection($0) })) {
+            Text("ブラウザで見つけたToolを通知")
+        }
+        .toggleStyle(.switch)
+        .controlSize(.mini)
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+        .help("ブラウザでSkill・Plugin・Subagentのページを開くと通知します。ブラウザの制御を許可する必要があります。ウィンドウを閉じている間は動きません。")
+    }
+
+    private var usageFooter: some View {
         HStack(spacing: 6) {
             Image(systemName: "clock.arrow.circlepath")
             if let at = model.inventory.usageScannedAt {
@@ -107,7 +145,6 @@ struct ContentView: View {
         .font(.caption2)
         .foregroundStyle(.tertiary)
         .lineLimit(1)
-        .padding(.horizontal, 14).padding(.vertical, 8)
     }
 
     @ViewBuilder

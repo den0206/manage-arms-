@@ -1,0 +1,2 @@
+/* ブラウザ検知（DESIGN.md 6 章）。オートメーションの許可ダイアログに出る文言。 */
+"NSAppleEventsUsageDescription" = "ブラウザで開いているページの URL を読み取り、Skill や Plugin のページなら追加を提案します。URL は保存しません。";

@@ -55,8 +55,32 @@ final class AppModel {
     private(set) var permissions: [PermissionEntry] = []
     private(set) var duplicateCounts: [String: Int] = [:]
     var preview: UpdatePreview?
+    /// ブラウザ検知（DESIGN.md 6 章）。ウィンドウが開いている間だけ動く。
+    let watcher = BrowserWatcher()
+    private(set) var detectsBrowserURLs = false
+    /// 通知から来た追加候補。ContentView が拾って AddSheet を開く。
+    var incomingLead: ToolLead?
 
-    init() { reload() }
+    init() {
+        detectsBrowserURLs = Registry.load(env: .live).detectsBrowserURLs
+        watcher.onAdd = { [weak self] in self?.incomingLead = $0 }
+        watcher.onError = { [weak self] in self?.errorMessage = $0 }
+        // 許可されずに止まったら、設定も OFF に戻す（ON なのに動かない状態を残さない）。
+        watcher.onDisabled = { [weak self] in self?.setBrowserDetection(false) }
+        watcher.setEnabled(detectsBrowserURLs)
+        reload()
+    }
+
+    /// ブラウザ検知の ON/OFF。**保存するのは利用者が決めたことだけ**（4.1）。
+    func setBrowserDetection(_ on: Bool) {
+        do {
+            var registry = try Registry.read(env: .live)
+            registry.browserDetection = on ? true : nil   // 既定値は書き出さない
+            try registry.save(env: .live)
+            detectsBrowserURLs = on
+            watcher.setEnabled(on)
+        } catch { errorMessage = "\(error)" }
+    }
 
     /// キャッシュしない（DESIGN.md 3.5）。毎回読み直す。
     /// 走査は数十ファイル + CLI 数回で終わるが、CLI が node 起動を伴うため
