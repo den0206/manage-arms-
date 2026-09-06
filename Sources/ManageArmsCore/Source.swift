@@ -57,7 +57,8 @@ extension Source {
     /// ここから読んでよいのは各プロジェクトの
     /// `.claude/skills` / `.claude/agents` / `.mcp.json` / `.claude/settings*.json` だけ。
     /// **`~/.claude/projects/`（140 MB のセッションログ）とは別物** — あれは読まない。
-    /// ユーザーが明示的に選んだフォルダ（`registry.projects`、DESIGN.md 15）も足す。
+    /// `registry.projects` も合流させるが、**足す導線はもう無い**（DESIGN.md 15）。
+    /// 既に値がある人のデータを黙って無視しないために読み取りだけ残す。
     public static func projectPaths(in env: Environment) -> [String] {
         var paths = Set(Registry.load(env: env).projects)
         if let data = try? Data(contentsOf: env.home.appending(path: ".claude.json")),

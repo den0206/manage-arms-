@@ -207,8 +207,6 @@
 "GitHubのURL" = "GitHub URL";
 "読み取りに失敗した項目があります" = "Some items could not be read";
 "メンテナンス" = "Maintenance";
-"プロジェクトを追加…" = "Add a project…";
-"選択したフォルダのClaude設定を一覧に追加します" = "Include Claude settings from the selected folder.";
 "起動状態はウィンドウ表示中に3秒ごとに確認します。Tool呼び出し中を示すものではありません。" = "Process status is checked every 3 seconds while a window is visible. It does not indicate an active tool call.";
 "スキル・MCP・Pluginを追加します" = "Add skills, MCP connections, and plugins.";
 "同梱・変更不可" = "Bundled · protected";

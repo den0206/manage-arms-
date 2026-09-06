@@ -84,8 +84,6 @@ struct ContentView: View {
             }
             Section("メンテナンス") {
                 Label("権限", systemImage: "lock").tag(Screen.permissions)
-                Button("プロジェクトを追加…") { model.addProject() }
-                    .help("選択したフォルダのClaude設定を一覧に追加します")
             }
         }
         .navigationSplitViewColumnWidth(min: 208, ideal: 228, max: 300)

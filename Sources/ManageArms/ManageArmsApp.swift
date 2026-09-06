@@ -254,19 +254,6 @@ final class AppModel {
         }
     }
 
-    func addProject() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            var registry = try Registry.read(env: .live)
-            if !registry.projects.contains(url.path) { registry.projects.append(url.path) }
-            try registry.save(env: .live)
-            reload()
-        } catch { errorMessage = "\(error)" }
-    }
 
     func refreshActivity() {
         guard !isRefreshingActivity else { return }
