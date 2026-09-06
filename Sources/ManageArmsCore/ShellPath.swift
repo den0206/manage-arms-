@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// GUI アプリの `PATH` はターミナルと違う。DESIGN.md 3.7 —
 /// launchd 起動時は `/usr/bin:/bin:/usr/sbin:/sbin` のみで、
@@ -45,31 +46,48 @@ public enum Exec {
         public let code: Int32
         public let stderr: String
         public var description: String {
-            "`\(command.joined(separator: " "))` が終了コード \(code) で失敗: \(stderr)"
+            "`\(command.prefix(3).joined(separator: " "))` が終了コード \(code) で失敗: \(stderr)"
         }
     }
 
-    public static func run(_ command: [String], path: String?) throws -> String {
+    public static func run(_ command: [String], path: String?, environment: [String: String]? = nil, directory: URL? = nil) throws -> String {
         guard let first = command.first else { return "" }
         let process = Process()
         process.executableURL = URL(filePath: "/usr/bin/env")
         process.arguments = command
+        process.currentDirectoryURL = directory
+        process.environment = environment ?? ProcessInfo.processInfo.environment
         if let path {
-            var env = ProcessInfo.processInfo.environment
+            var env = process.environment ?? [:]
             env["PATH"] = path
             process.environment = env
         }
         let out = Pipe(), err = Pipe()
         process.standardOutput = out
         process.standardError = err
+        process.standardInput = FileHandle.nullDevice
         try process.run()
-        // 読み切ってから wait する。逆順だとパイプが埋まってデッドロックする。
+        let errors = Mutex(Data())
+        let completed = DispatchGroup()
+        completed.enter()
+        DispatchQueue.global().async {
+            let data = err.fileHandleForReading.readDataToEndOfFile()
+            errors.withLock { $0 = data }
+            completed.leave()
+        }
+        let deadline = DispatchWorkItem { if process.isRunning { process.terminate() } }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 180, execute: deadline)
+        defer { deadline.cancel() }
         let outData = out.fileHandleForReading.readDataToEndOfFile()
-        let errData = err.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
+        completed.wait()
+        var stderr = String(decoding: errors.withLock { $0 }, as: UTF8.self)
+        for index in command.indices.dropFirst() where ["-e", "--env", "-H", "--header"].contains(command[index - 1]) {
+            stderr = stderr.replacingOccurrences(of: command[index], with: "[redacted]")
+        }
         guard process.terminationStatus == 0 else {
             throw Failure(command: command, code: process.terminationStatus,
-                          stderr: String(decoding: errData, as: UTF8.self))
+                          stderr: stderr)
         }
         _ = first
         return String(decoding: outData, as: UTF8.self)
