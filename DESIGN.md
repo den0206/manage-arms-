@@ -8,7 +8,7 @@ AI コーディングエージェント（Claude Code / Cursor / Codex / Gemini 
 - **配布**: DMG の直配布（App Sandbox 非対応のため App Store 不可）。公開先は
   [den0206/manage-arms-releases](https://github.com/den0206/manage-arms-releases)。13 章
 - **状態**: **v1〜v4 実装済み**（Skills / Subagents / Plugins / 使用実績 / MCP / 権限）、
-  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト 322 件
+  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト件数は `swift test` の実行結果を参照
 - **実装**: SPM パッケージ。`swift test` / `CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh`
   （`.xcodeproj` は不要。実 CLI・実ネットワークを使う確認は `MANUAL=1 swift test`）
 - **作業の進め方**: [CLAUDE.md](CLAUDE.md)。利用者向けの入口は [README.md](README.md)
@@ -1310,9 +1310,14 @@ SwiftUI / AppKit の共有ページを含むため 150 MB 前後になり、ア�
 
 **アプリが削除・移動してよいのは次の 2 つだけ:**
 
-1. **自分が張った symlink** — リンク先が `~/.agents/skills/` 配下であることを
-   `resolvingSymlinksInPath` で検証したもののみ
-2. **`registry.json` に載っている実体** — `~/.agents/skills/<name>/`
+1. **既知の配置ルート直下にある管理 symlink** — リンク先が管理ルート直下にあり、
+   `resolvingSymlinksInPath` で解決しても管理領域の外に出ないもののみ
+2. **`registry.json` に載っている実体** — Skill / Subagent の実体置き場または退避先の直下
+
+名前は単一のパス要素として検証し、空・隠し名・パス区切り・制御文字を拒否する。
+追加・有効化の保存先も同じガードを通し、管理ルートの祖先が symlink で別の場所へ
+向けられていれば操作前に拒否する。home / App Support 自体と macOS の `/var` は
+解決して比較する。無効化済みの同名実体やリンク切れ symlink も既存リソースとして保護する。
 
 これ以外は一切触らない。特に **`registry.json` に無いスキル**
 （`vercel-labs/skills` が入れた `find-skills` など）は

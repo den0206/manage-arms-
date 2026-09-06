@@ -41,6 +41,7 @@ public enum Updater {
     ) async throws -> UpdatePreview {
         guard let repo = entry.repo else { throw Failure.notManaged(entry.name) }
         guard !entry.pinned else { throw Failure.pinned(entry.name) }
+        try WriteGuard.assertValidName(entry.name)
 
         let source = GitHubSource(repo: repo, branch: entry.branch, subdir: entry.subdir)
         let staging = try await Fetcher.stage(source)
@@ -72,6 +73,7 @@ public enum Updater {
         guard var entry = registry.entry(named: preview.name, kind: preview.candidate.kind) else {
             throw Failure.notManaged(preview.name)
         }
+        try WriteGuard.assertValidName(entry.name)
         let destination = entry.kind == Kind.subagent.rawValue
             ? (entry.disabled ? env.disabledAgentStore : env.agentStore).appending(path: "\(entry.name).md")
             : (entry.disabled ? env.disabledStore : env.skillStore).appending(path: entry.name)

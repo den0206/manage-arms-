@@ -305,3 +305,4 @@
 "システムに合わせる" = "Match system";
 "ライト" = "Light";
 "ダーク" = "Dark";
+"リソース名が不正です: %@" = "Invalid resource name: %@";

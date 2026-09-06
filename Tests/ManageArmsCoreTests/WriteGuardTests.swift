@@ -123,4 +123,82 @@ struct WriteGuardTests {
             try WriteGuard.assertMutable(sibling, env: f.env, registry: f.registry)
         }
     }
+
+    @Test("安全なリソース名は変更せず受け入れる", arguments: ["demo", "my skill", "日本語", "demo.md"])
+    func acceptsResourceName(_ name: String) throws {
+        try WriteGuard.assertValidName(name)
+    }
+
+    @Test("空や制御文字のリソース名を拒否する", arguments: ["", " ", "bad\u{0000}name", "bad\nname"])
+    func rejectsEmptyOrControlName(_ name: String) {
+        #expect(throws: WriteGuard.Denial.invalidName(name)) {
+            try WriteGuard.assertValidName(name)
+        }
+    }
+
+    @Test("管理ルートの symlink 越しに実体を変更しない")
+    func rejectsRedirectedManagedRoot() throws {
+        var f = try Fixture()
+        defer { try? FileManager.default.removeItem(at: f.env.home) }
+        let outside = try f.makeDir(f.env.home.appending(path: "outside"))
+        _ = try f.makeDir(outside.appending(path: "mine"))
+        _ = try f.makeDir(f.env.skillStore.deletingLastPathComponent())
+        try FileManager.default.createSymbolicLink(at: f.env.skillStore, withDestinationURL: outside)
+        f.registry.upsert(Registry.Entry(name: "mine", kind: .skill))
+        #expect(throws: WriteGuard.Denial.self) {
+            try WriteGuard.assertMutable(f.env.skillStore.appending(path: "mine"), env: f.env, registry: f.registry)
+        }
+    }
+
+    @Test("管理ルート内を経由して外に出る二段 symlink を拒否する")
+    func rejectsChainedSymlink() throws {
+        let f = try Fixture()
+        defer { try? FileManager.default.removeItem(at: f.env.home) }
+        let outside = try f.makeDir(f.env.home.appending(path: "outside"))
+        _ = try f.makeDir(f.env.skillStore)
+        _ = try f.makeDir(f.env.claudeSkills)
+        let target = f.env.skillStore.appending(path: "mine")
+        let link = f.env.claudeSkills.appending(path: "mine")
+        try FileManager.default.createSymbolicLink(at: target, withDestinationURL: outside)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+        #expect(throws: WriteGuard.Denial.self) {
+            try WriteGuard.assertMutable(link, env: f.env, registry: f.registry)
+        }
+    }
+
+    @Test("管理リンクでも未知の配置場所には触れない")
+    func rejectsLinkOutsideKnownRoots() throws {
+        var f = try Fixture()
+        defer { try? FileManager.default.removeItem(at: f.env.home) }
+        let target = try f.managedSkill("mine")
+        let link = f.env.home.appending(path: "foreign-link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+        #expect(throws: WriteGuard.Denial.self) {
+            try WriteGuard.assertMutable(link, env: f.env, registry: f.registry)
+        }
+    }
+
+    @Test(".md で終わる Skill も保存先で種別を判定する")
+    func skillWithMarkdownSuffix() throws {
+        var f = try Fixture()
+        defer { try? FileManager.default.removeItem(at: f.env.home) }
+        _ = try f.managedSkill("demo.md")
+        try SkillManager.disable("demo.md", env: f.env, registry: &f.registry)
+        try SkillManager.enable("demo.md", env: f.env, registry: &f.registry)
+        #expect(f.registry.entry(named: "demo.md", kind: .skill)?.disabled == false)
+    }
+
+    @Test("有効化でも不正な名前を実体移動やリンク作成より先に拒否する")
+    func enableRejectsTraversal() throws {
+        var f = try Fixture()
+        defer { try? FileManager.default.removeItem(at: f.env.home) }
+        let name = "../../escaped"
+        _ = try f.makeDir(f.env.home.appending(path: "escaped"))
+        f.registry.upsert(Registry.Entry(name: name, kind: .skill))
+        #expect(throws: WriteGuard.Denial.invalidName(name)) {
+            try SkillManager.enable(name, env: f.env, registry: &f.registry)
+        }
+        #expect(!FileManager.default.fileExists(atPath: f.env.registryFile.path))
+        #expect(!FileManager.default.fileExists(atPath: f.env.claudeSkills.path))
+    }
 }

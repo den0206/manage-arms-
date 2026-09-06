@@ -285,4 +285,70 @@ struct InstallerTests {
             try Installer.install(plugin, from: f.staging, env: f.env, registry: &f.registry)
         }
     }
+
+    @Test("frontmatter のパスを含む名前は保存前に拒否する", arguments: [
+        "../../escaped", "nested/skill", "/absolute", ".", "..", ".hidden", "bad\\name",
+    ])
+    func rejectsUnsafeCandidateName(_ name: String) throws {
+        var f = try Fixture()
+        defer { try? FileManager.default.removeItem(at: f.env.home) }
+        try "---\nname: \(name)\n---\n".write(
+            to: f.candidate.localURL.appending(path: "SKILL.md"), atomically: true, encoding: .utf8)
+        let candidate = try #require(Fetcher.identify(f.candidate.localURL).first)
+        #expect(throws: WriteGuard.Denial.invalidName(name)) {
+            try Installer.install(candidate, from: f.staging, env: f.env, registry: &f.registry)
+        }
+        #expect(f.registry.resources.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: f.env.skillStore.path))
+        #expect(!FileManager.default.fileExists(atPath: f.env.home.appending(path: "escaped").path))
+    }
+
+    @Test("保存先やリンク先ルートの symlink は辿らない", arguments: [false, true])
+    func rejectsRedirectedInstallRoot(_ redirectLinkRoot: Bool) throws {
+        var f = try Fixture()
+        defer { try? FileManager.default.removeItem(at: f.env.home) }
+        let fm = FileManager.default
+        let outside = f.env.home.appending(path: "outside")
+        try fm.createDirectory(at: outside, withIntermediateDirectories: true)
+        let root = redirectLinkRoot ? f.env.claudeSkills : f.env.skillStore
+        try fm.createDirectory(at: root.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.createSymbolicLink(at: root, withDestinationURL: outside)
+        #expect(throws: WriteGuard.Denial.self) {
+            try Installer.install(f.candidate, from: f.staging, env: f.env, registry: &f.registry)
+        }
+        #expect(try fm.contentsOfDirectory(atPath: outside.path).isEmpty)
+        #expect(f.registry.resources.isEmpty)
+    }
+
+    @Test("無効化した同名スキルを再インストールで上書きしない")
+    func rejectsDisabledDuplicate() throws {
+        var f = try Fixture()
+        defer { try? FileManager.default.removeItem(at: f.env.home) }
+        try Installer.install(f.candidate, from: f.staging, env: f.env, registry: &f.registry)
+        try SkillManager.disable("demo", env: f.env, registry: &f.registry)
+        let before = f.registry
+        #expect(throws: Installer.Failure.alreadyInstalled("demo")) {
+            try Installer.install(f.candidate, from: f.staging, env: f.env, registry: &f.registry)
+        }
+        #expect(f.registry == before)
+        #expect(Registry.load(env: f.env) == before)
+        #expect(FileManager.default.fileExists(atPath: f.env.disabledStore.appending(path: "demo/SKILL.md").path))
+        #expect(!FileManager.default.fileExists(atPath: f.env.skillStore.appending(path: "demo").path))
+    }
+
+    @Test("リンク切れの同名実体を上書きしない")
+    func rejectsDanglingDestination() throws {
+        var f = try Fixture()
+        defer { try? FileManager.default.removeItem(at: f.env.home) }
+        let fm = FileManager.default
+        try fm.createDirectory(at: f.env.skillStore, withIntermediateDirectories: true)
+        let destination = f.env.skillStore.appending(path: "demo")
+        let target = f.env.home.appending(path: "missing")
+        try fm.createSymbolicLink(at: destination, withDestinationURL: target)
+        #expect(throws: Installer.Failure.alreadyInstalled("demo")) {
+            try Installer.install(f.candidate, from: f.staging, env: f.env, registry: &f.registry)
+        }
+        #expect(WriteGuard.isSymlink(destination))
+        #expect(f.registry.resources.isEmpty)
+    }
 }

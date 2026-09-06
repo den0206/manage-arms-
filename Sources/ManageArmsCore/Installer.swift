@@ -29,10 +29,13 @@ public enum Installer {
         let isSubagent = candidate.kind == .subagent
 
         let fm = FileManager.default
-        let destination = isSubagent
-            ? env.agentStore.appending(path: "\(candidate.name).md")
-            : env.skillStore.appending(path: candidate.name)
-        guard !fm.fileExists(atPath: destination.path(percentEncoded: false)) else {
+        let layout = try ManagedLifecycle.layout(candidate.name, kind: candidate.kind, env: env)
+        let destination = layout.store
+        guard !fm.fileExists(atPath: destination.path(percentEncoded: false)),
+              !WriteGuard.isSymlink(destination),
+              !fm.fileExists(atPath: layout.parked.path(percentEncoded: false)),
+              !WriteGuard.isSymlink(layout.parked),
+              registry.entry(named: candidate.name, kind: candidate.kind) == nil else {
             throw Failure.alreadyInstalled(candidate.name)
         }
 

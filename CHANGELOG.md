@@ -10,6 +10,17 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 
 ## [Unreleased]
 
+### Security
+
+- Reject unsafe resource names and redirected managed directories before installing,
+  enabling, disabling, removing or updating Skills and Subagents. Validate both the
+  location and resolved destination of managed symbolic links.
+
+### Fixed
+
+- Preserve disabled resources and dangling links when a same-name install is attempted.
+- Identify managed Skills by their storage directory even when their names end in `.md`.
+
 ## [0.1.0] — 2026-09-06
 
 ### Fixed

@@ -15,6 +15,7 @@ public enum WriteGuard {
         case outsideManagedRoots(String)
         /// registry.json に載っていない。他ツールが入れたもの（外部管理）。
         case notInRegistry(String)
+        case invalidName(String)
 
         public var description: String {
             switch self {
@@ -26,6 +27,8 @@ public enum WriteGuard {
                 "\(p) は manage-arms の管理外です"
             case .notInRegistry(let n):
                 "\(n) は他のツールが管理しています。manage-arms からは変更できません"
+            case .invalidName(let n):
+                String(localized: "リソース名が不正です: \(n)")
             }
         }
     }
@@ -52,10 +55,14 @@ public enum WriteGuard {
 
         try assertNotBundled(url, env: env)
         if isDenied(url) { throw Denial.deniedPath(path) }
+        try assertManagedLocation(url, env: env, allowingLinks: true)
 
         if isSymlink(url) {
             guard let target = symlinkTarget(url),
-                  env.managedRoots.contains(where: { isInside(target, $0) })
+                  (try? assertManagedLocation(target, env: env)) != nil,
+                  env.managedRoots.contains(where: {
+                      isInside(target.resolvingSymlinksInPath(), $0.resolvingSymlinksInPath())
+                  })
             else { throw Denial.symlinkOutsideStore(path) }
             return
         }
@@ -63,11 +70,14 @@ public enum WriteGuard {
         guard env.managedRoots.contains(where: { isInside(url, $0) }) else {
             throw Denial.outsideManagedRoots(path)
         }
-        // Subagent は `<name>.md` なので拡張子を落とす。
-        let name = url.pathExtension == "md"
+        // 種別は保存先で決める。Skill のディレクトリ名が .md で終わる場合もある。
+        let parent = url.deletingLastPathComponent().standardizedFileURL.path
+        let kind: Kind = [env.agentStore, env.disabledAgentStore].contains {
+            $0.standardizedFileURL.path == parent
+        } ? .subagent : .skill
+        let name = kind == .subagent && url.pathExtension == "md"
             ? String(url.lastPathComponent.dropLast(3))
             : url.lastPathComponent
-        let kind: Kind = url.pathExtension == "md" ? .subagent : .skill
         guard registry.entry(named: name, kind: kind) != nil else {
             throw Denial.notInRegistry(name)
         }
@@ -116,6 +126,37 @@ public enum WriteGuard {
     }
 
     // MARK: - 判定
+
+    /// 外部の frontmatter や registry の値をパスとして解釈させない。
+    static func assertValidName(_ name: String) throws {
+        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !name.hasPrefix("."), !name.contains("/"), !name.contains("\\"),
+              name.rangeOfCharacter(from: .controlCharacters) == nil else {
+            throw Denial.invalidName(name)
+        }
+    }
+
+    /// 書き込み先は既知ルートの直下だけ。祖先の symlink による迂回も拒否する。
+    /// home / App Support 自体と macOS の /var → /private/var は正規化して比較する。
+    static func assertManagedLocation(_ url: URL, env: Environment,
+                                      allowingLinks: Bool = false) throws {
+        let roots = env.managedRoots + (allowingLinks ? [env.claudeSkills,
+            env.home.appending(path: ".claude/agents"),
+            env.home.appending(path: ".cursor/agents")] : [])
+        let parent = url.deletingLastPathComponent().standardizedFileURL
+        guard roots.contains(where: { $0.standardizedFileURL.path == parent.path }) else {
+            throw Denial.outsideManagedRoots(url.path)
+        }
+        let base = (isInside(parent, env.appSupport) ? env.appSupport : env.home).standardizedFileURL
+        let suffix = String(parent.path.dropFirst(base.path.count))
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let expected = base.resolvingSymlinksInPath().appending(path: suffix).standardizedFileURL
+        guard parent.resolvingSymlinksInPath().path == expected.path else {
+            throw Denial.outsideManagedRoots(url.path)
+        }
+        try assertNotBundled(url, env: env)
+        if isDenied(url) { throw Denial.deniedPath(url.path) }
+    }
 
     static func isDenied(_ url: URL) -> Bool {
         deniedNames.contains(url.lastPathComponent)

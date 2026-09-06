@@ -61,26 +61,33 @@ enum ManagedLifecycle {
         let links: [URL]
     }
 
-    static func layout(_ name: String, kind: Kind, env: Environment) -> Layout {
+    static func layout(_ name: String, kind: Kind, env: Environment) throws -> Layout {
+        try WriteGuard.assertValidName(name)
+        let result: Layout
         if kind == .subagent {
-            return Layout(
+            result = Layout(
                 store: env.agentStore.appending(path: "\(name).md"),
                 parked: env.disabledAgentStore.appending(path: "\(name).md"),
                 links: [env.home.appending(path: ".claude/agents/\(name).md"),
                         env.home.appending(path: ".cursor/agents/\(name).md")]
             )
+        } else {
+            result = Layout(
+                store: env.skillStore.appending(path: name),
+                parked: env.disabledStore.appending(path: name),
+                links: [env.claudeSkills.appending(path: name)]
+            )
         }
-        return Layout(
-            store: env.skillStore.appending(path: name),
-            parked: env.disabledStore.appending(path: name),
-            links: [env.claudeSkills.appending(path: name)]
-        )
+        for url in [result.store, result.parked] + result.links {
+            try WriteGuard.assertManagedLocation(url, env: env, allowingLinks: true)
+        }
+        return result
     }
 
     static func link(_ name: String, kind: Kind, env: Environment,
                      registry: Registry) throws {
         let fm = FileManager.default
-        let layout = layout(name, kind: kind, env: env)
+        let layout = try layout(name, kind: kind, env: env)
         for link in layout.links {
             if WriteGuard.isSymlink(link) {
                 try WriteGuard.assertMutable(link, env: env, registry: registry)
@@ -97,7 +104,7 @@ enum ManagedLifecycle {
     static func enable(_ name: String, kind: Kind, env: Environment,
                        registry: inout Registry) throws {
         let fm = FileManager.default
-        let layout = layout(name, kind: kind, env: env)
+        let layout = try layout(name, kind: kind, env: env)
         if !fm.fileExists(atPath: layout.store.path(percentEncoded: false)) {
             guard fm.fileExists(atPath: layout.parked.path(percentEncoded: false)) else {
                 throw SkillManager.Failure.notFound(name)
@@ -117,7 +124,7 @@ enum ManagedLifecycle {
     static func disable(_ name: String, kind: Kind, env: Environment,
                         registry: inout Registry) throws {
         let fm = FileManager.default
-        let layout = layout(name, kind: kind, env: env)
+        let layout = try layout(name, kind: kind, env: env)
         for link in layout.links where WriteGuard.isSymlink(link) {
             try WriteGuard.assertMutable(link, env: env, registry: registry)
             try fm.removeItem(at: link)
@@ -142,7 +149,7 @@ enum ManagedLifecycle {
     static func remove(_ name: String, kind: Kind, env: Environment,
                        registry: inout Registry) throws -> URL? {
         let fm = FileManager.default
-        let layout = layout(name, kind: kind, env: env)
+        let layout = try layout(name, kind: kind, env: env)
         for link in layout.links where WriteGuard.isSymlink(link) {
             try WriteGuard.assertMutable(link, env: env, registry: registry)
             try fm.removeItem(at: link)
