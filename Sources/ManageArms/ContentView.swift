@@ -9,6 +9,7 @@ enum Screen: Hashable {
     case home
     case agent(Agent)
     case permissions
+    case settings
 }
 
 struct ContentView: View {
@@ -48,10 +49,18 @@ struct ContentView: View {
         } message: {
             Text(model.errorMessage ?? "")
         }
-        // 通知の「追加する」から。URL を入れて取得まで済ませた状態で開く（6 章）。
+        // 検知の「追加する」から。URL を入れて取得まで済ませた状態で開く（6 章）。
         // **自動では入れない** — 候補一覧を見せてから利用者が選ぶ。
-        .onChange(of: model.incomingLead) { _, lead in
-            guard let lead else { return }
+        // `onChange` ではなく `task(id:)` — メニューバーから開いた場合は
+        // ウィンドウが出る前に値が入っており、変化として観測できない。
+        // メニューバーや ⌘, から。設定を別ウィンドウにせず、この画面に切り替える。
+        .task(id: model.pendingScreen) {
+            guard let requested = model.pendingScreen else { return }
+            screen = requested
+            model.pendingScreen = nil
+        }
+        .task(id: model.incomingLead) {
+            guard let lead = model.incomingLead else { return }
             add.text = lead.url
             add.syncFields()
             add.fetch()
@@ -77,11 +86,14 @@ struct ContentView: View {
         .toolbar { toolbar }
         .disabled(model.isMutating)
         .task {
+            model.reload()      // 常駐中に閉じている間は読まないので、開いたときに読む
             while !Task.isCancelled {
                 if NSApp.windows.contains(where: { $0.isVisible && !$0.isMiniaturized }) { model.refreshActivity() }
                 do { try await Task.sleep(for: .seconds(3)) } catch { break }
             }
         }
+        // 常駐したまま閉じたときにメモリへ抱え続けない（DESIGN.md 3.5 / 9 章）。
+        .onDisappear { model.releaseForBackground() }
     }
 
     private var sidebar: some View {
@@ -100,6 +112,7 @@ struct ContentView: View {
             }
             Section("メンテナンス") {
                 Label("権限", systemImage: "lock").tag(Screen.permissions)
+                Label("設定", systemImage: "gearshape").tag(Screen.settings)
             }
         }
         .navigationSplitViewColumnWidth(min: 208, ideal: 228, max: 300)
@@ -109,28 +122,12 @@ struct ContentView: View {
     /// 最後に何を読んだのか。**使用状況は明示的に集計する**（3.9）ので、
     /// 「まだ押していない」ことが分かる場所が要る。
     private var sidebarFooter: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            browserDetectionToggle
-            Divider()
-            usageFooter
-        }
-        .padding(.horizontal, 14).padding(.vertical, 8)
+        usageFooter
+            .padding(.horizontal, 14).padding(.vertical, 8)
     }
 
-    /// ブラウザ検知の ON/OFF（DESIGN.md 6 章）。設定画面は作らず、
-    /// 画面を切り替えても見える位置に 1 個だけ置く。
-    private var browserDetectionToggle: some View {
-        Toggle(isOn: .init(get: { model.detectsBrowserURLs },
-                           set: { model.setBrowserDetection($0) })) {
-            Text("ブラウザで見つけたToolを表示")
-        }
-        .toggleStyle(.switch)
-        .controlSize(.mini)
-        .font(.caption2)
-        .foregroundStyle(.secondary)
-        .help("ブラウザでSkill・Plugin・Subagentのページを開くと、この画面の上に出します。ブラウザの制御を許可する必要があります。ウィンドウを閉じている間は動きません。")
-    }
-
+    /// ブラウザ検知の ON/OFF は設定画面（⌘,）に置く。ここには置かない — 同じ設定を
+    /// 2 か所に出すと、片方だけ直したときに食い違う。
     private var usageFooter: some View {
         HStack(spacing: 6) {
             Image(systemName: "clock.arrow.circlepath")
@@ -156,6 +153,8 @@ struct ContentView: View {
             AgentPage(agent: agent, model: model, showAdd: $showAdd)
         case .permissions:
             PermissionList(model: model)
+        case .settings:
+            SettingsView(model: model)
         }
     }
 

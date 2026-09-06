@@ -7,8 +7,13 @@ struct ManageArmsApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @State private var model = AppModel()
 
+    /// メニューバーからウィンドウを開き直すための id。
+    static let windowID = "main"
+
+    @SwiftUI.Environment(\.openWindow) private var openWindow
+
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: Self.windowID) {
             ContentView(model: model)
                 // サイドバー 208 + 一覧。理想値は要約タイル 4 枚とエージェント 2 列が
                 // そのまま入る幅にする（最小のままだと初回だけ窮屈に見える）。
@@ -21,12 +26,37 @@ struct ManageArmsApp: App {
         }
         .defaultSize(width: 1020, height: 720)
         .windowToolbarStyle(.unified)
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("設定…") { showSettings() }.keyboardShortcut(",")
+            }
+        }
+
+        // 常駐（DESIGN.md 3.5）。OFF なら項目ごと外れ、最後のウィンドウで終了する。
+        MenuBarExtra(isInserted: .init(get: { model.staysInMenuBar },
+                                       set: { model.setMenuBarResident($0) })) {
+            MenuBarMenu(model: model)
+        } label: {
+            MenuBarIcon(alert: model.watcher.pending != nil)
+        }
+
+    }
+
+    /// 設定はサイドバーの 1 画面。**別ウィンドウにしない** — 画面が 2 種類あると
+    /// 「どっちで直したか」が分からなくなる。⌘, もそこへ飛ばす。
+    private func showSettings() {
+        NSApp.activate(ignoringOtherApps: true)
+        openWindow(id: Self.windowID)
+        model.pendingScreen = .settings
     }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    // DESIGN.md 3.5 — 常駐しない。閉じたらプロセスごと終了、アイドル時のメモリ消費 0。
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    /// 常駐が ON ならウィンドウを閉じても終了しない（DESIGN.md 3.5）。
+    /// 閉じた時点で一覧は捨ててあるので、残るのはメニューバー項目とタイマーだけ。
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        !Registry.load(env: .live).staysInMenuBar
+    }
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
@@ -58,28 +88,56 @@ final class AppModel {
     /// ブラウザ検知（DESIGN.md 6 章）。ウィンドウが開いている間だけ動く。
     let watcher = BrowserWatcher()
     private(set) var detectsBrowserURLs = false
-    /// 通知から来た追加候補。ContentView が拾って AddSheet を開く。
+    /// メニューバー常駐（DESIGN.md 3.5）。
+    private(set) var staysInMenuBar = true
+    /// 検知から来た追加候補。ContentView が拾って AddSheet を開く。
     var incomingLead: ToolLead?
+    /// メニューバー・⌘, から開きたい画面。ContentView が拾って切り替える。
+    var pendingScreen: Screen?
 
     init() {
-        detectsBrowserURLs = Registry.load(env: .live).detectsBrowserURLs
+        let registry = Registry.load(env: .live)
+        detectsBrowserURLs = registry.detectsBrowserURLs
+        staysInMenuBar = registry.staysInMenuBar
         watcher.onAdd = { [weak self] in self?.incomingLead = $0 }
         watcher.onError = { [weak self] in self?.errorMessage = $0 }
         // 許可されずに止まったら、設定も OFF に戻す（ON なのに動かない状態を残さない）。
         watcher.onDisabled = { [weak self] in self?.setBrowserDetection(false) }
         watcher.setEnabled(detectsBrowserURLs)
-        reload()
+        // 一覧はウィンドウが出てから読む（常駐だけの状態では走査しない）。
     }
 
     /// ブラウザ検知の ON/OFF。**保存するのは利用者が決めたことだけ**（4.1）。
     func setBrowserDetection(_ on: Bool) {
+        detectsBrowserURLs = on
+        watcher.setEnabled(on)
+        save { $0.browserDetection = on ? nil : false }   // 既定値（ON）は書き出さない
+    }
+
+    /// メニューバー常駐の ON/OFF。OFF にしても今開いているウィンドウは閉じない
+    /// （次に閉じたときからプロセスごと終了する）。
+    func setMenuBarResident(_ on: Bool) {
+        staysInMenuBar = on
+        save { $0.menuBar = on ? nil : false }            // 既定値（ON）は書き出さない
+    }
+
+    private func save(_ change: (inout Registry) -> Void) {
         do {
             var registry = try Registry.read(env: .live)
-            registry.browserDetection = on ? true : nil   // 既定値は書き出さない
+            change(&registry)
             try registry.save(env: .live)
-            detectsBrowserURLs = on
-            watcher.setEnabled(on)
         } catch { errorMessage = "\(error)" }
+    }
+
+    /// ウィンドウを閉じたら一覧を捨てる（DESIGN.md 3.5 / 9 章）。
+    /// 常駐中に抱え続けてよいのは設定と検知の状態だけで、
+    /// 一覧は次に開いたときにどうせ読み直す（キャッシュしない）。
+    func releaseForBackground() {
+        inventory = .empty
+        permissions = []
+        duplicateCounts = [:]
+        cleanup = nil
+        discardPreview()
     }
 
     /// キャッシュしない（DESIGN.md 3.5）。毎回読み直す。

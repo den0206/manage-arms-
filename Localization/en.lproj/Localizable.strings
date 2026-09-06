@@ -278,8 +278,8 @@
 "ゴミ箱へ移動：%@。これはプロジェクトで共有されるファイルです。他のメンバーや別のマシンにも影響します。" = "Move to Trash: %@. This file is shared through the project, so other members and machines are affected too.";
 
 /* ブラウザ検知（DESIGN.md 6 章） */
-"ブラウザで見つけたToolを表示" = "Show tools found in the browser";
-"ブラウザでSkill・Plugin・Subagentのページを開くと、この画面の上に出します。ブラウザの制御を許可する必要があります。ウィンドウを閉じている間は動きません。" = "Shows a bar at the top of this window when you open a skill, plugin or subagent page in your browser. Requires permission to control the browser, and only runs while this window is open.";
+"ブラウザで見つけたToolを知らせる" = "Tell me about tools found in the browser";
+"ブラウザでSkill・Plugin・Subagentのページを開くと、メニューバーのアイコンが緑になります（ページから離れれば元に戻ります）。前面のブラウザを見るだけで、URLは保存しません。ブラウザの制御を許可する必要があります。" = "Turns the menu bar icon green when you open a skill, plugin or subagent page in your browser, and back again when you leave the page. It only reads the frontmost browser's URL and never stores it. Requires permission to control the browser.";
 "スキル「%@」を見つけました" = "Found the skill “%@”";
 "サブエージェント「%@」を見つけました" = "Found the subagent “%@”";
 "プラグイン「%@」を見つけました" = "Found the plugin “%@”";
@@ -287,3 +287,15 @@
 "追加する" = "Add";
 "今はしない" = "Not now";
 "ブラウザの制御が許可されていないため、検知を停止しました。システム設定 > プライバシーとセキュリティ > オートメーション で ManageArms を許可してください。" = "Detection stopped because ManageArms is not allowed to control the browser. Allow it in System Settings > Privacy & Security > Automation.";
+
+/* Menu bar and settings (DESIGN.md 3.5) */
+"ManageArms" = "ManageArms";
+"ManageArms（追加できるToolがあります）" = "ManageArms (a tool is ready to add)";
+"ManageArmsを開く" = "Open ManageArms";
+"設定" = "Settings";
+"設定…" = "Settings…";
+"終了" = "Quit";
+"常駐" = "Menu bar";
+"メニューバーに常駐する" = "Keep ManageArms in the menu bar";
+"OFFにすると、ウィンドウを閉じた時点でアプリを終了します。常駐中もウィンドウを閉じていれば一覧はメモリから捨てます。" = "When off, ManageArms quits as soon as you close its window. While it stays in the menu bar with the window closed, the scanned list is dropped from memory.";
+"ブラウザ検知" = "Browser detection";
