@@ -7,11 +7,11 @@ AI コーディングエージェント（Claude Code / Cursor / Codex / Gemini 
 - **プラットフォーム**: macOS 26 以降 / SwiftUI
 - **配布**: DMG の直配布（App Sandbox 非対応のため App Store 不可）。13 章
 - **状態**: **v1〜v4 実装済み**（Skills / Subagents / Plugins / 使用実績 / MCP / 権限）、
-  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト 308 件
+  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト 320 件
 - **実装**: SPM パッケージ。`swift test` / `CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh`
   （`.xcodeproj` は不要。実 CLI・実ネットワークを使う確認は `MANUAL=1 swift test`）
 - **作業の進め方**: [CLAUDE.md](CLAUDE.md)。利用者向けの入口は [README.md](README.md)
-- **最終更新**: 2026-09-05（spike 決着 + 配布基盤の追加）
+- **最終更新**: 2026-09-06（ブラウザで開いた Tool ページの検知を追加）
 
 ---
 
@@ -225,6 +225,11 @@ enum Source {
   （数分）空いた時だけ再実行する
 - **メニューバー常駐にしない。** 通常のウィンドウアプリとし、
   `applicationShouldTerminateAfterLastWindowClosed = true`。**アイドル時のメモリ消費 0**
+- **例外はブラウザ検知の 1 つだけ**（6 章）。次の 3 つを同時に満たす間だけ 3 秒間隔で
+  前面ブラウザに URL を訊く: 設定が ON・ウィンドウが開いている（＝プロセスが生きている）・
+  既知ブラウザが前面。`NSWorkspace.didActivateApplicationNotification` で
+  前面が変わった時にタイマーを張り直し、ブラウザ以外が前面なら**タイマーごと止める**。
+  ウィンドウを閉じればプロセスが終わるので、検知も一緒に終わる
 - **sqlite / Core Data / SwiftData を使わない。** 永続化するのは `registry.json` のみ
 - **スキャン結果をキャッシュしない。** 再スキャンはファイル数十個 + CLI 数回で完了する。
   キャッシュは「実際の設定とズレる」という管理アプリとして最悪のバグを生む
@@ -715,6 +720,41 @@ skills.sh のようなカタログは配布元ではない。実体は GitHub �
 ```
 解釈結果 → 確認画面（編集可能）→ 導入先エージェントを選択 → 追加
 ```
+
+### ブラウザで開いたページから追加する（設定で ON）
+
+URL を手で貼らずに済ませる導線。**既定は OFF** — ブラウザ制御の許可（TCC）を
+伴うので黙って始めない。ON にした瞬間に通知の許可を求め、最初に既知ブラウザが
+前面へ来たときにオートメーションの許可を求める。拒否されたら設定を OFF に戻す
+（ON なのに動かない状態を残さない）。
+
+```
+ブラウザが前面 → 3秒ごとに前面タブのURL → パス名で候補 → rawで実在を確認 → 通知
+                                                              ↓「追加する」
+                                        取得済みの確認画面（上と同じ AddSheet）
+```
+
+| 段 | やること | 代償 |
+|---|---|---|
+| 前面監視 | `NSWorkspace` で前面アプリを見て、既知ブラウザのときだけタイマーを回す | 3.5 の例外 |
+| URL 取得 | 事前コンパイルした `NSAppleScript` を使い回す（`osascript` のプロセス起動をしない） | ブラウザごとの TCC 許可 |
+| 候補にする | パス名だけで判定。`skills.sh/<owner>/<repo>/<skill>`、`/skills/`、`/plugins/`・`/.claude-plugin/`、`/agents/` | ネットワーク不要 |
+| 確定する | `raw.githubusercontent.com` へ HEAD（`SKILL.md` / `plugin.json` / `marketplace.json` / 指定された `.md`）。**どれか 200 なら本物**、404・通信失敗は黙る | 実測 0.2 秒。GitHub API の 60 req/h 枠は使わない |
+| 通知 | 「スキル『名前』を見つけました」＋［追加する］［今はしない］。通知が許可されていなければウィンドウ内の帯に出す | — |
+
+**MCP は URL からは拾わない。** リポジトリ URL に手がかりが無く、公式サイトの JSON を
+コピペする既存導線の方が確実。**Subagent はファイルを指す URL だけ** — ディレクトリを
+指されても中のファイル名が分からず、実在を確かめられない。
+カタログのリポジトリページ（`skills.sh/<owner>/<repo>`）も拾わない — 名前が決まらない。
+
+**取得した URL は保存しない。** 対象ホストかどうかを見たら捨てる。ログにも出さない。
+重複抑止は起動中のメモリ（`Set<String>`）だけで、`registry.json` には残さない。
+併せて**既に導入済みのものは通知しない**（`Registry.resources` の repo / subdir / 名前と照合）。
+これが一番うるさい誤検知を消す。
+
+`skills.sh` には `/about` や `/agent/claude-code` といった**予約パス**があり、
+これを `owner/repo` と読むと存在しないリポジトリを取得しに行く。除外は
+`GitHubURL.catalog` に置き、検知と手貼りの両方に効かせる。
 
 ---
 
@@ -1528,6 +1568,7 @@ Hooks / Commands / Rules は対象外に決まった（1 章）ため、v4 は�
 | 11 | Cursor が同一スキルを二重に読まないか — 実体 `~/.agents/skills/` と Claude 用 symlink `~/.claude/skills/` の両方を走査するため、重複排除の有無を確認 | v1 の symlink 実装（11 章ステップ 4） |
 | 12 | Plugin の scope 移動（local → user）を `claude plugin` CLI が対応しているか | 5.2 の「ユーザー全体に昇格」ボタンの実現性。v2 着手前に確認 |
 | 14 | Cursor の使用実績ログの形式（`~/.cursor/projects/` / `ai-tracking/`） | 3.9 の最終使用日を Cursor 列にも出せるか。出せなければ Cursor だけ空欄 |
+| 16 | 最小化・⌘H の状態で App Nap が 3 秒タイマーを間引かないか（ブラウザ検知、6 章） | 間引かれるなら `ProcessInfo.beginActivity` で抑止するか、その状態では諦めるかの判断 |
 | 15 | Plugin 由来の skill / command を使用実績から逆引きできるか（実測では `ponytail:ponytail-review` と `plugin:skill` 形式で記録されていた） | 3.9 の Plugin 行の最終使用日。命名規則が全プラグインで一貫しているか要確認 |
 
 ---
