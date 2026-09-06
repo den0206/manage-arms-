@@ -10,6 +10,8 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 
 ## [Unreleased]
 
+## [0.0.1] — 2026-09-06
+
 ### Changed
 
 - Refreshed the app icon: a calmer indigo backdrop with a colour-coded node for each agent, so
@@ -158,3 +160,4 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
   appearing in English.
 
 [Unreleased]: https://github.com/den0206/manage-arms/compare/Ver_0.0.1...HEAD
+[0.0.1]: https://github.com/den0206/manage-arms/releases/tag/Ver_0.0.1
