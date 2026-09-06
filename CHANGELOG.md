@@ -14,6 +14,9 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 
 ### Changed
 
+- Downloads have moved to a dedicated public repository,
+  [den0206/manage-arms-releases](https://github.com/den0206/manage-arms-releases). Get the DMG
+  from its Releases page — it also carries the user-facing README in English and Japanese.
 - Settings now has an Appearance option: follow the system, or force light or dark. It applies
   to the whole app, including the menu bar menu and sheets, and is remembered across launches.
 - Refreshed the app icon: a calmer indigo backdrop with a colour-coded node for each agent, so

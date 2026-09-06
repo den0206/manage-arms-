@@ -6,8 +6,16 @@ name: Release
 # 依存ゼロの原則はパイプラインにも及ぶ。Marketplace のサードパーティ Action は使わない。
 # 許可は GitHub 公式の actions/checkout のみ。あとは gh と macOS / Swift 標準ツールだけ。
 #
-# 公開済みリリースは不変。同じ Ver_X.Y.Z が既にあれば**上書きせずジョブを落とす**
-# （やり直したいときは新しいパッチ版として出す）。
+# **ソースはこの Private リポジトリ、配布は公開リポジトリ RELEASES_REPO**
+# （den0206/manage-arms-releases）。DMG のダウンロード先を公開したまま、ソースは非公開に保つ。
+# 別リポジトリへ書くので GITHUB_TOKEN では権限が足りない（自リポジトリ限定）。
+# 公開リポジトリに contents:write を持つ PAT を RELEASES_TOKEN に入れておくこと。
+# 既存タグの照会は公開リポジトリの ls-remote（未認証で可）で行う。
+#
+# 公開済みリリースは不変。要求版 Ver_X.Y.Z が既にあれば、X.Y.Z は変えずに +N を付けて
+# 採番する（Ver_0.0.1 があれば Ver_0.0.1+1、それもあれば +2）。上書きはしない。
+# CFBundleShortVersionString は Apple の形式要件で数値 3 成分のみ（marketing = X.Y.Z）。
+# +N 込みの完全版は MAFullVersion（FULL_VERSION）に入れる。
 #
 # **署名・公証は必須**。シークレットが 1 つでも欠けていたら、ビルドもせずに最初のステップで止める。
 # 未署名／アドホックの DMG は Gatekeeper に「開発元を確認できません」と弾かれる配布物にしかならず、
@@ -23,13 +31,17 @@ name: Release
 #   NOTARY_APPLE_ID        Apple ID（メール）
 #   NOTARY_TEAM_ID         Team ID
 #   NOTARY_PASSWORD        アプリ用パスワード（app-specific password）
+# 公開 — 1 つ必須:
+#   RELEASES_TOKEN         公開リポジトリ（den0206/manage-arms-releases）へ Release を publish する PAT
+#                          （contents:write。fine-grained なら当該リポジトリのみにスコープを絞る）
 
 on:
   push:
     branches:
       - 'release/Ver_*'
 
-# Release とタグの作成、および公開後の main への CHANGELOG 反映に要る。
+# Release 本体は公開リポジトリへ書く（RELEASES_TOKEN）。このリポジトリ側の
+# contents:write は、公開後のタグ push と main への CHANGELOG 反映に要る。
 permissions:
   contents: write
 
@@ -41,6 +53,9 @@ jobs:
   release:
     # macOS 26 ターゲット + swift-tools-version 6.2 なので macOS 26 SDK = Xcode 26 が要る。
     runs-on: macos-26
+    env:
+      # Release の publish 先。ソースは Private のまま、ここ（公開）にだけ Release を出す。
+      RELEASES_REPO: den0206/manage-arms-releases
 
     steps:
       - name: Require signing secrets
@@ -53,22 +68,24 @@ jobs:
           NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
           NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
           NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+          RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
         run: |
           MISSING=""
           for name in MACOS_CERT_P12 MACOS_CERT_PASSWORD MACOS_SIGN_IDENTITY KEYCHAIN_PASSWORD \
-                      NOTARY_APPLE_ID NOTARY_TEAM_ID NOTARY_PASSWORD; do
+                      NOTARY_APPLE_ID NOTARY_TEAM_ID NOTARY_PASSWORD RELEASES_TOKEN; do
             if [ -z "${!name}" ]; then MISSING="$MISSING $name"; fi
           done
           if [ -n "$MISSING" ]; then
-            echo "::error::署名・公証に必要なシークレットが未設定です:$MISSING"
+            echo "::error::署名・公証・公開に必要なシークレットが未設定です:$MISSING"
             echo "::error::未署名の DMG は作りません。設定手順は docs/signing.md を参照してください。"
             exit 1
           fi
-          echo "✓ 署名・公証のシークレットが揃っています"
+          echo "✓ 署名・公証・公開のシークレットが揃っています"
 
       - uses: actions/checkout@v4
         with:
-          # タグの照合（既存版の検出）と main への CHANGELOG 反映に全履歴が要る。
+          # main への CHANGELOG 反映とタグ付けに全履歴が要る
+          # （既存版の照合は公開リポジトリの ls-remote で行う）。
           fetch-depth: 0
 
       - name: Select latest stable Xcode
@@ -85,21 +102,36 @@ jobs:
         id: meta
         run: |
           BRANCH="${GITHUB_REF_NAME}"          # 例: release/Ver_1.2.3
-          VERSION="${BRANCH##*/Ver_}"          # -> 1.2.3
-          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+          REQUESTED="${BRANCH##*/Ver_}"        # -> 1.2.3（要求版）
+          if ! printf '%s' "$REQUESTED" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "::error::branch '$BRANCH' が release/Ver_X.Y.Z 形式ではありません"
             exit 1
           fi
 
-          # 公開済みリリースは不変にする。既にあるタグは上書きしない。
-          if git ls-remote --exit-code --tags origin "refs/tags/Ver_$VERSION" >/dev/null 2>&1; then
-            echo "::error::Ver_$VERSION は既に公開されています。公開済みリリースは上書きしません。新しいパッチ版（release/Ver_X.Y.Z+1 相当）で出してください"
-            exit 1
+          # 公開済みリリースは不変にする。要求版が既にあれば X.Y.Z は変えず +N で空きを探す
+          # （Ver_0.0.1 があれば Ver_0.0.1+1、それもあれば +2 …）。+N は同一 X.Y.Z の再ビルド番号。
+          # タグの権威は publish 先の公開リポジトリ。未認証の ls-remote で読める。
+          EXISTING="$(git ls-remote --tags "https://github.com/${RELEASES_REPO}.git" | sed -n 's#.*refs/tags/\(Ver_[0-9][0-9A-Za-z.+-]*\)$#\1#p' | sort -u)"
+
+          if printf '%s\n' "$EXISTING" | grep -Fxq "Ver_$REQUESTED"; then
+            N=1
+            while printf '%s\n' "$EXISTING" | grep -Fxq "Ver_$REQUESTED+$N"; do
+              N=$((N + 1))
+            done
+            VERSION="$REQUESTED+$N"
+            echo "::notice::Ver_$REQUESTED は既に存在するため Ver_$VERSION に採番しました"
+          else
+            VERSION="$REQUESTED"
           fi
 
+          # CFBundleShortVersionString は数値 3 成分のみが正当（Apple）。+N は付けない。
+          # +N 込みの完全版は FULL_VERSION → MAFullVersion に入れる。
+          MARKETING="${VERSION%%+*}"
+
           {
-            echo "version=$VERSION"
-            echo "tag=Ver_$VERSION"
+            echo "version=$VERSION"        # 0.0.1+1（タグ・タイトル・DMG 名）
+            echo "marketing=$MARKETING"    # 0.0.1（CFBundleShortVersionString / CHANGELOG の見出し）
+            echo "tag=Ver_$VERSION"        # Ver_0.0.1+1
             echo "dmg=ManageArms-$VERSION.dmg"
           } >> "$GITHUB_OUTPUT"
 
@@ -125,7 +157,7 @@ jobs:
 
       - name: Build universal ManageArms.app
         env:
-          MARKETING_VERSION: ${{ steps.meta.outputs.version }}
+          MARKETING_VERSION: ${{ steps.meta.outputs.marketing }}
           FULL_VERSION: ${{ steps.meta.outputs.version }}
           BUILD_NUMBER: ${{ github.run_number }}
         run: ./Scripts/build-app.sh
@@ -202,32 +234,52 @@ jobs:
 
       - name: Cut CHANGELOG
         # [Unreleased] を `## [X.Y.Z] — YYYY-MM-DD` へ移す。Release 本文はこの節を使う。
+        # +N の再ビルドは同じ X.Y.Z の見出しが既にあるので no-op になる。
         env:
-          VERSION: ${{ steps.meta.outputs.version }}
-        run: ./Scripts/release-changelog.sh "$VERSION" "$(date -u +%F)"
+          MARKETING: ${{ steps.meta.outputs.marketing }}
+        run: ./Scripts/release-changelog.sh "$MARKETING" "$(date -u +%F)"
 
       - name: Create GitHub Release
         env:
-          GH_TOKEN: ${{ github.token }}
+          # 公開リポジトリ RELEASES_REPO へ書くため PAT を使う（GITHUB_TOKEN は自リポジトリ限定）。
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
           TAG: ${{ steps.meta.outputs.tag }}
           DMG: ${{ steps.meta.outputs.dmg }}
           VERSION: ${{ steps.meta.outputs.version }}
+          MARKETING: ${{ steps.meta.outputs.marketing }}
         run: |
           # Release 本文は CHANGELOG.md の当該版の節（直前のステップが切り出したもの）。
           # 節が無い = [Unreleased] が空のままリリースした場合だけ gh の自動生成へ落ちる。
-          NOTES="$RUNNER_TEMP/notes-${VERSION}.md"
-          if ./Scripts/release-changelog.sh --section "$VERSION" > "$NOTES"; then
-            echo "::notice::CHANGELOG.md の [$VERSION] を Release 本文に使用します"
+          NOTES="$RUNNER_TEMP/notes-${MARKETING}.md"
+          if ./Scripts/release-changelog.sh --section "$MARKETING" > "$NOTES"; then
+            echo "::notice::CHANGELOG.md の [$MARKETING] を Release 本文に使用します"
             NOTES_ARGS=(--notes-file "$NOTES")
           else
-            echo "::warning::CHANGELOG.md に [$VERSION] の節がありません（[Unreleased] が空だった可能性）。gh の --generate-notes にフォールバックします"
+            echo "::warning::CHANGELOG.md に [$MARKETING] の節がありません（[Unreleased] が空だった可能性）。gh の --generate-notes にフォールバックします"
             NOTES_ARGS=(--generate-notes)
           fi
-          # タグはこのビルド元コミットに対して作る。空きタグであることは確認済み。
+          # 採番済み（$TAG は空き）なので上書きはしない。公開済みリリースは不変。
+          # --target は付けない（このソースの SHA は RELEASES_REPO に存在しないため。
+          # タグは RELEASES_REPO の既定ブランチ HEAD に対して作られる）。
           gh release create "$TAG" "$DMG" \
-            --target "$GITHUB_SHA" \
+            --repo "$RELEASES_REPO" \
             --title "ManageArms ${VERSION}" \
             "${NOTES_ARGS[@]}"
+
+      - name: Tag source commit
+        # 公開 Release の成功後に、同じ Ver_X.Y.Z(+N) タグをこのソースのビルド元コミットにも付ける。
+        # 配布物とソースの対応を残すため。push は checkout が保持する GITHUB_TOKEN で行う。
+        # 冪等: 既にあればスキップする。
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "::notice::source に $TAG は既に存在します（スキップ）"
+          else
+            git tag "$TAG" "$GITHUB_SHA"
+            git push origin "refs/tags/$TAG"
+            echo "::notice::source に $TAG を付与しました（$GITHUB_SHA）"
+          fi
 
       - name: Sync CHANGELOG to main
         # 切り出しは release ブランチ上で起きるので、main の [Unreleased] は埋まったまま。
@@ -235,7 +287,7 @@ jobs:
         # 作業ツリーは持ち運ばず main の最新から切り直す（リリース中に main へ入った
         # 別の編集を巻き戻さないため）。
         env:
-          VERSION: ${{ steps.meta.outputs.version }}
+          MARKETING: ${{ steps.meta.outputs.marketing }}
           TAG: ${{ steps.meta.outputs.tag }}
         run: |
           git config user.name 'github-actions[bot]'
@@ -254,7 +306,7 @@ jobs:
           for attempt in 1 2 3; do
             git fetch origin main
             git switch -f -C main origin/main
-            ./Scripts/release-changelog.sh "$VERSION" "$(date -u +%F)"
+            ./Scripts/release-changelog.sh "$MARKETING" "$(date -u +%F)"
 
             git add CHANGELOG.md
             if git diff --cached --quiet; then
@@ -270,5 +322,5 @@ jobs:
             echo "::warning::main への push に失敗しました（試行 $attempt/3）。取り直して再試行します"
             sleep 5
           done
-          echo "::error::main への CHANGELOG 反映に失敗しました。Release と DMG は公開済みです。main で 'Scripts/release-changelog.sh $VERSION' を手動実行して push してください（main がブランチ保護されている場合は github-actions をバイパスに追加）"
+          echo "::error::main への CHANGELOG 反映に失敗しました。Release と DMG は公開済みです。main で 'Scripts/release-changelog.sh $MARKETING' を手動実行して push してください（main がブランチ保護されている場合は github-actions をバイパスに追加）"
           exit 1
