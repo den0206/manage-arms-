@@ -20,7 +20,7 @@ The design document is [DESIGN.md](DESIGN.md) (Japanese).
 | **Update** | Review the `SKILL.md` diff before applying. Pin a resource to stop updates when upstream changes direction |
 | **Scope** | A tab for "all projects", one per project, and one for what ships with the agent — with a warning when the same thing is installed both ways, and bulk removal of the project copies |
 | **Usage** | Last-used dates from session logs. MCP processes checked every 3 seconds while a window is visible; this does not indicate an active tool call |
-| **Browser detection** | Off by default. While a window is open and a browser is frontmost, opening a skill, plugin or subagent page offers to add it — no URL to copy. The page is confirmed against `raw.githubusercontent.com` before you are notified, and the URL is never stored |
+| **Browser detection** | Off by default. While a window is open and a browser is frontmost, opening a skill, plugin or subagent page offers to add it from a bar at the top of the window — no URL to copy, and no system notifications. The page is confirmed against `raw.githubusercontent.com` first, and the URL is never stored |
 | **Permission cleanup** | Remove machine-specific and cross-project duplicate entries from `permissions.allow` |
 
 ## Requirements
@@ -103,8 +103,9 @@ docs/signing.md         Developer ID signing and notarization setup (Japanese)
   `.ephemeral`; temporary work happens in the system temporary directory
 - **Browser detection is opt-in and narrow.** It is off until you turn it on, asks for
   permission to control the browser at that point, and stops itself if you decline. It runs
-  only while a window is open and a browser is frontmost. URLs are examined for `github.com`
-  and `skills.sh` and then discarded — never written to disk or logged
+  only while a window is open and a browser is frontmost, and asks for no notification
+  permission — findings appear in the window. URLs are examined for `github.com` and
+  `skills.sh` and then discarded — never written to disk or logged
 - Zero third-party dependencies
 
 ## Releases

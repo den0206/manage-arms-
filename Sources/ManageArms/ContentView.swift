@@ -122,13 +122,13 @@ struct ContentView: View {
     private var browserDetectionToggle: some View {
         Toggle(isOn: .init(get: { model.detectsBrowserURLs },
                            set: { model.setBrowserDetection($0) })) {
-            Text("ブラウザで見つけたToolを通知")
+            Text("ブラウザで見つけたToolを表示")
         }
         .toggleStyle(.switch)
         .controlSize(.mini)
         .font(.caption2)
         .foregroundStyle(.secondary)
-        .help("ブラウザでSkill・Plugin・Subagentのページを開くと通知します。ブラウザの制御を許可する必要があります。ウィンドウを閉じている間は動きません。")
+        .help("ブラウザでSkill・Plugin・Subagentのページを開くと、この画面の上に出します。ブラウザの制御を許可する必要があります。ウィンドウを閉じている間は動きません。")
     }
 
     private var usageFooter: some View {
