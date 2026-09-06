@@ -354,6 +354,63 @@ struct ProjectScopeTests {
         #expect(rows.contains { $0.name == "local-only" && $0.kind == .mcp })
     }
 
+    /// monorepo のパッケージが自前のスキルを持つ形。ルート直下しか見ないと消える。
+    @Test("サブディレクトリの .claude/skills も読む")
+    func nestedSkill() throws {
+        let f = try Fixture()
+        try f.writeSkill("web-deploy",
+                         at: f.project.appending(path: "apps/web/.claude/skills"))
+
+        let row = try #require(Inventory.load(env: f.env).rows.first { $0.name == "web-deploy" })
+        #expect(row.reach == .projects([f.project.path(percentEncoded: false)]))
+    }
+
+    /// Claude が修飾名を使うのは競合したときだけ。競合が無ければ `/deploy` で呼べる。
+    @Test("同名が競合したときだけ apps/web:deploy になる")
+    func nestedQualifiedOnCollision() throws {
+        let f = try Fixture()
+        try f.writeSkill("deploy", at: f.project.appending(path: ".claude/skills"))
+        try f.writeSkill("deploy", at: f.project.appending(path: "apps/web/.claude/skills"))
+        try f.writeSkill("lint", at: f.project.appending(path: "apps/web/.claude/skills"))
+
+        let names = Set(Inventory.load(env: f.env).rows.map(\.name))
+        #expect(names.contains("deploy"))
+        #expect(names.contains("apps/web:deploy"))
+        #expect(names.contains("lint"), "競合していないので修飾しない")
+        #expect(!names.contains("apps/web:lint"))
+    }
+
+    /// 修飾名を素で埋めると存在しないパスを消せと言うことになる。
+    @Test("修飾名の削除コマンドはサブディレクトリを指す")
+    func nestedRemovalCommand() throws {
+        let f = try Fixture()
+        try f.writeSkill("deploy", at: f.project.appending(path: ".claude/skills"))
+        try f.writeSkill("deploy", at: f.project.appending(path: "apps/web/.claude/skills"))
+
+        let project = f.project.path(percentEncoded: false)
+        let row = try #require(Inventory.load(env: f.env).rows
+            .first { $0.name == "apps/web:deploy" })
+        #expect(row.removalCommand(agent: .claude, project: project)
+                == "rm -rf '\(project)/apps/web/.claude/skills/deploy'")
+    }
+
+    /// 3.4 のホワイトリストを広げた分の上限。深すぎる場所と依存物の置き場は歩かない。
+    @Test("走査は 3 段まで。node_modules には降りない")
+    func nestedWalkIsBounded() throws {
+        let f = try Fixture()
+        try f.writeSkill("too-deep",
+                         at: f.project.appending(path: "a/b/c/d/.claude/skills"))
+        try f.writeSkill("vendored",
+                         at: f.project.appending(path: "node_modules/pkg/.claude/skills"))
+        try f.writeSkill("deep-enough",
+                         at: f.project.appending(path: "a/b/c/.claude/skills"))
+
+        let names = Set(Inventory.load(env: f.env).rows.map(\.name))
+        #expect(names.contains("deep-enough"))
+        #expect(!names.contains("too-deep"))
+        #expect(!names.contains("vendored"))
+    }
+
     @Test("プロジェクトが 1 つも無ければ何も読まない")
     func noProjects() throws {
         let home = URL(filePath: NSTemporaryDirectory())

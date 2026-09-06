@@ -108,6 +108,12 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 
 ### Fixed
 
+- Project skills in subdirectories are now listed. Claude Code loads `.claude/skills` from
+  nested directories as well as the project root, so a monorepo package carrying its own skills
+  was invisible in manage-arms. The walk stops three levels below the project root and skips
+  hidden and dependency directories. A nested skill is shown under its qualified name
+  (`apps/web:deploy`) only when the name collides, matching how Claude Code names it, and its
+  removal command points at the subdirectory it actually lives in.
 - Pasting a repository root now lists the skills nested under it. Skills laid out as
   `skills/<category>/<name>` were invisible because only one directory level was searched, and a
   repository carrying `.claude-plugin/plugin.json` stopped the search entirely — its skills are

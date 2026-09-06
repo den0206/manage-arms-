@@ -171,6 +171,31 @@ struct ManagementTests {
         #expect(try String(contentsOf: env.registryFile, encoding: .utf8) == "broken")
     }
 
+    /// 許可ルートを走査と同じ集合にしていないと、一覧には出るのに
+    /// 削除だけ「保護対象」と嘘をつく行ができる。
+    @Test("サブディレクトリの .claude/skills も削除を許す")
+    func nestedProjectArtifact() throws {
+        let env = try fixture()
+        defer { try? FileManager.default.removeItem(at: env.home) }
+        let project = env.home.appending(path: "project")
+        var registry = Registry()
+        registry.projects = [project.path(percentEncoded: false)]
+        try registry.save(env: env)
+
+        let nested = project.appending(path: "apps/web/.claude/skills/deploy")
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        try WriteGuard.assertUserArtifact(nested, kind: .skill,
+                                          project: project.path(percentEncoded: false), env: env)
+
+        // スキルルートでない場所は従来どおり拒む。
+        let elsewhere = project.appending(path: "apps/web/deploy")
+        try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
+        #expect(throws: (any Error).self) {
+            try WriteGuard.assertUserArtifact(elsewhere, kind: .skill,
+                                              project: project.path(percentEncoded: false), env: env)
+        }
+    }
+
     @Test("手動登録したプロジェクトをClaudeの履歴がなくても検出する")
     func explicitProject() throws {
         let env = try fixture()

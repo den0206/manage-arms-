@@ -842,14 +842,18 @@ struct ResourceRowView: View {
     private var removableFiles: [URL] {
         guard row.kind == .skill || row.kind == .subagent else { return [] }
         let suffix = row.kind == .subagent ? ".md" : ""
+        // `apps/web:deploy` はサブディレクトリの `.claude/skills` に居る。
+        let (subdir, leaf) = Source.splitQualified(row.name)
         let roots: [URL]
         if let project {
-            roots = [URL(filePath: project).appending(path: row.kind == .skill ? ".claude/skills" : ".claude/agents")]
+            let dir = row.kind == .skill ? ".claude/skills" : ".claude/agents"
+            roots = [URL(filePath: project)
+                .appending(path: subdir.isEmpty ? dir : "\(subdir)/\(dir)")]
         } else {
             let allowed = row.kind == .skill ? agent.skillRoots : agent.subagentRoots
             roots = row.roots.filter(allowed.contains).map { ManageArmsCore.Environment.live.home.appending(path: $0) }
         }
-        return roots.map { $0.appending(path: row.name + suffix) }.filter {
+        return roots.map { $0.appending(path: leaf + suffix) }.filter {
             (try? WriteGuard.assertUserArtifact($0, kind: row.kind, project: project, env: .live)) != nil
         }
     }

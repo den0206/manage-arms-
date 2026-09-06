@@ -84,7 +84,11 @@ public enum WriteGuard {
             guard Source.projectPaths(in: env).contains(project) else {
                 throw Denial.outsideManagedRoots(url.path)
             }
-            roots = [URL(filePath: project).appending(path: kind == .skill ? ".claude/skills" : ".claude/agents")]
+            // 許可ルートは走査と同じ集合にする。ここだけルート直下に絞ると、
+            // 一覧には出るのに削除だけ「保護対象」と嘘をつくことになる。
+            roots = kind == .skill
+                ? Source.projectSkillRoots(project).map(\.url)
+                : [URL(filePath: project).appending(path: ".claude/agents")]
         } else {
             let labels = kind == .skill ? Agent.allCases.flatMap(\.skillRoots) : Agent.allCases.flatMap(\.subagentRoots)
             roots = labels.filter { !Agent.bundledSkillRoots.contains($0) }.map { env.home.appending(path: $0) }

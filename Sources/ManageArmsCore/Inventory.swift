@@ -137,7 +137,11 @@ public struct ResourceRow: Identifiable, Sendable {
             let suffix = kind == .subagent ? ".md" : ""
             let dir = kind == .subagent ? "agents" : "skills"
             if let project {
-                return "rm -rf \(Self.quote("\(project)/.claude/\(dir)/\(name)\(suffix)"))"
+                // `apps/web:deploy` はサブディレクトリの `.claude/skills` に居る。
+                // 素で埋めると存在しないパスを消せと言うことになる。
+                let (sub, leaf) = Source.splitQualified(name)
+                let base = sub.isEmpty ? project : "\(project)/\(sub)"
+                return "rm -rf \(Self.quote("\(base)/.claude/\(dir)/\(leaf)\(suffix)"))"
             }
             guard let root = roots.first(where: { $0.hasPrefix(".") }) else { return nil }
             return "rm -rf ~/\(root)/" + Self.arg(name + suffix)
@@ -544,9 +548,22 @@ public struct ProjectScan: Sendable {
         let mcp = MCPScanner.byProject(env: env)
         for path in Source.projectPaths(in: env) {
             let root = URL(filePath: path)
-            for skill in SkillScanner.scan(root: root.appending(path: ".claude/skills"),
-                                           rootLabel: path) where skill.isLoadable {
-                scan.add(skill.name, kind: .skill, project: path, summary: skill.description)
+            // サブディレクトリの `.claude/skills` も読む（`Source.projectSkillRoots`）。
+            var byName: [String: [(prefix: String, description: String?)]] = [:]
+            for (prefix, dir) in Source.projectSkillRoots(path) {
+                for skill in SkillScanner.scan(root: dir, rootLabel: path) where skill.isLoadable {
+                    byName[skill.name, default: []].append((prefix, skill.description))
+                }
+            }
+            for (name, entries) in byName {
+                // Claude が修飾名 `apps/web:deploy` を使うのは**同名が競合したときだけ**。
+                // 競合が無ければ `/deploy` で呼べるので、勝手に修飾すると呼び出し名を偽る。
+                let qualify = entries.count > 1
+                for entry in entries {
+                    let display = qualify && !entry.prefix.isEmpty
+                        ? "\(entry.prefix):\(name)" : name
+                    scan.add(display, kind: .skill, project: path, summary: entry.description)
+                }
             }
             for agent in SubagentScanner.scan(root: root.appending(path: ".claude/agents"),
                                               rootLabel: path) where agent.isLoadable {

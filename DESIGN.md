@@ -7,7 +7,7 @@ AI コーディングエージェント（Claude Code / Cursor / Codex / Gemini 
 - **プラットフォーム**: macOS 26 以降 / SwiftUI
 - **配布**: DMG の直配布（App Sandbox 非対応のため App Store 不可）。13 章
 - **状態**: **v1〜v4 実装済み**（Skills / Subagents / Plugins / 使用実績 / MCP / 権限）、
-  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト 297 件
+  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト 302 件
 - **実装**: SPM パッケージ。`swift test` / `CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh`
   （`.xcodeproj` は不要。実 CLI・実ネットワークを使う確認は `MANUAL=1 swift test`）
 - **作業の進め方**: [CLAUDE.md](CLAUDE.md)。利用者向けの入口は [README.md](README.md)
@@ -557,7 +557,7 @@ struct Resource {
 | リソース | ユーザー全体 | プロジェクト（git 共有） | ローカル（gitignore） |
 |---|---|---|---|
 | MCP | `~/.claude.json` | `<proj>/.mcp.json` | `~/.claude.json` の projects 配下 |
-| Skills | `~/.claude/skills/` | `<proj>/.claude/skills/` | — |
+| Skills | `~/.claude/skills/` | `<proj>/.claude/skills/` および `<proj>/<sub>/.claude/skills/` | — |
 | Subagents | `~/.claude/agents/` | `<proj>/.claude/agents/` | — |
 | Plugins | `installed_plugins.json` scope: `user` | — | scope: `local` + `projectPath` |
 | Permissions | `~/.claude/settings.json` | `<proj>/.claude/settings.json` | `settings.local.json`（実際はここに集中） |
@@ -566,6 +566,28 @@ struct Resource {
 パスが動的で静的列挙にできない、3.4 の唯一の例外。読むのは各プロジェクトの
 `.claude/skills` / `.claude/agents` / `.mcp.json` / `.claude/settings*.json` **だけ**で、
 `~/.claude/projects/`（140 MB のセッションログ）とは別物。
+
+#### スキルはサブディレクトリの `.claude/skills` も読む
+
+Claude Code はプロジェクト直下だけでなく、作業ディレクトリ下のサブディレクトリの
+`.claude/skills` も読む（monorepo のパッケージが自前のスキルを持てる）。
+直下しか見ないと、その分が画面から完全に消える。
+
+3.4 のホワイトリストを広げるので、上限を固定で持つ（`Source.projectSkillRoots`）:
+**プロジェクト直下から 3 段まで**、隠しディレクトリと依存物の置き場
+（`node_modules` / `Pods` / `vendor` / `target` / `dist` / `build` / `out`）には降りない。
+途中で読むのはディレクトリ名だけで、`.claude/skills` 以外は一切開かない。
+実測（20 プロジェクト）: 訪問 614 ディレクトリ / 72 ms。9 章の起動 300 ms 以内に収まる。
+
+同名が競合したときだけ Claude は修飾名 `apps/web:deploy` を使い、競合が無ければ
+`/deploy` で呼べる。**表示もこれに合わせる** — 勝手に修飾すると呼び出し名を偽ることになる。
+削除コマンドと `WriteGuard` の許可ルートも同じ集合から作る。片方だけルート直下に
+絞ると、一覧には出るのに削除だけ「保護対象」と嘘をつく行ができる。
+
+親ディレクトリ側（プロジェクトより上）は読まない。ホワイトリストの外になる。
+
+**Subagent は対象外。** `<proj>/<sub>/.claude/agents` を読むかは未実測で、
+3.7 の「推測で埋めない」に倣う。
 
 実測（19 プロジェクト）: 4 プロジェクトに `.claude/skills` が 15 件、
 1 プロジェクトに `.claude/agents` が 3 件、1 プロジェクトに project スコープの MCP。
