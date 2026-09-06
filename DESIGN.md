@@ -7,11 +7,11 @@ AI コーディングエージェント（Claude Code / Cursor / Codex / Gemini 
 - **プラットフォーム**: macOS 26 以降 / SwiftUI
 - **配布**: DMG の直配布（App Sandbox 非対応のため App Store 不可）。13 章
 - **状態**: **v1〜v4 実装済み**（Skills / Subagents / Plugins / 使用実績 / MCP / 権限）、
-  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト 321 件
+  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト 322 件
 - **実装**: SPM パッケージ。`swift test` / `CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh`
   （`.xcodeproj` は不要。実 CLI・実ネットワークを使う確認は `MANUAL=1 swift test`）
 - **作業の進め方**: [CLAUDE.md](CLAUDE.md)。利用者向けの入口は [README.md](README.md)
-- **最終更新**: 2026-09-06（メニューバー常駐に変更し、検知はアイコンを緑にして知らせる）
+- **最終更新**: 2026-09-06（外観をライト / ダーク / システムで切り替えられるようにした）
 
 ---
 
@@ -227,6 +227,10 @@ enum Source {
   ウィンドウを閉じている間こそ効く機能なので、閉じたら終了する形とは両立しない。
   OFF にすれば `applicationShouldTerminateAfterLastWindowClosed` が true に戻り、
   従来どおり閉じた時点でプロセスごと終わる
+- **外観（ライト / ダーク / システム）は設定で切り替えられる。** 既定はシステム追従で、
+  選んだときだけ `registry.json` の `appearance` に残る。**`NSApplication.appearance` を
+  差し替える** — `.preferredColorScheme` はウィンドウの中しか変わらず、
+  メニューバーのメニュー・シート・パネルが取り残される
 - **常駐中に抱えるのは設定と検知の状態だけ。** ウィンドウを閉じた時点で
   `inventory` / `permissions` / 重複集計を捨てる（`AppModel.releaseForBackground`）。
   一覧は開いたときにどうせ読み直す（キャッシュしない）ので、

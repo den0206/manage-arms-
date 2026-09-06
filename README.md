@@ -22,6 +22,7 @@ The design document is [DESIGN.md](DESIGN.md) (Japanese).
 | **Usage** | Last-used dates from session logs. MCP processes checked every 3 seconds while a window is visible; this does not indicate an active tool call |
 | **Browser detection** | On by default. Opening a skill, plugin or subagent page while a browser is frontmost turns the menu bar icon green and offers to add it; leaving the page turns it back — no URL to copy, and no system notifications. The page is confirmed against `raw.githubusercontent.com` first, and the URL is never stored |
 | **Permission cleanup** | Remove machine-specific and cross-project duplicate entries from `permissions.allow` |
+| **Appearance** | Switch between light, dark and following the system in Settings (system by default) |
 
 ## Requirements
 
