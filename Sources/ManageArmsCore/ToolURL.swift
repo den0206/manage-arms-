@@ -91,8 +91,13 @@ public enum ToolURL {
     public static func shouldNotify(_ lead: ToolLead, registry: Registry, seen: Set<String>) -> Bool {
         guard !seen.contains(lead.url) else { return false }
         return !registry.resources.contains { entry in
-            entry.repo == lead.source.repo
-                && (entry.name == lead.name || entry.subdir == lead.source.subdir)
+            guard entry.repo == lead.source.repo else { return false }
+            if entry.name == lead.name { return true }
+            // **subdir が両方 nil でも「同じもの」ではない。** カタログ URL は subdir を
+            // 持たないので、nil 同士を突き合わせると同じリポジトリの別スキルまで
+            // 導入済み扱いになる（mattpocock/skills の grilling を入れると grill-me が出ない）。
+            guard let subdir = lead.source.subdir else { return false }
+            return entry.subdir == subdir
         }
     }
 }

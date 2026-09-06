@@ -112,6 +112,19 @@ struct ToolURLTests {
                               subdir: "skills/engineering/improve-codebase-architecture"))
         #expect(!ToolURL.shouldNotify(lead, registry: registry, seen: []))
 
+        // 同じリポジトリの**別のスキル**は勧める。カタログ URL は subdir を持たないので、
+        // nil 同士を突き合わせると repo が一致するだけで導入済み扱いになってしまう。
+        let sibling = try #require(ToolURL.lead("https://www.skills.sh/mattpocock/skills/grill-me"))
+        #expect(sibling.source.subdir == nil)
+        #expect(ToolURL.shouldNotify(sibling, registry: registry, seen: []))
+
+        // subdir を持たない登録（カタログから入れたもの）でも同じ。
+        var catalogInstalled = Registry()
+        catalogInstalled.upsert(.init(name: "grilling", kind: .skill, repo: "mattpocock/skills"))
+        #expect(ToolURL.shouldNotify(sibling, registry: catalogInstalled, seen: []))
+        let same = try #require(ToolURL.lead("https://www.skills.sh/mattpocock/skills/grilling"))
+        #expect(!ToolURL.shouldNotify(same, registry: catalogInstalled, seen: []))
+
         // 別のリポジトリの同名は別物。
         var other = Registry()
         other.upsert(.init(name: "improve-codebase-architecture", kind: .skill, repo: "someone/else"))
