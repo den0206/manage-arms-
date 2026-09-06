@@ -70,3 +70,16 @@ jobs:
           CONFIG: debug
           UNIVERSAL: '0'
         run: ./Scripts/build-app.sh
+
+  agent-compatibility:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-26
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        agent: [claude, codex, gemini]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check latest agent in an isolated home
+        run: ./Scripts/check-agent-compatibility.sh "${{ matrix.agent }}"

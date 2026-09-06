@@ -15,6 +15,7 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 - Guided MCP and plugin installation with an explicit agent destination, registration checks,
   direct removal of existing user tools, and protected indicators for recognized bundled tools.
 - Visible-window MCP process polling and scan diagnostics that distinguish failures from empty lists.
+- Isolated CLI compatibility checks for Claude Code, Codex, and Gemini CLI, run on demand.
 - Explicit project folder registration for discovering Claude project settings.
 
 - One screen per agent for MCP servers, Skills, Subagents and Plugins across Claude Code,
