@@ -12,6 +12,13 @@ public struct Registry: Codable, Equatable, Sendable {
     /// エージェントごとの手動設定（3.7）。キーは `Agent.rawValue`。
     /// **検出結果は保存しない** — 保存してよいのは利用者が決めたことだけ。
     public var agents: [String: AgentSetting] = [:]
+    /// ブラウザで開いた Tool のページを検知して通知するか（DESIGN.md 6 章）。
+    /// **Optional なのは既定値を書き出さないため** — 触っていない利用者の
+    /// registry.json に意味の無い行を増やさない。
+    public var browserDetection: Bool?
+
+    /// 既定は OFF。ブラウザ制御の許可（TCC）を伴うので、黙って始めない。
+    public var detectsBrowserURLs: Bool { browserDetection ?? false }
 
     /// 既定は「有効・自動検出のまま」。エントリが無いエージェントもこれになるので、
     /// 対応エージェントが増えたときは何も書かなくても自動で並ぶ。
@@ -76,7 +83,9 @@ public struct Registry: Codable, Equatable, Sendable {
 
     public init() {}
 
-    enum CodingKeys: String, CodingKey { case resources, repos, usage, projects, agents }
+    enum CodingKeys: String, CodingKey {
+        case resources, repos, usage, projects, agents, browserDetection
+    }
 
     /// **欠けているキーは既定値で埋める。**
     /// 合成された `init(from:)` はキーが 1 つ足りないだけで失敗し、`load` の
@@ -90,6 +99,7 @@ public struct Registry: Codable, Equatable, Sendable {
         repos = try container.decodeIfPresent([String: RepoState].self, forKey: .repos) ?? [:]
         usage = try container.decodeIfPresent(Usage.self, forKey: .usage) ?? Usage()
         agents = try container.decodeIfPresent([String: AgentSetting].self, forKey: .agents) ?? [:]
+        browserDetection = try container.decodeIfPresent(Bool.self, forKey: .browserDetection)
     }
 
     public func setting(_ agent: Agent) -> AgentSetting { agents[agent.rawValue] ?? AgentSetting() }

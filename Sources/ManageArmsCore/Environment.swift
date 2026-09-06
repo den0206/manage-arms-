@@ -14,6 +14,9 @@ public struct Environment: Sendable {
     /// HTTP GET。本文・ステータス・レスポンスヘッダを返す。
     /// テストではネットワークを叩かない（DESIGN.md 10.6）。
     public var httpGet: @Sendable (URL, [String: String]) async throws -> HTTPResult
+    /// HTTP HEAD。**本文を落とさずに実在だけ確かめる**（ブラウザ検知の確度上げ）。
+    /// 見ているだけのページに対して数十 KB を落とさないための分離。
+    public var httpHead: @Sendable (URL) async throws -> Int
 
     public struct HTTPResult: Sendable {
         public let body: Data
@@ -29,13 +32,15 @@ public struct Environment: Sendable {
         appSupport: URL,
         run: @escaping @Sendable ([String]) throws -> String,
         now: @escaping @Sendable () -> Date,
-        httpGet: @escaping @Sendable (URL, [String: String]) async throws -> HTTPResult
+        httpGet: @escaping @Sendable (URL, [String: String]) async throws -> HTTPResult,
+        httpHead: @escaping @Sendable (URL) async throws -> Int = { _ in 0 }
     ) {
         self.home = home
         self.appSupport = appSupport
         self.run = run
         self.now = now
         self.httpGet = httpGet
+        self.httpHead = httpHead
     }
 }
 
@@ -87,6 +92,15 @@ extension Environment {
             return .init(body: data, status: http?.statusCode ?? 0,
                          headers: Dictionary(uniqueKeysWithValues:
                             headers.map { ($0.key.lowercased(), $0.value) }))
+        },
+        httpHead: { url in
+            var request = URLRequest(url: url)
+            request.httpMethod = "HEAD"
+            request.timeoutInterval = 5      // 見ているだけのページ。待たせない
+            let session = URLSession(configuration: .ephemeral)
+            defer { session.finishTasksAndInvalidate() }
+            let (_, response) = try await session.data(for: request)
+            return (response as? HTTPURLResponse)?.statusCode ?? 0
         }
     )
 
@@ -96,14 +110,16 @@ extension Environment {
         run: @escaping @Sendable ([String]) throws -> String = { _ in "" },
         now: @escaping @Sendable () -> Date = { Date(timeIntervalSince1970: 0) },
         httpGet: @escaping @Sendable (URL, [String: String]) async throws -> HTTPResult
-            = { _, _ in .init(body: Data(), status: 0, headers: [:]) }
+            = { _, _ in .init(body: Data(), status: 0, headers: [:]) },
+        httpHead: @escaping @Sendable (URL) async throws -> Int = { _ in 0 }
     ) -> Environment {
         Environment(
             home: home,
             appSupport: home.appending(path: "Library/Application Support/ManageArms"),
             run: run,
             now: now,
-            httpGet: httpGet
+            httpGet: httpGet,
+            httpHead: httpHead
         )
     }
 }
