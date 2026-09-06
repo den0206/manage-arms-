@@ -173,10 +173,15 @@ public struct ResourceRow: Identifiable, Sendable {
     /// **1 件ずつの削除は別経路**（`SkillManager.removeExisting`、DESIGN.md 15）。
     /// そちらはパスを 1 つ選ばせ、`WriteGuard.assertUserArtifact` で検証してから
     /// ゴミ箱へ移す。共有ファイルであることは確認ダイアログで明示する。
-    public func isRemovalExecutable(mcpScope: String?) -> Bool {
+    ///
+    /// **`agent` を見るのは、実行できる CLI がエージェントごとに違うから。**
+    /// プロジェクト単位の MCP を消せるのは `claude mcp remove -s local` だけで、
+    /// `~/.claude.json` の中身。他のエージェントには同じ置き場も CLI も無い
+    /// （`MCPScanner.byProject` が読むのも Claude の 2 か所だけ）。
+    public func isRemovalExecutable(agent: Agent, mcpScope: String?) -> Bool {
         switch kind {
-        case .plugin: true
-        case .mcp:    mcpScope == "local"      // project スコープは <proj>/.mcp.json の中
+        case .plugin: agent.cliName != nil     // CLI が無ければ実行しようがない
+        case .mcp:    agent == .claude && mcpScope == "local"
         case .skill, .subagent: false          // リポジトリの中のファイル
         }
     }
@@ -274,9 +279,9 @@ public struct Inventory: Sendable {
             let scope = projectScan.mcpScope(row.name, in: project)
             guard let command = row.removalCommand(agent: agent, project: project,
                                                    mcpScope: scope) else { return nil }
-            return CleanupItem(name: row.name, kind: row.kind, project: project,
+            return CleanupItem(name: row.name, kind: row.kind, agent: agent, project: project,
                                command: command,
-                               executable: row.isRemovalExecutable(mcpScope: scope))
+                               executable: row.isRemovalExecutable(agent: agent, mcpScope: scope))
         }
     }
 
@@ -310,10 +315,8 @@ public struct Inventory: Sendable {
             try PluginManager.remove(row.name, from: agent, project: project, env: env)
         } else if row.kind == .mcp {
             if let project {
-                guard agent == .claude else {
-                    throw MCPScanner.ReadFailure("このプロジェクト範囲には対応していません")
-                }
-                try MCPManager.removeProject(row.name, project: project, env: env)
+                // 対応範囲の判定は `MCPManager.removeProject` が持つ（二重に書かない）。
+                try MCPManager.removeProject(row.name, from: agent, project: project, env: env)
             } else {
                 try MCPManager.remove(row.name, from: agent, env: env)
             }
@@ -321,14 +324,19 @@ public struct Inventory: Sendable {
         return nil
     }
 
+    /// **表示したコマンドと同じことをする。** 以前は `agent` を `.claude` に決め打ちして
+    /// いたため、Codex の画面で `codex plugin remove …` と見せながら
+    /// `claude plugin remove` を走らせ、的外れなエラーで失敗していた。
+    /// どのエージェントに対する削除かは `CleanupItem` が持つ。
     public static func runCleanup(_ items: [CleanupItem], env: Environment) -> [String] {
         items.filter(\.executable).compactMap { item in
             do {
                 if item.kind == .plugin {
-                    try PluginManager.remove(item.name, from: .claude,
+                    try PluginManager.remove(item.name, from: item.agent,
                                              project: item.project, env: env)
                 } else if item.kind == .mcp {
-                    try MCPManager.removeProject(item.name, project: item.project, env: env)
+                    try MCPManager.removeProject(item.name, from: item.agent,
+                                                 project: item.project, env: env)
                 }
                 return nil
             } catch { return "\(item.name): \(error)" }
@@ -753,10 +761,12 @@ public struct ProjectScan: Sendable {
 public struct CleanupItem: Identifiable, Sendable, Equatable {
     public let name: String
     public let kind: Kind
+    /// どのエージェントに対する削除か。**`command` と実行を食い違わせないために持つ。**
+    public let agent: Agent
     public let project: String
     public let command: String
     /// アプリが代わりに実行してよいか（`ResourceRow.isRemovalExecutable`）。
     public let executable: Bool
-    public var id: String { "\(project)|\(kind.rawValue):\(name)" }
+    public var id: String { "\(project)|\(agent.rawValue)|\(kind.rawValue):\(name)" }
     public var projectName: String { (project as NSString).lastPathComponent }
 }

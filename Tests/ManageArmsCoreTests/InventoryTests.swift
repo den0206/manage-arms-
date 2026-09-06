@@ -557,13 +557,31 @@ struct CleanupPlanTests {
     @Test("実行してよいのは CLI が自分の領域に持っている登録だけ")
     func executability() {
         let plugin = row("ponytail@ponytail", kind: .plugin, reach: .projects(["/w/a"]))
-        #expect(plugin.isRemovalExecutable(mcpScope: nil))
+        #expect(plugin.isRemovalExecutable(agent: .claude, mcpScope: nil))
+        #expect(plugin.isRemovalExecutable(agent: .codex, mcpScope: nil))
+        // Cursor に CLI は無い。実行しようがないので見せるだけにする。
+        #expect(!plugin.isRemovalExecutable(agent: .cursor, mcpScope: nil))
         let mcp = row("chrome-devtools", kind: .mcp, reach: .projects(["/w/a"]))
-        #expect(mcp.isRemovalExecutable(mcpScope: "local"))
+        #expect(mcp.isRemovalExecutable(agent: .claude, mcpScope: "local"))
         // <proj>/.mcp.json は git 共有のファイル。消したことが他の人にも及ぶ。
-        #expect(!mcp.isRemovalExecutable(mcpScope: "project"))
-        #expect(!row("x", kind: .skill, reach: .projects(["/w/a"])).isRemovalExecutable(mcpScope: nil))
-        #expect(!row("y", kind: .subagent, reach: .projects(["/w/a"])).isRemovalExecutable(mcpScope: nil))
+        #expect(!mcp.isRemovalExecutable(agent: .claude, mcpScope: "project"))
+        // プロジェクト単位の MCP を消せるのは Claude だけ（`byProject` が読むのもそこだけ）。
+        #expect(!mcp.isRemovalExecutable(agent: .codex, mcpScope: "local"))
+        #expect(!row("x", kind: .skill, reach: .projects(["/w/a"]))
+            .isRemovalExecutable(agent: .claude, mcpScope: nil))
+        #expect(!row("y", kind: .subagent, reach: .projects(["/w/a"]))
+            .isRemovalExecutable(agent: .claude, mcpScope: nil))
+    }
+
+    /// **表示と実行を食い違わせない**（F-4 の回帰テスト）。
+    /// `agent` を落とすと、Codex の画面で `codex …` と見せて `claude …` を走らせる。
+    @Test("計画は画面のエージェントを持ち歩く")
+    func planCarriesAgent() {
+        let inventory = Inventory(agents: [:], rows: [])
+        let plugin = row("ponytail@ponytail", kind: .plugin, reach: .projects(["/w/a"]))
+        let items = inventory.cleanupItems([plugin], agent: .codex, project: "/w/a")
+        #expect(items.first?.agent == .codex)
+        #expect(items.first?.command.contains("codex plugin remove") == true)
     }
 
     @Test("計画にはスコープ付きのコマンドが入り、実行可否で分かれる")
