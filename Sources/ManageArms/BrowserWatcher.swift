@@ -87,6 +87,9 @@ final class BrowserWatcher {
         observer = nil
         pending = nil
         lastURL = ""
+        // OFF にしたら何も抱えない（DESIGN.md 3.5）。次に ON にしたら作り直す。
+        scripts.removeAll()
+        seen.removeAll()
     }
 
     /// ブラウザが前面の間だけタイマーを回す。それ以外は止めておく（3.5）。
@@ -143,7 +146,10 @@ final class BrowserWatcher {
         seen.insert(lead.url)      // 確認の往復中に同じ URL でもう一度走らせない
         Task { [weak self] in
             guard await Self.exists(lead) else { return }
-            self?.pending = lead
+            // **往復の間にページを離れていたら出さない。** 実在確認は数百 ms かかるので、
+            // その間にスクロールで次の記事へ行かれると、見ていないページの帯が出る。
+            guard let self, self.lastURL == url else { return }
+            self.pending = lead
         }
     }
 
@@ -167,6 +173,13 @@ final class BrowserWatcher {
     // MARK: - Apple Events
 
     /// 前面タブの URL。**許可されていなければ機能ごと止める**（毎回ダイアログを出さない）。
+    ///
+    /// ⚠️ `NSAppleScript` はスレッドセーフではなくメインスレッドで実行する。
+    /// 1 回 ~100 ms かかり、初回は TCC の許可ダイアログが閉じるまで返らない。
+    /// **これが許されるのは、この経路が動くのが「他のアプリが前面のとき」だけ**だから
+    /// （`syncTimer` が前面ブラウザ以外ではタイマーを止める）。自分のウィンドウを
+    /// 見ている間は 1 回も飛ばない。ここを常時実行に変えるなら、先に
+    /// 専用スレッド + run loop へ逃がすこと。
     private func frontURL(_ browser: Browser) -> String? {
         let script = scripts[browser] ?? NSAppleScript(source: browser.script)
         guard let script else { return nil }

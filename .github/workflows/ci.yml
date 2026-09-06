@@ -18,6 +18,11 @@ on:
   pull_request:
     branches:
       - main
+  # PR を経由しない main への push も同じゲートを通す。
+  # PR だけだと、直 push とマージ後の main が一度も検証されないまま残る。
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 # 同一 PR に追い push があったら、古い実行を打ち切る。

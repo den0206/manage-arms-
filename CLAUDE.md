@@ -21,7 +21,7 @@ AI コーディングエージェントの周辺リソース（MCP / Skills / Su
 
 ```bash
 swift build && swift test
-./Scripts/check-invariants.sh                                              # 不変条件
+./Scripts/check-invariants.sh                                              # 不変条件（翻訳の網羅も含む）
 ./Scripts/release-changelog.sh --check && ./Scripts/test-release-changelog.sh
 CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh                            # .app が組めること
 ```
@@ -41,19 +41,27 @@ CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh                            # .ap
    実行中の Claude と競合してユーザーの全状態を壊しうる。
 2. **削除・移動・symlink 作成は `WriteGuard` を通る経路だけ** — Skill/Subagent の
    共通 lifecycle を持つ `SkillManager` と `Updater` は必ず `WriteGuard.assertMutable` を呼ぶ。
+   `PermissionWriter` はバックアップの世代刈りだけで `WriteGuard.assertAppBackup` を呼ぶ。
    `Fetcher` / `Installer` は一時ディレクトリのみ、`InstallLocationGuard` は
    直前に自分が `/Applications` へ作ったバンドルのみ。
    既存ユーザーToolの削除は `WriteGuard.assertUserArtifact` で既知ルート直下を検証する。
    新しいファイルで無防備に `removeItem` を書くと `~/.claude` や `~/.agents` を消しうる。
-3. **`ja` と `en` のキー集合が一致していること** — 片方に足し忘れると、
-   その文言だけ日本語のまま英語 UI に出る。
+2b. **作成もガードを通る** — 取得物が名乗った名前（frontmatter の `name`）は
+   こちらの管理下に無い。`../` を含む名前がそのままパス要素になると管理ルートの外へ書ける。
+   `WriteGuard.assertValidName` を `Fetcher` / `Installer` / `ManagedLifecycle` で通す。
+3. **UI に出る日本語リテラルが `Localizable.strings` で引けること** —
+   ja / en のキー集合の一致だけでは「**両方に無い**」文言を見逃す
+   （`String` を返すプロパティは SwiftUI が自動で引かない）。
+   `Scripts/check-localization.py` が Sources 側から検査する。
 4. **走査対象はホワイトリスト**（DESIGN 3.4）。除外リスト方式にしない。
    `Source` の列挙に無いパスは存在しても読まない。`projects` / `sessions` は
    使用実績の集計からのみ、`usageLog` ケース経由で読む。
 5. **常駐中に抱えない・キャッシュしない**（DESIGN 3.5 / 15）。メニューバー常駐は既定 ON
    だが、ウィンドウを閉じたら一覧はメモリから捨てる（`AppModel.releaseForBackground`）。
    設定はアクティブ化時に再走査し、ウィンドウ表示中だけ起動状態を3秒ごとに取得する。
-   永続ファイルは `registry.json` 1 つだけ。
+   永続ファイルは `registry.json` 1 つだけ（`permission-backups/` は 5 世代で頭打ち）。
+   **唯一の例外が `CLIScan`** — DESIGN 3.5 が求める CLI 呼び出しの間引きで、
+   CLI に訊かないと分からないことだけを 3 分持ち、閉じたら捨てる。
 
 ## ストレージ・メモリの規律（徹底する）
 

@@ -10,6 +10,40 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 
 ## [Unreleased]
 
+### Security
+
+- A skill or subagent fetched from GitHub could no longer be written outside the directories
+  ManageArms manages. The `name` in a `SKILL.md` front matter is written by whoever publishes
+  the repository, and it was used as a path component without checking, so a name containing
+  `../` escaped the managed store. Names are now validated before anything is created.
+
+### Fixed
+
+- Error messages now appear in English in the English interface. Messages raised while
+  scanning, installing, updating, pinning and editing permissions were left untranslated, as
+  were list details such as the "disabled (parked)" label and broken-link notes.
+- Disabling a skill or subagent no longer leaves it half-disabled when the operation cannot
+  finish. Previously the Claude symlink was removed first, so a later failure hid the skill
+  from Claude while the list still showed it as enabled.
+- Removing several project items at once now runs the command shown in the sheet. On the Codex
+  screen it displayed `codex plugin remove` but ran the Claude equivalent, which then failed
+  with an unrelated message.
+- Applying an update no longer keeps reporting that an update is available afterwards.
+- Refreshing after an action no longer gets dropped when a scan is already running, which
+  could leave the list showing stale contents.
+- A skill description ending near the 4 KB front-matter limit no longer shows a replacement
+  character in place of its last character.
+
+### Changed
+
+- Returning to ManageArms is faster: the command-line tools for each agent are queried at most
+  every few minutes instead of on every activation. Explicit refreshes, agent settings changes
+  and removals still query immediately.
+- Toggling, removing, updating and editing permissions no longer block the interface while
+  files are moved or copied.
+- Permission backups are capped at five generations per settings file, and recorded last-used
+  dates are capped, so neither grows without bound.
+
 ## [0.1.0] — 2026-09-06
 
 ### Fixed
