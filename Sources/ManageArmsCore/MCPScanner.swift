@@ -154,7 +154,14 @@ public enum MCPManager {
         }
     }
 
-    public static func removeProject(_ name: String, project: String, env: Environment) throws {
+    /// プロジェクト単位の MCP を消す。**Claude 専用**（`MCPScanner.byProject` が読むのも
+    /// `<proj>/.mcp.json` と `~/.claude.json` の 2 か所だけで、他のエージェントには
+    /// 同じ置き場も CLI も無い）。呼び出し側が取り違えないよう、agent を受けて弾く。
+    public static func removeProject(_ name: String, from agent: Agent = .claude,
+                                     project: String, env: Environment) throws {
+        guard agent == .claude else {
+            throw MCPScanner.ReadFailure("このプロジェクト範囲には対応していません")
+        }
         guard !name.isEmpty, !name.hasPrefix("-"), let scope = ProjectScan.load(env: env).mcpScope(name, in: project) else {
             throw MCPScanner.ReadFailure("MCPの適用範囲が不明です。変更していません")
         }
