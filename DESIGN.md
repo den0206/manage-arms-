@@ -439,8 +439,10 @@ supabase          MCP   ○ 停止中
 2026-09-03T09:48  Skill  {'skill': 'review-for-merge'}
 ```
 
-Claude は `~/.claude/projects/*/*.jsonl`、Codex は
-`~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` と**同じ JSONL 形式**。
+Claude は `~/.claude/projects/*/*.jsonl` の `tool_use: Skill`、Codex は
+`~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` の `type: skill` と `SKILL.md` 読み込み、
+Cursor は `~/.cursor/projects/**/agent-transcripts/**/*.jsonl` の `tool_use: Read` を使う。
+Cursor の行には時刻が無いため、最終使用日は transcript の更新時刻で近似する。
 
 **そしてこれが、リアルタイム点灯よりはるかに価値がある。** 実測:
 
@@ -461,10 +463,10 @@ Claude は `~/.claude/projects/*/*.jsonl`、Codex は
 
 したがって:
 
-- `registry.json` に `usageScannedUpTo`（タイムスタンプ）と集計結果を持つ
+- `registry.json` に Agent ごとの走査時刻 `scannedSources` と集計結果を持つ
 - 2 回目以降は **mtime がそれより新しいログだけ**読む（増分スキャン）
-- ログのメタデータ走査は実測 **147 ファイルで 6 ms**。増分なら実質ゼロ
-- 初回の全読みは 129 MB になるため、**明示的な「使用状況を分析」ボタン**から
+- 実測では 3 Agent の全走査が **2.54 秒**、増分が **0.013 秒**
+- 初回は複数 Agent のログ全体を読むため、**明示的な「使用状況を分析」ボタン**から
   バックグラウンドで実行し、進捗を出す。起動時には走らせない
 
 #### やらないこと: hooks を仕込んでの通知
@@ -689,16 +691,15 @@ git 共有で他マシン・他メンバーの環境を壊すため、ユーザ�
 | `● 実行中`（緑） | **MCP のみ。** プロセスが生きている。所属エージェントと稼働時間を tooltip に出す |
 | `停止中` | **MCP のみ。** 登録されているがプロセスが無い |
 | `—`（淡） | **未集計**。まだ「使用状況を分析」を押していない |
-| `─` | **観測範囲外**。読めるログは Claude のものだけで、Cursor / Codex での使用は見えない |
+| `─` | **観測範囲外**。使用ログを読めない Agent にしか存在しない |
 | `未使用`（橙） | 集計した範囲で一度も使われていない。**削除の候補** |
 | `2 日前` | 最終使用日 |
 
 MCP は最終使用日より**実行状態を優先**する。3.9 の通り MCP だけが
 「今この瞬間の状態」を持ち、そちらの方が情報量が多い。
 
-**「観測範囲外」を「未使用」と出すと嘘になる。** 実装時に実際にこれが起き、
-`~/.cursor/skills-cursor/` にしか無いスキル 26 件が全部「未使用」と表示された。
-Cursor は使っているかもしれず、こちらに見えていないだけ。
+**「観測範囲外」を「未使用」と出すと嘘になる。** ログ対応前には実際にこれが起き、
+Cursor 専用スキルが全部「未使用」と表示された。現在は Claude / Codex / Cursor を観測する。
 
 ---
 
@@ -1361,7 +1362,7 @@ symlink を張り、外部コマンドを実行する。壊れ方が「設定が
 | **スコープ解決** | `absent` / `inherited` / `explicit` の判定。ユーザー全体とプロジェクトの両方に存在する場合 |
 | **更新判定** | sha 一致 / 不一致 / `pinned: true` は更新対象にしない / ETag 304 |
 | **バージョン文字列パース** | `2.1.236 (Claude Code)` / `codex-cli 0.153.2` / `0.46.0` / パース失敗時に「バージョン不明」へ落ちること |
-| **使用実績の抽出（3.9）** | `tool_use` の `Skill` / `mcp__*` を拾えること / 壊れた JSONL 行を飛ばして続行すること / `plugin:skill` 形式の分解 / **未集計と「未使用」を別の値として返すこと**（5.3） |
+| **使用実績の抽出（3.9）** | Claude の `tool_use: Skill`、Codex の `type: skill` / `SKILL.md` 読み込み、Cursor の `tool_use: Read`、`mcp__*` を拾えること / 書き込みや patch 内の `SKILL.md` を誤認しないこと / 壊れた JSONL 行を飛ばして続行すること / `plugin:skill` 形式の分解 / **未集計と「未使用」を別の値として返すこと**（5.3） |
 | **MCP プロセスの所属判定（3.9）** | `ps` 出力から PPID を辿って Cursor / Claude / Codex に到達すること / 親が既に死んでいる孤児プロセス / どのエージェントにも辿り着かない場合に「不明」を返すこと |
 
 ### 10.2 走査範囲（設計の生命線）
@@ -1372,8 +1373,8 @@ symlink を張り、外部コマンドを実行する。壊れ方が「設定が
 ここが破られると 3.4 / 3.5 / 9 の対策がすべて無意味になる。
 新しい `Source` を足した誰かが、このテストで止まるようにしておく。
 
-**`usageLog` ケースは別扱い（3.4 / 3.9）。** `projects` / `sessions` を読んでよい
-唯一の経路なので、**一覧スキャンの経路から `usageLog` が呼ばれないこと**を
+**使用実績ログは別扱い（3.4 / 3.9）。** `projects` / `sessions` を読んでよい
+唯一の経路なので、**一覧スキャンの経路から `UsageScanner` が呼ばれないこと**を
 別途 assert する。ここが混ざると 3.4 の「129 MB を踏まない」が崩れる。
 
 ### 10.3 ファイルシステム操作（偽ホームで実行）
@@ -1495,25 +1496,25 @@ Cursor は Skills では 9 ルートを走査するが、**Subagent は `.cursor
 `UsageScanner` + `registry.usage` + 5.3 の 1 列。実測値:
 
 ```
-全走査   1.27 秒（~/.claude/projects 140 MB / 147 ファイル）
-増分     0.002 秒（mtime で絞り込み）
-検出     8 件（うち ponytail はプラグイン名の逆引き）
+全走査   2.54 秒（Claude / Codex / Cursor）
+増分     0.013 秒（Agent ごとの走査時刻と mtime で絞り込み）
+検出     22 件（実環境、未導入の Skill を含む）
 ```
 
 実装で判明し、設計に反映した事実:
 
 | 発見 | 反映先 |
 |---|---|
-| **読めるログは Claude のものだけ。** Cursor 専用スキル 26 件が全部「未使用」と出た | `ResourceRow.usageObservable`。観測範囲外は `─` にして「未使用」と混ぜない（5.3） |
+| Claude だけの走査では Codex / Cursor の使用が「未使用」になる | 3 Agent のログを走査し、`ResourceRow.usageObservable` も同じ範囲にする |
+| 旧 registry の全体走査時刻を流用すると、新規対応 Agent の過去ログを飛ばす | Agent ごとの `scannedSources` を追加し、未走査の Agent だけ初回に全履歴を埋める |
+| Cursor transcript の行には時刻が無い | ファイル更新時刻を最終使用日の近似値にする |
 | 合成された `Codable` は欠けたキーを既定値で埋めない。`usage` を足した瞬間、旧 `registry.json` が読めず**導入済みスキルの取得元が全部飛ぶ** | `Registry.init(from:)` を明示し `decodeIfPresent`。以後フィールドを足しても壊れない |
 | `ISO8601DateFormatter` は `Sendable` でなく `static` に置けない | 日付解析を「名前が取れた行」の後ろに移し、その場で生成（全履歴で数十回） |
 | `inout` は `Task.detached` に渡せない | `refreshed(_:env:)` は値を返す。全走査は数秒かかりメインスレッドでは回せない |
 | `#expect` の中の `allSatisfy(\.isEmpty)` はマクロが `rethrows` と誤解して展開に失敗する | `MCPTests`。マクロの外で評価する |
 
-**Codex は対象外のまま。** `~/.codex/sessions/**/rollout-*.jsonl` は
-`type: function_call` を使う別形式で、スキル呼び出しの表現が未確認（spike #15）。
-**対応するまで「Codex では未使用」とは表示しない** — 観測できないことと
-使われていないことは違う。
+Codex の明示呼び出しは `type: skill`、暗黙使用は `SKILL.md` の読み込みとして残る。
+実行コマンドだけを解析し、patch やファイル操作に含まれるパスは使用と数えない。
 
 ### v3 — MCP（実装済み）
 
@@ -1581,7 +1582,7 @@ Hooks / Commands / Rules は対象外に決まった（1 章）ため、v4 は�
 
 ## 12. spike の結果と未検証項目
 
-### 解決済み（2026-09-05 実測）
+### 解決済み（2026-09-05〜06 実測）
 
 | # | 項目 | 結果 |
 |---|---|---|
@@ -1590,7 +1591,8 @@ Hooks / Commands / Rules は対象外に決まった（1 章）ため、v4 は�
 | — | Claude が symlink を辿るか | **✅ 辿る。** `~/.claude/skills/` に symlink を張った瞬間、起動中セッションのスキル一覧に反映された |
 | — | GUI アプリの `PATH` 問題 | **✅ 確定。** 3 CLI すべて launchd の `PATH` では見つからない。起動中の Cursor Helper も `PATH=/usr/bin:/bin:/usr/sbin:/sbin` で動いている（3.7） |
 | — | MCP の実行中検出と所属エージェント特定 | **✅ 可能。** `chrome-devtools-mcp` が独立プロセスとして常駐。PPID を辿ると `Cursor Helper: mcp-process` → `Cursor.app` に到達し、どのエージェントが掴んでいるか確定できる（3.9） |
-| — | Skills の使用実績がログから取れるか | **✅ 取れる。** `~/.claude/projects/*/*.jsonl` に `{'skill': 'artifact-design'}` がタイムスタンプ付きで残る。Codex も `~/.codex/sessions/**/rollout-*.jsonl` と同形式。メタデータ走査は 147 ファイルで **6 ms**（3.9） |
+| — | Skills の使用実績がログから取れるか | **✅ 取れる。** Claude は `tool_use: Skill`、Codex は `type: skill` と `SKILL.md` 読み込み、Cursor は `tool_use: Read` に残る（3.9） |
+| 14 | Cursor の使用実績ログの形式 | **✅ 確定。** `~/.cursor/projects/**/agent-transcripts/**/*.jsonl`。行時刻が無いためファイル更新時刻で近似する |
 | 9 | `.skill-lock.json` を registry として流用するか | **決定: 流用しない。** 自前 `registry.json` を持ち、`.skill-lock.json` は読み取り専用（4.1） |
 | 13 | `ditto -xk` の Zip Slip 耐性 | **✅ 安全。** `../escaped.txt` / `a/../../escaped2.txt` を含む zip を展開したところ、`../` が除去され全て展開先の内側に着地。脱出なし。自前検証は不要（3.3） |
 
@@ -1614,7 +1616,6 @@ Hooks / Commands / Rules は対象外に決まった（1 章）ため、v4 は�
 | 10 | `~/.cursor/cloud-skills/` / `~/.grok/skills/` の扱い | 対応表に載せるか |
 | 11 | Cursor が同一スキルを二重に読まないか — 実体 `~/.agents/skills/` と Claude 用 symlink `~/.claude/skills/` の両方を走査するため、重複排除の有無を確認 | v1 の symlink 実装（11 章ステップ 4） |
 | 12 | Plugin の scope 移動（local → user）を `claude plugin` CLI が対応しているか | 5.2 の「ユーザー全体に昇格」ボタンの実現性。v2 着手前に確認 |
-| 14 | Cursor の使用実績ログの形式（`~/.cursor/projects/` / `ai-tracking/`） | 3.9 の最終使用日を Cursor 列にも出せるか。出せなければ Cursor だけ空欄 |
 | 16 | ウィンドウを閉じた常駐状態で App Nap が 3 秒タイマーを間引かないか（ブラウザ検知、6 章） | 間引かれるなら `ProcessInfo.beginActivity` で抑止するか、その状態では諦めるかの判断。**常駐が既定になったぶん影響が大きい** |
 | ~~17~~ | ~~メニューバーの緑が明・暗どちらでも見えるか~~ | **解決。** `MenuBarExtra` のラベルはまるごとテンプレートとして描かれるので、検知中だけ非テンプレート画像に差し替える。図案ごと緑にしたため外観への依存が無くなった（明るい外観で実機確認済み） |
 | 15 | Plugin 由来の skill / command を使用実績から逆引きできるか（実測では `ponytail:ponytail-review` と `plugin:skill` 形式で記録されていた） | 3.9 の Plugin 行の最終使用日。命名規則が全プラグインで一貫しているか要確認 |
@@ -1775,7 +1776,7 @@ DMG は誰でも取れる必要があるが、ソースを公開する必要は�
   `~/.cursor/skills-cursor/` に 26 件
 - Plugins: `swift-lsp@claude-plugins-official`（user）、
   `ponytail@ponytail` v4.9.0（local × 5 プロジェクト）
-- 使用実績: インストール済みスキル 26 件に対し、Claude のログに残るのは 7 件（3.9）
+- 使用実績: インストール済みスキル 33 件に対し、3 Agent のログに残るのは 9 件（3.9）
 - プロジェクト側: `.claude/` を持つプロジェクト 12 件
 
 ## 15. 既存Toolの管理と互換性検証（2026-09-06）

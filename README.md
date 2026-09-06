@@ -19,7 +19,7 @@ The design document is [DESIGN.md](DESIGN.md) (Japanese).
 | **Bundled protection** | Known bundled skill paths, tools with protection metadata, and links into plugin storage are protected |
 | **Update** | Review the `SKILL.md` diff before applying. Pin a resource to stop updates when upstream changes direction |
 | **Scope** | A tab for "all projects", one per project, and one for what ships with the agent — with a warning when the same thing is installed both ways, and bulk removal of the project copies |
-| **Usage** | Last-used dates from session logs. MCP processes checked every 3 seconds while a window is visible; this does not indicate an active tool call |
+| **Usage** | Last-used dates from Claude Code, Codex and Cursor session logs. MCP processes checked every 3 seconds while a window is visible; this does not indicate an active tool call |
 | **Browser detection** | On by default. Opening a skill, plugin or subagent page while a browser is frontmost turns the menu bar icon green and offers to add it; leaving the page turns it back — no URL to copy, and no system notifications. The page is confirmed against `raw.githubusercontent.com` first, and the URL is never stored |
 | **Permission cleanup** | Remove machine-specific and cross-project duplicate entries from `permissions.allow` |
 | **Appearance** | Switch between light, dark and following the system in Settings (system by default) |
