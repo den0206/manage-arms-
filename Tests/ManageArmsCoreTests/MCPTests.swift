@@ -81,8 +81,8 @@ struct MCPCommandTests {
     @Test("claude はユーザースコープを明示し -- でコマンドを渡す")
     func claudeStdio() {
         #expect(MCPCommand.add(Self.stdio, to: .claude) == [
-            "claude", "mcp", "add", "-s", "user", "-e", "API_KEY=x",
-            "chrome-devtools", "--", "npx", "-y", "chrome-devtools-mcp@latest", "--autoConnect",
+            "claude", "mcp", "add", "-s", "user", "chrome-devtools", "-e", "API_KEY=x",
+            "--", "npx", "-y", "chrome-devtools-mcp@latest", "--autoConnect",
         ])
     }
 
@@ -95,12 +95,25 @@ struct MCPCommandTests {
         #expect(!argv[..<separator].contains("--autoConnect"))
     }
 
-    @Test("gemini は -- を受けないので位置引数で渡す")
+    /// `--` を受けないので位置引数で渡す。**名前は可変長の `-e` より前**に置く —
+    /// 後ろに置くと名前が直前の `-e` の値として食われる（claude と同じ罠）。
+    @Test("gemini は名前を -e より前に置き、コマンドは位置引数で渡す")
     func geminiStdio() {
         #expect(MCPCommand.add(Self.stdio, to: .gemini) == [
-            "gemini", "mcp", "add", "-s", "user", "-e", "API_KEY=x",
-            "chrome-devtools", "npx", "-y", "chrome-devtools-mcp@latest", "--autoConnect",
+            "gemini", "mcp", "add", "-s", "user", "chrome-devtools",
+            "-e", "API_KEY=x", "npx", "-y", "chrome-devtools-mcp@latest", "--autoConnect",
         ])
+    }
+
+    /// 可変長フラグを持つ 3 CLI すべてで、名前がフラグより前にあること。
+    @Test("名前は可変長フラグより前に置く", arguments: [Agent.claude, .gemini])
+    func nameBeforeVariadicFlags(agent: Agent) {
+        let argv = MCPCommand.add(Self.stdio, to: agent)!
+        let name = argv.firstIndex(of: "chrome-devtools")!
+        #expect(!argv[..<name].contains("-e"))
+        let http = MCPCommand.add(Self.http, to: agent)!
+        let httpName = http.firstIndex(of: "sentry")!
+        #expect(!http[..<httpName].contains("-H"))
     }
 
     @Test("codex は --env と -- を使い、スコープ指定は無い")
@@ -114,8 +127,8 @@ struct MCPCommandTests {
     @Test("HTTP は transport とヘッダを付ける")
     func httpTransport() {
         #expect(MCPCommand.add(Self.http, to: .claude) == [
-            "claude", "mcp", "add", "-s", "user", "-t", "http",
-            "-H", "Authorization: Bearer t", "sentry", "https://mcp.sentry.dev/mcp",
+            "claude", "mcp", "add", "-s", "user", "sentry", "-t", "http", "https://mcp.sentry.dev/mcp",
+            "-H", "Authorization: Bearer t",
         ])
         #expect(MCPCommand.add(Self.http, to: .codex) == [
             "codex", "mcp", "add", "sentry", "--url", "https://mcp.sentry.dev/mcp",

@@ -104,7 +104,7 @@ public enum SubagentManager {
             try fm.createSymbolicLink(at: link, withDestinationURL: store)
         }
 
-        var entry = registry.entry(named: name) ?? Registry.Entry(name: name, kind: .subagent)
+        var entry = registry.entry(named: name, kind: .subagent) ?? Registry.Entry(name: name, kind: .subagent)
         entry.disabled = false
         registry.upsert(entry)
         try registry.save(env: env)
@@ -132,7 +132,7 @@ public enum SubagentManager {
                                withIntermediateDirectories: true)
         try fm.moveItem(at: store, to: parked)
 
-        var entry = registry.entry(named: name) ?? Registry.Entry(name: name, kind: .subagent)
+        var entry = registry.entry(named: name, kind: .subagent) ?? Registry.Entry(name: name, kind: .subagent)
         entry.disabled = true
         registry.upsert(entry)
         try registry.save(env: env)
@@ -140,25 +140,6 @@ public enum SubagentManager {
 }
 
 extension SubagentManager {
-    /// Subagent の取り込み。Skills と同じく**実体は動かさない**（DESIGN.md 8 章）。
-    /// 実体が置き場にあるものだけが対象で、symlink を 2 本張り直す。
-    public static func adopt(_ name: String, env: Environment, registry: inout Registry) throws {
-        guard registry.entry(named: name) == nil else {
-            throw SkillManager.Failure.alreadyExists(name)
-        }
-        guard FileManager.default.fileExists(
-            atPath: storeURL(name, env: env).path(percentEncoded: false))
-        else { throw SkillManager.Failure.notFound(name) }
-
-        registry.upsert(Registry.Entry(name: name, kind: .subagent))
-        do {
-            try enable(name, env: env, registry: &registry)
-        } catch {
-            registry.resources.removeAll { $0.name == name }
-            throw error
-        }
-    }
-
     /// symlink（Claude / Cursor の 2 本）を外し、実体をゴミ箱へ移して registry から外す。
     /// SkillManager.remove と同じ方針 — **完全削除しない**（DESIGN.md 8 章）。
     @discardableResult
@@ -179,7 +160,7 @@ extension SubagentManager {
         }
         guard trashed != nil else { throw SkillManager.Failure.notFound(name) }
 
-        registry.resources.removeAll { $0.name == name }
+        registry.resources.removeAll { $0.name == name && $0.kind == Kind.subagent.rawValue }
         try registry.save(env: env)
         return trashed
     }

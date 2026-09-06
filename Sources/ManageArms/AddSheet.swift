@@ -8,40 +8,41 @@ final class AddModel {
     var repo = ""
     var branch = ""
     var subdir = ""
+    var kind: Kind = .skill
+    var agent: Agent = .claude
+    var name = ""
+    var marketplace = ""
     private(set) var staged: Staging?
     private(set) var isBusy = false
+    private var generation = UUID()
     var error: String?
-
-    /// 入力欄は 1 つだけ。貼られた文字列を見て分岐する（DESIGN.md 6 章）。
     var interpretation: PasteInput { PasteInput.classify(text) }
-
     var source: GitHubSource? {
         guard case .github(let s) = interpretation else { return nil }
         return GitHubSource(repo: repo.isEmpty ? s.repo : repo,
                             branch: branch.isEmpty ? s.branch : branch,
-                            subdir: subdir.isEmpty ? nil : subdir,
-                            branchAmbiguous: s.branchAmbiguous)
+                            subdir: subdir.isEmpty ? nil : subdir, branchAmbiguous: s.branchAmbiguous)
     }
+    var servers: [MCPServer] { (try? PasteInput.mcpServers(text, name: name)) ?? [] }
 
-    /// 貼られた瞬間に編集可能なフォームへ流し込む。
     func syncFields() {
-        guard case .github(let s) = interpretation else { return }
-        repo = s.repo
-        branch = s.branch ?? ""
-        subdir = s.subdir ?? ""
+        discard()
+        if case .github(let s) = interpretation {
+            repo = s.repo; branch = s.branch ?? ""; subdir = s.subdir ?? ""
+        } else if case .mcpJSON = interpretation { kind = .mcp }
+        else if case .command = interpretation { kind = .mcp }
     }
 
-    /// **自動では入れない。** 取得して中身を見せるところまで（6 章）。
     func fetch() {
         guard let source, !isBusy else { return }
         discard()
+        let token = generation
         isBusy = true
         Task {
             do {
-                staged = try await Fetcher.stage(source)
-            } catch let failure {
-                self.error = "\(failure)"
-            }
+                let result = try await Fetcher.stage(source)
+                if token == generation { staged = result } else { result.discard() }
+            } catch { if token == generation { self.error = "\(error)" } }
             isBusy = false
         }
     }
@@ -49,195 +50,164 @@ final class AddModel {
     func install(_ candidate: Candidate, onDone: () -> Void) {
         guard let staged else { return }
         do {
-            var registry = Registry.load(env: .live)
+            var registry = try Registry.read(env: .live)
             try Installer.install(candidate, from: staged, env: .live, registry: &registry)
             onDone()
-        } catch {
-            self.error = "\(error)"
+        } catch { self.error = "\(error)" }
+    }
+
+    func installConnection(onDone: @escaping () -> Void) {
+        guard !isBusy else { return }
+        let kind = kind, agent = agent, text = text, name = name, marketplace = marketplace
+        isBusy = true
+        Task {
+            let failure = await Task.detached { () -> String? in
+                do {
+                    if kind == .mcp {
+                        let servers = try PasteInput.mcpServers(text, name: name)
+                        guard !servers.isEmpty else { throw MCPScanner.ReadFailure("MCPサーバーが見つかりません") }
+                        let existing = try MCPScanner.read(agent, env: .live)
+                        // Validate the whole input before starting; report partial success if a later CLI operation fails.
+                        for server in servers {
+                            try MCPManager.validate(server, for: agent)
+                            if existing.contains(where: { $0.name == server.name }) { throw MCPManager.Failure.alreadyExists(server.name) }
+                            if let command = server.command { _ = try Environment.live.run(["which", command]) }
+                        }
+                        var completed: [String] = []
+                        for server in servers {
+                            do { try MCPManager.add(server, to: agent, env: .live); completed.append(server.name) }
+                            catch { throw MCPScanner.ReadFailure("追加済み：\(completed.joined(separator: "、"))。失敗：\(server.name)（\(String(describing: error))）") }
+                        }
+                        let installed = try MCPScanner.read(agent, env: .live)
+                        guard servers.allSatisfy({ server in installed.contains { $0.name == server.name } }) else {
+                            throw MCPScanner.ReadFailure("登録を確認できませんでした。一覧を更新してから再試行してください。")
+                        }
+                    } else {
+                        try PluginManager.add(name, source: marketplace, to: agent, env: .live)
+                    }
+                    return nil
+                } catch { return "\(error)" }
+            }.value
+            isBusy = false
+            if let failure { error = failure } else { onDone() }
         }
     }
 
     func discard() {
-        staged?.discard()
-        staged = nil
+        generation = UUID()
+        staged?.discard(); staged = nil
     }
 }
 
 struct AddSheet: View {
     @Bindable var add: AddModel
     let onInstalled: () -> Void
-    // ManageArmsCore.Environment と名前が衝突するので修飾する
     @SwiftUI.Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            SheetHeader(title: "スキル・サブエージェントを追加",
-                        subtitle: String(localized: "確認するまで何も入りません"))
-
-            VStack(alignment: .leading, spacing: 6) {
-                TextField("GitHub の URL / MCP の JSON / npx コマンドを貼り付け",
-                          text: $add.text, axis: .vertical)
-                    .lineLimit(2...5)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.body, design: .monospaced))
-                    .onChange(of: add.text) { add.syncFields() }
-                interpretation
+            SheetHeader(title: "Toolを追加", subtitle: String(localized: "種類と追加先を確認してから追加します"))
+            Picker("種類", selection: $add.kind) {
+                Text("スキル・サブエージェント").tag(Kind.skill)
+                Text("MCP接続").tag(Kind.mcp)
+                Text("Plugin").tag(Kind.plugin)
+            }.pickerStyle(.segmented).disabled(add.isBusy)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if add.kind == .skill {
+                        Text("エージェントに手順や専門知識を追加します。共有先にも反映されます。")
+                            .font(.callout).foregroundStyle(.secondary)
+                        input
+                        if add.source != nil {
+                            DisclosureGroup("取得元の詳細") {
+                                TextField("リポジトリ", text: $add.repo)
+                                TextField("ブランチ", text: $add.branch)
+                                TextField("サブディレクトリ", text: $add.subdir)
+                            }.textFieldStyle(.roundedBorder)
+                        }
+                        if let staged = add.staged {
+                            ForEach(Array(staged.candidates.enumerated()), id: \.offset) { _, candidate in
+                                HStack {
+                                    VStack(alignment: .leading) {
+                                        Text(candidate.name).font(.headline)
+                                        Text(candidate.description ?? "").font(.caption).lineLimit(3)
+                                        if candidate.kind != .plugin {
+                                            Text(candidate.kind == .subagent ? "Claude Code / Cursor に導入されます" : "Claude Code / Cursor / Codex に導入されます")
+                                                .font(.caption).foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    Spacer()
+                                    Button(candidate.kind == .plugin ? "Pluginとして追加…" : "追加") {
+                                        if candidate.kind == .plugin {
+                                            add.name = candidate.name
+                                            add.marketplace = "https://github.com/" + staged.source.repo
+                                            add.kind = .plugin
+                                            add.discard()
+                                        } else { add.install(candidate, onDone: onInstalled) }
+                                    }
+                                }.padding(10).background(.quinary, in: RoundedRectangle(cornerRadius: 8))
+                            }
+                        } else {
+                            Text("GitHubのURLを貼り付けて「内容を確認」を押してください。")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Picker("追加先", selection: $add.agent) {
+                            ForEach(Agent.allCases.filter { add.kind == .mcp || [.claude, .codex].contains($0) }) { agent in
+                                Text(agent.displayName).tag(agent)
+                            }
+                        }
+                        Label("適用範囲：選択したエージェントのユーザー全体", systemImage: "person.crop.circle")
+                            .font(.caption).foregroundStyle(.secondary)
+                        if add.kind == .mcp {
+                            Text("外部サービスやローカルツールへの接続を追加します。")
+                                .font(.callout).foregroundStyle(.secondary)
+                            TextField("接続名（JSONに名前がある場合は省略可）", text: $add.name)
+                            input
+                            Text("認証情報や環境変数が必要な場合は、配布元のMCP設定JSONを貼り付けてください。")
+                                .font(.caption).foregroundStyle(.secondary)
+                            ForEach(add.servers, id: \.name) { server in
+                                Label(server.name.isEmpty ? String(localized: "接続名を入力してください") : server.name,
+                                      systemImage: "network")
+                            }
+                        } else {
+                            Text("Pluginは配布元と名前を指定して追加します。")
+                                .font(.callout).foregroundStyle(.secondary)
+                            TextField("plugin@marketplace", text: $add.name)
+                            TextField("配布元のHTTPS URL（登録済みなら省略可）", text: $add.marketplace)
+                            Text("URLを指定すると配布元も登録されます。Plugin追加に失敗した場合も配布元の登録は残ります。")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }.textFieldStyle(.roundedBorder).disabled(add.isBusy)
             }
-
-            if case .github = add.interpretation { form }
-
-            result.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            Divider()
+            HStack {
+                if add.isBusy { ProgressView().controlSize(.small); Text("処理中…") }
+                Spacer()
+                Button("閉じる") { add.discard(); dismiss() }.disabled(add.isBusy)
+                Button(add.kind == .skill ? "内容を確認" : "追加") {
+                    if add.kind == .skill { add.fetch() } else { add.installConnection(onDone: onInstalled) }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(add.isBusy || (add.kind == .skill && add.source == nil))
+            }
         }
-        .padding(20)
-        .safeAreaInset(edge: .bottom, spacing: 0) { footer }
-        .frame(width: 580, height: 480)
-        .animation(Motion.pop, value: add.staged?.candidates.count ?? 0)
-        .alert("失敗しました", isPresented: .init(get: { add.error != nil },
-                                            set: { if !$0 { add.error = nil } })) {
+        .padding(20).frame(width: 620, height: 560)
+        .interactiveDismissDisabled(add.isBusy)
+        .onDisappear { add.discard() }
+        .onChange(of: add.kind) { _, kind in
+            if kind == .plugin && ![Agent.claude, .codex].contains(add.agent) { add.agent = .claude }
+        }
+        .alert("操作できませんでした", isPresented: .init(get: { add.error != nil }, set: { if !$0 { add.error = nil } })) {
             Button("OK") { add.error = nil }
         } message: { Text(add.error ?? "") }
     }
 
-    private var footer: some View {
-        VStack(spacing: 0) {
-            Divider()
-            HStack {
-                if add.isBusy {
-                    ProgressView().controlSize(.small)
-                    Text("取得しています…").font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("閉じる") { add.discard(); dismiss() }
-                Button(add.isBusy ? "取得中…" : "取得") { add.fetch() }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(add.source == nil || add.isBusy)
-            }
-            .padding(.horizontal, 20).padding(.vertical, 14)
-        }
-        .background(.bar)
-    }
-
-    @ViewBuilder
-    private var interpretation: some View {
-        switch add.interpretation {
-        case .github:
-            Label("GitHub リポジトリとして解釈しました", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.green).font(.caption)
-        case .mcpJSON:
-            Label("MCP の設定です。追加は claude mcp add で行います", systemImage: "terminal")
-                .foregroundStyle(.orange).font(.caption)
-        case .command:
-            Label("MCP の起動コマンドです。追加は claude mcp add で行います", systemImage: "terminal")
-                .foregroundStyle(.orange).font(.caption)
-        case .unrecognized:
-            Text(add.text.isEmpty ? " " : "解釈できませんでした")
-                .foregroundStyle(.secondary).font(.caption)
-        }
-    }
-
-    /// 解釈結果は編集できる（6 章）。特にブランチ名に "/" を含む場合はここで直す。
-    private var form: some View {
-        Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
-            GridRow {
-                Text("リポジトリ").font(.caption).foregroundStyle(.secondary)
-                TextField("owner/name", text: $add.repo).textFieldStyle(.roundedBorder)
-            }
-            GridRow {
-                Text("ブランチ").font(.caption).foregroundStyle(.secondary)
-                TextField("main", text: $add.branch).textFieldStyle(.roundedBorder)
-            }
-            GridRow {
-                Text("サブディレクトリ").font(.caption).foregroundStyle(.secondary)
-                TextField("（リポジトリ直下なら空）", text: $add.subdir)
-                    .textFieldStyle(.roundedBorder)
-            }
-            if add.source?.branchAmbiguous == true {
-                GridRow {
-                    Text("")
-                    Label("ブランチ名に「/」が含まれる場合、区切りが正しいか確認してください",
-                          systemImage: "info.circle")
-                        .font(.caption).foregroundStyle(.orange)
-                }
-            }
-        }
-        .padding(12)
-        .background(.quinary, in: RoundedRectangle(cornerRadius: Theme.radiusS))
-    }
-
-    /// 取得するまでの下半分は**空のまま置く**。罫線で仕切ったり注記を左上に貼ったりすると、
-    /// 「何か出るはずの場所が壊れている」ように見える。中央に 1 行だけ置いて、
-    /// 空白が意図的なものだと分かるようにする。
-    @ViewBuilder
-    private var result: some View {
-        if add.isBusy {
-            centered {
-                HStack(spacing: 8) { ProgressView().controlSize(.small); Text("取得しています…") }
-            }
-        } else if let staged = add.staged {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("見つかった候補").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(staged.candidates, id: \.name) { candidate in
-                            CandidateRow(candidate: candidate) {
-                                add.install(candidate) { onInstalled() }
-                            }
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
-            }
-        } else {
-            centered {
-                Text("「取得」を押すと中身を確認できます。確認するまで何も入りません。")
-            }
-        }
-    }
-
-    private func centered(@ViewBuilder _ content: () -> some View) -> some View {
-        VStack {
-            Spacer(minLength: 0)
-            content()
-            Spacer(minLength: 0)
-        }
-        .font(.callout)
-        .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity)
-    }
-}
-
-/// 取得した候補 1 件。**押す前に、何がどこへ入るのかを 1 枚で見せる**（DESIGN.md 6 章）。
-struct CandidateRow: View {
-    let candidate: Candidate
-    let install: () -> Void
-    @State private var hovering = false
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            KindIcon(kind: candidate.kind, size: 20)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(candidate.name).font(.body.weight(.medium))
-                Text(candidate.description ?? String(localized: "（説明なし）"))
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                // Skills は全エージェント一括（3.2）。導入先は選べない。
-                Label(candidate.kind == .subagent ? "Claude Code / Cursor に導入されます"
-                                                  : "Claude Code / Cursor / Codex に導入されます",
-                      systemImage: "arrow.down.circle")
-                    .font(.caption2).foregroundStyle(.tertiary)
-            }
-            Spacer(minLength: 8)
-            Button("追加", action: install)
-                .disabled(candidate.kind != .skill && candidate.kind != .subagent)
-        }
-        .padding(10)
-        .background(hovering ? AnyShapeStyle(.quaternary.opacity(0.6)) : AnyShapeStyle(.quinary),
-                    in: RoundedRectangle(cornerRadius: Theme.radiusS))
-        .overlay {
-            RoundedRectangle(cornerRadius: Theme.radiusS)
-                .strokeBorder(.separator.opacity(0.5), lineWidth: 1)
-        }
-        .animation(Motion.gentle, value: hovering)
-        .onHover { hovering = $0 }
+    private var input: some View {
+        TextField(add.kind == .mcp ? "MCP設定JSON / HTTPS接続先 / 起動コマンド" : "GitHubのURL",
+                  text: $add.text, axis: .vertical)
+            .lineLimit(3...6).font(.system(.body, design: .monospaced))
+            .onChange(of: add.text) { add.syncFields() }
     }
 }

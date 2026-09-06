@@ -69,20 +69,35 @@ public enum MCPPin {
     /// Cursor も `mcp.json` の当該キーを上書きするだけなので、どちらも同じ手順で済む。
     /// 失敗したら元の定義で登録し直す — 消えたままにしない。
     public static func pin(_ server: MCPServer, in agents: [Agent], env: Environment) async throws {
+        guard !server.isProtected else { throw MCPScanner.ReadFailure("このMCPサーバーはエージェントが管理しています") }
         guard let package = server.floatingPackage else { throw Failure.notFloating(server.name) }
         let version = try await latestVersion(ofPackage: package, env: env)
         guard let updated = pinned(server, to: version) else {
             throw Failure.notFloating(server.name)
         }
-        for agent in agents {
-            try? MCPManager.remove(server.name, from: agent, env: env)
-            do {
-                try MCPManager.add(updated, to: agent, env: env)
-            } catch {
-                // 登録に失敗したら元に戻す。中途半端に消えている方が害が大きい。
-                try? MCPManager.add(server, to: agent, env: env)
-                throw error
+        guard agents.count == 1, let agent = agents.first else {
+            throw MCPScanner.ReadFailure("MCPの固定はエージェントを1つ選んでください")
+        }
+        if agent == .cursor {
+            try MCPManager.editCursor(env: env) { servers in
+                guard var definition = servers[server.name] as? [String: Any],
+                      MCPServer.parse(name: server.name, definition) == server else {
+                    throw MCPScanner.ReadFailure("MCP設定が変更されています。一覧を更新してから固定してください")
+                }
+                definition["command"] = updated.command
+                definition["args"] = updated.args
+                servers[server.name] = definition
             }
+            return
+        }
+        try MCPManager.remove(server.name, from: agent, env: env)
+        do {
+            try MCPManager.add(updated, to: agent, env: env)
+        } catch {
+            let failure = error
+            do { try MCPManager.add(server, to: agent, env: env) }
+            catch { throw MCPScanner.ReadFailure("固定に失敗し、元の設定の復元にも失敗しました：\(String(describing: failure)) / \(String(describing: error))。元のMCP設定を手で登録し直してください。") }
+            throw failure
         }
     }
 }

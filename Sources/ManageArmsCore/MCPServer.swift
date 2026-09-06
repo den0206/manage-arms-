@@ -6,6 +6,8 @@ import Foundation
 public struct MCPServer: Equatable, Sendable {
     public let name: String
     public let transport: Transport
+    public var isProtected = false
+    public var enabled = true
 
     public enum Transport: Equatable, Sendable {
         case stdio(command: String, args: [String], env: [String: String])
@@ -50,16 +52,24 @@ public struct MCPServer: Equatable, Sendable {
     }
 
     /// `{"name": {...}}` を解釈する。`url` があれば HTTP、無ければ stdio。
-    public static func parse(name: String, _ object: [String: Any]) -> MCPServer? {
+    public static func parse(name: String, _ raw: [String: Any]) -> MCPServer? {
+        let object = (raw["transport"] as? [String: Any]) ?? raw
+        var server: MCPServer
+
         if let url = object["url"] as? String {
-            return MCPServer(name: name, transport: .http(
+            if let headers = object["headers"], !(headers is NSNull), !(headers is [String: String]) { return nil }
+            server = MCPServer(name: name, transport: .http(
                 url: url, headers: object["headers"] as? [String: String] ?? [:]))
+        } else {
+            guard let command = object["command"] as? String else { return nil }
+            if let args = object["args"], !(args is NSNull), !(args is [String]) { return nil }
+            if let env = object["env"], !(env is NSNull), !(env is [String: String]) { return nil }
+            server = MCPServer(name: name, transport: .stdio(command: command,
+                args: object["args"] as? [String] ?? [], env: object["env"] as? [String: String] ?? [:]))
         }
-        guard let command = object["command"] as? String else { return nil }
-        return MCPServer(name: name, transport: .stdio(
-            command: command,
-            args: object["args"] as? [String] ?? [],
-            env: object["env"] as? [String: String] ?? [:]))
+        server.isProtected = raw["isBuiltIn"] as? Bool == true || raw["managed"] as? Bool == true
+        server.enabled = raw["enabled"] as? Bool ?? true
+        return server
     }
 
     /// `{"mcpServers": {...}}` あるいは `{...}` から一括で読む。
@@ -96,33 +106,35 @@ public enum MCPCommand {
         }
     }
 
-    /// `claude mcp add [-s user] [-t http] [-e K=V] [-H h] <name> <commandOrUrl> [args...]`
+    /// `claude mcp add -s user <name> [-e K=V] -- <command> [args...]`
+    /// `claude mcp add -s user <name> -t http <url> [-H h]`
+    /// **名前は可変長の `-e` / `-H` より前に置く。** 後ろに置くと名前が
+    /// 直前のフラグの値として食われる。
     static func claudeAdd(_ server: MCPServer) -> [String] {
-        var argv = ["claude", "mcp", "add", "-s", "user"]
+        var argv = ["claude", "mcp", "add", "-s", "user", server.name]
         switch server.transport {
         case .stdio(let command, let args, let env):
             argv += env.sorted { $0.key < $1.key }.flatMap { ["-e", "\($0.key)=\($0.value)"] }
-            argv += [server.name, "--", command] + args      // -- 以降はそのまま渡る
+            argv += ["--", command] + args      // Name must precede variadic -e.
         case .http(let url, let headers):
-            argv += ["-t", "http"]
+            argv += ["-t", "http", url]
             argv += headers.sorted { $0.key < $1.key }.flatMap { ["-H", "\($0.key): \($0.value)"] }
-            argv += [server.name, url]
         }
         return argv
     }
 
-    /// `gemini mcp add [-s user] [-t http] <name> <commandOrUrl> [args...]`
+    /// `gemini mcp add -s user <name> <commandOrUrl> [args...]`
     /// `--` を受けないので、コマンドと引数を位置引数で渡す。
+    /// `claudeAdd` と同じく、名前は可変長の `-e` / `-H` より前に置く。
     static func geminiAdd(_ server: MCPServer) -> [String] {
-        var argv = ["gemini", "mcp", "add", "-s", "user"]
+        var argv = ["gemini", "mcp", "add", "-s", "user", server.name]
         switch server.transport {
         case .stdio(let command, let args, let env):
             argv += env.sorted { $0.key < $1.key }.flatMap { ["-e", "\($0.key)=\($0.value)"] }
-            argv += [server.name, command] + args
+            argv += [command] + args
         case .http(let url, let headers):
-            argv += ["-t", "http"]
+            argv += ["-t", "http", url]
             argv += headers.sorted { $0.key < $1.key }.flatMap { ["-H", "\($0.key): \($0.value)"] }
-            argv += [server.name, url]
         }
         return argv
     }

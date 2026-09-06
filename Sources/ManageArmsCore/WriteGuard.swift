@@ -47,8 +47,10 @@ public enum WriteGuard {
     public static func assertMutable(
         _ url: URL, env: Environment, registry: Registry
     ) throws {
+        try Registry.assertReadable(env: env)
         let path = url.standardized.path(percentEncoded: false)
 
+        try assertNotBundled(url, env: env)
         if isDenied(url) { throw Denial.deniedPath(path) }
 
         if isSymlink(url) {
@@ -65,8 +67,47 @@ public enum WriteGuard {
         let name = url.pathExtension == "md"
             ? String(url.lastPathComponent.dropLast(3))
             : url.lastPathComponent
-        guard registry.entry(named: name) != nil else {
+        let kind: Kind = url.pathExtension == "md" ? .subagent : .skill
+        guard registry.entry(named: name, kind: kind) != nil else {
             throw Denial.notInRegistry(name)
+        }
+    }
+
+    /// Installed artifacts may be removed regardless of who installed them.
+    /// Only a direct child of a known resource directory is eligible; never follow a link to delete its target.
+    public static func assertUserArtifact(_ url: URL, kind: Kind, project: String? = nil,
+                                          env: Environment) throws {
+        guard kind == .skill || kind == .subagent else { throw Denial.deniedPath(url.path) }
+        try assertNotBundled(url, env: env)
+        let roots: [URL]
+        if let project {
+            guard Source.projectPaths(in: env).contains(project) else {
+                throw Denial.outsideManagedRoots(url.path)
+            }
+            roots = [URL(filePath: project).appending(path: kind == .skill ? ".claude/skills" : ".claude/agents")]
+        } else {
+            let labels = kind == .skill ? Agent.allCases.flatMap(\.skillRoots) : Agent.allCases.flatMap(\.subagentRoots)
+            roots = labels.filter { !Agent.bundledSkillRoots.contains($0) }.map { env.home.appending(path: $0) }
+        }
+        let parent = url.deletingLastPathComponent().standardizedFileURL
+        let base = (project.map { URL(filePath: $0) } ?? env.home).standardizedFileURL
+        let suffix = String(parent.path.dropFirst(base.path.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let expected = base.resolvingSymlinksInPath().appending(path: suffix).standardizedFileURL
+        guard roots.contains(where: { $0.standardizedFileURL.path == parent.path }),
+              parent.resolvingSymlinksInPath().path == expected.path,
+              !url.lastPathComponent.hasPrefix("."), !isDenied(url),
+              kind != .subagent || url.pathExtension == "md" else {
+            throw Denial.outsideManagedRoots(url.path)
+        }
+    }
+
+    static func assertNotBundled(_ url: URL, env: Environment) throws {
+        let protected = Agent.bundledSkillRoots.map { env.home.appending(path: $0) }
+            + [env.home.appending(path: ".codex/plugins"), env.home.appending(path: ".claude/plugins"),
+               env.home.appending(path: ".cursor/plugins")]
+        let paths = [url.standardizedFileURL, url.resolvingSymlinksInPath()]
+        guard !paths.contains(where: { path in protected.contains { path.path == $0.path || isInside(path, $0) } }) else {
+            throw Denial.deniedPath(url.path)
         }
     }
 

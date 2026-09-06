@@ -22,6 +22,7 @@ public enum Installer {
         env: Environment,
         registry: inout Registry
     ) throws {
+        try Registry.assertReadable(env: env)
         guard candidate.kind == .skill || candidate.kind == .subagent else {
             throw Failure.unsupportedKind(candidate.kind)
         }

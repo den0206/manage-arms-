@@ -57,12 +57,15 @@ extension Source {
     /// ここから読んでよいのは各プロジェクトの
     /// `.claude/skills` / `.claude/agents` / `.mcp.json` / `.claude/settings*.json` だけ。
     /// **`~/.claude/projects/`（140 MB のセッションログ）とは別物** — あれは読まない。
+    /// ユーザーが明示的に選んだフォルダ（`registry.projects`、DESIGN.md 15）も足す。
     public static func projectPaths(in env: Environment) -> [String] {
-        guard let data = try? Data(contentsOf: env.home.appending(path: ".claude.json")),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let projects = object["projects"] as? [String: Any]
-        else { return [] }
-        return projects.keys.sorted()
+        var paths = Set(Registry.load(env: env).projects)
+        if let data = try? Data(contentsOf: env.home.appending(path: ".claude.json")),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let projects = object["projects"] as? [String: Any] {
+            paths.formUnion(projects.keys)
+        }
+        return paths.sorted()
     }
 
     /// ファイル/ディレクトリのルート相対パス。CLI ケースは nil。

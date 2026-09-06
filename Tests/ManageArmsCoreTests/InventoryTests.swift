@@ -239,12 +239,12 @@ struct SkillOriginTests {
                                  registry: Registry()) == .user)
     }
 
-    @Test("registry に載っていれば同梱ルートでも managed")
+    @Test("registry に載っていても同梱ルートは保護する")
     func managedWins() {
         var registry = Registry()
         registry.upsert(Registry.Entry(name: "automate", kind: .skill))
         #expect(Inventory.origin("automate", roots: [".cursor/skills-cursor"],
-                                 registry: registry) == .managed)
+                                 registry: registry) == .bundled)
     }
 
     /// 退避中は走査ルートから消え、残るのは退避ラベルだけ。
@@ -437,7 +437,7 @@ struct RemovalCommandTests {
         #expect(plugin.removalCommand(agent: .claude)
                 == "claude plugin remove ponytail@ponytail -s user")
         #expect(plugin.removalCommand(agent: .codex)
-                == "codex plugin remove ponytail@ponytail -s user")
+                == "codex plugin remove ponytail@ponytail")
     }
 
     @Test("MCP はスキャンで分かったスコープを載せる")

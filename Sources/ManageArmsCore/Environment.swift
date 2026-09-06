@@ -42,9 +42,6 @@ public struct Environment: Sendable {
 extension Environment {
     /// スキル実体の置き場。Cursor と Codex がここを直読みする（DESIGN.md 3.2）。
     public var skillStore: URL { home.appending(path: ".agents/skills") }
-    /// 走査結果の root ラベル（`Source` の相対パス）と対。取り込み可否の判定に使う。
-    public static let skillStoreLabel = ".agents/skills"
-    public static let agentStoreLabel = "agents"
     /// 無効化したスキルの退避先（3.2 / 9 章）。実体は消さない。
     public var disabledStore: URL { appSupport.appending(path: "disabled-skills") }
     /// アプリが永続化する唯一のファイル（4.1）。

@@ -24,11 +24,12 @@ public struct ResourceRow: Identifiable, Sendable {
     /// **未集計との区別は `Inventory.usageScannedAt` が持つ** — 混同させない（5.3）。
     public let lastUsed: Date?
     /// 実行中の MCP（3.9）。MCP 以外は常に `nil` — 他の種別には実行実体が無い。
-    public let running: RunningMCP?
+    public var running: RunningMCP?
+    public var ownerAgent: Agent? = nil
     /// `@latest` 指定でピン留めできる MCP（7.2）。
     /// MCP に「更新」は存在しないので、操作列にはこれを出す。
     public let canPin: Bool
-    public var id: String { "\(kind.rawValue):\(name)" }
+    public var id: String { "\(kind.rawValue):\(name)" + (ownerAgent.map { ":" + $0.rawValue } ?? "") }
 
     /// 表示順。種別ごとにまとめ、同じ種別なら名前順。
     public static func display(_ a: ResourceRow, _ b: ResourceRow) -> Bool {
@@ -117,6 +118,7 @@ public struct ResourceRow: Identifiable, Sendable {
         switch kind {
         case .plugin:
             guard let cli = agent.cliName else { return nil }
+            if agent == .codex { return "codex plugin remove \(Self.arg(name))" }
             guard let project else { return "\(cli) plugin remove \(Self.arg(name)) -s user" }
             return "cd \(Self.quote(project)) && \(cli) plugin remove \(Self.arg(name)) -s local"
         case .mcp:
@@ -157,49 +159,24 @@ public struct ResourceRow: Identifiable, Sendable {
         "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
-    /// プロジェクト側の削除を、**アプリが代わりに実行してよいか**（DESIGN.md 5.2 / 9 章）。
+    /// 一括削除シート（`cleanupItems`）で、**アプリが代わりに実行してよいか**
+    /// （DESIGN.md 5.2 / 9 章）。
     ///
-    /// **ユーザーのリポジトリには書かない。** `<proj>/.claude/skills/` も
+    /// **まとめてリポジトリを書き換えない。** `<proj>/.claude/skills/` も
     /// `<proj>/.mcp.json` も git で共有されるファイルで、消えたことに気づくのは
     /// 別のマシンや他のメンバー。ここはコマンドを見せるだけにする。
     /// 実行してよいのは、各 CLI が自分の領域（`installed_plugins.json` /
     /// `~/.claude.json`）に持っている登録だけ。
+    ///
+    /// **1 件ずつの削除は別経路**（`SkillManager.removeExisting`、DESIGN.md 15）。
+    /// そちらはパスを 1 つ選ばせ、`WriteGuard.assertUserArtifact` で検証してから
+    /// ゴミ箱へ移す。共有ファイルであることは確認ダイアログで明示する。
     public func isRemovalExecutable(mcpScope: String?) -> Bool {
         switch kind {
         case .plugin: true
         case .mcp:    mcpScope == "local"      // project スコープは <proj>/.mcp.json の中
         case .skill, .subagent: false          // リポジトリの中のファイル
         }
-    }
-
-    /// このアプリの管理下に取り込めるか（DESIGN.md 8 章）。
-    ///
-    /// **実体を動かさずに済むときだけ取り込む。** `~/.claude/skills/` にある実体を
-    /// 勝手に `~/.agents/skills/` へ移すと、他ツールが張った symlink やユーザーの
-    /// 想定を壊す。取り込みは registry に 1 行足して Claude 用の symlink を張るだけ、
-    /// という**元に戻せる操作**の範囲に閉じる（3.1 / 9 章）。
-    public var adoption: Adoption {
-        guard origin == .user else { return .unsupported }
-        switch kind {
-        case .mcp, .plugin:
-            // 書き込みは各 CLI に委譲している（3.1）。取り込む先が無い。
-            return .unsupported
-        case .skill where roots.contains(Environment.skillStoreLabel),
-             .subagent where roots.contains(Environment.agentStoreLabel):
-            return .possible
-        case .skill, .subagent:
-            guard let root = roots.first else { return .unsupported }  // プロジェクト限定
-            return .needsMove(root)
-        }
-    }
-
-    public enum Adoption: Sendable, Equatable {
-        /// 実体が置き場にある。registry に足すだけで管理下に入る。
-        case possible
-        /// 実体が別の場所にある。移動が要るのでやらない（理由に置き場を出す）。
-        case needsMove(String)
-        /// そもそも取り込めない（MCP / Plugin / 同梱 / プロジェクト限定）。
-        case unsupported
     }
 
     /// 置いてあるのにどのエージェントからも読めない（リンク切れ / SKILL.md なし）。
@@ -230,7 +207,9 @@ public struct ResourceRow: Identifiable, Sendable {
 
 public struct Inventory: Sendable {
     public let agents: [Agent: Detection]
-    public let rows: [ResourceRow]
+    public var rows: [ResourceRow]
+    public var issues: [String] = []
+    public var mcpServers: [Agent: [MCPServer]] = [:]
     /// 表示に使う registry のスナップショット。更新操作の起点になる。
     public var registry = Registry()
     /// プロジェクト走査の結果。削除コマンドのスコープ決定に要る。
@@ -247,6 +226,7 @@ public struct Inventory: Sendable {
     /// ここで落とすと**再有効化する導線が消える**。
     public func rows(for agent: Agent) -> [ResourceRow] {
         rows.filter { row in
+            if let owner = row.ownerAgent { return owner == agent }
             if row.state[agent] == .explicit { return true }
             if row.isManaged && row.isDisabled && agent.supports(row.kind) { return true }
             // リンク切れ・SKILL.md 欠落は誰からも見えないが、置き場はこのエージェントの下。
@@ -317,16 +297,30 @@ public struct Inventory: Sendable {
         let registry = Registry.load(env: env)
         let used = registry.usage.lastUsed
         let projects = ProjectScan.load(env: env)
+        var issues: [String] = []
+        do { try Registry.assertReadable(env: env) } catch { issues.append("Registry: \(error)") }
+        var servers: [Agent: [MCPServer]] = [:]
+        var plugins: [InstalledPlugin] = []
+        for agent in Agent.allCases where agents[agent] != .undetected {
+            do { servers[agent] = try MCPScanner.read(agent, env: env) }
+            catch { issues.append("\(agent.displayName) MCP: \(error)") }
+            if agent == .claude || agent == .codex {
+                do { plugins += try PluginScanner.read(agent, env: env) }
+                catch { issues.append("\(agent.displayName) Plugins: \(error)") }
+            }
+        }
         let rows = skillRows(env: env, agents: agents, registry: registry, projects: projects)
             + subagentRows(env: env, agents: agents, registry: registry, projects: projects)
-            + pluginRows(env: env, agents: agents, used: used)
-            + mcpRows(env: env, agents: agents, used: used, projects: projects)
+            + pluginRows(env: env, agents: agents, used: used, installed: plugins)
+            + mcpRows(env: env, agents: agents, used: used, projects: projects, scanned: servers)
         // プロジェクトにしか無いものは上の走査に出てこない（実測: school-clique の
         // .claude/skills 7 件は、この行が無いと 1 つも表示されない）。
         var inventory = Inventory(agents: agents,
                                   rows: rows + projects.onlyRows(existing: rows, used: used),
                                   registry: registry)
         inventory.projectScan = projects
+        inventory.issues = issues
+        inventory.mcpServers = servers
         return inventory
     }
 
@@ -367,7 +361,7 @@ public struct Inventory: Sendable {
                     isDisabled: found.contains { $0.root == parkedLabel },
                     roots: found.map(\.root),
                     reach: .make(user: true, projects: projects.paths(name, kind: .skill)),
-                    update: registry.entry(named: name)
+                    update: registry.entry(named: name, kind: .skill)
                         .map { UpdateChecker.status(of: $0, in: registry) } ?? .unmanaged,
                     lastUsed: lastUsed(name, kind: .skill, used: registry.usage.lastUsed)
                 )
@@ -381,10 +375,9 @@ public struct Inventory: Sendable {
     static func origin(_ name: String, roots: [String], registry: Registry)
         -> ResourceRow.Origin
     {
-        if registry.entry(named: name) != nil { return .managed }
         let visible = roots.filter { $0 != parkedLabel }
-        return !visible.isEmpty && visible.allSatisfy(Agent.bundledSkillRoots.contains)
-            ? .bundled : .user
+        if !visible.isEmpty && visible.allSatisfy(Agent.bundledSkillRoots.contains) { return .bundled }
+        return registry.entry(named: name, kind: .skill) != nil ? .managed : .user
     }
 
     /// 「非対応」と「未検出」を混ぜない（DESIGN.md 3.7）。順序が意味を持つ。
@@ -412,7 +405,7 @@ public struct Inventory: Sendable {
                                         detection: agents[agent] ?? .undetected,
                                         visible: !Set(agent.subagentRoots).isDisjoint(with: roots))
                 }
-                let entry = registry.entry(named: name)
+                let entry = registry.entry(named: name, kind: .subagent)
                 return ResourceRow(
                     name: name, kind: .subagent,
                     summary: found.compactMap(\.description).first,
@@ -432,38 +425,19 @@ public struct Inventory: Sendable {
     // MARK: - MCP
 
     static func mcpRows(env: Environment, agents: [Agent: Detection], used: [String: Date] = [:],
-                        projects: ProjectScan = ProjectScan()) -> [ResourceRow]
-    {
-        let byAgent = MCPScanner.scan(env: env)
-        let names = Set(byAgent.values.flatMap { $0.map(\.name) })
-        // 「登録されているのに起動していない」ズレは設定ファイルを見ても分からない（3.9）。
-        let live = ProcessScanner.running(byAgent.values.flatMap { $0 },
-                                          in: ProcessScanner.snapshot(env: env))
-        return names.map { name in
-            var state: [Agent: ResourceRow.State] = [:]
-            for agent in Agent.allCases {
-                state[agent] = cell(agent, kind: .mcp,
-                                    detection: agents[agent] ?? .undetected,
-                                    visible: byAgent[agent]?.contains { $0.name == name } ?? false)
+                        projects: ProjectScan = ProjectScan(), scanned: [Agent: [MCPServer]]? = nil) -> [ResourceRow] {
+        let byAgent = scanned ?? MCPScanner.scan(env: env)
+        return Agent.allCases.flatMap { agent in
+            (byAgent[agent] ?? []).map { server in
+                var row = ResourceRow(name: server.name, kind: .mcp, summary: server.summary,
+                    detail: mcpDetail(server), state: [agent: server.enabled ? .explicit : .absent],
+                    origin: server.isProtected ? .bundled : .user, isDisabled: !server.enabled,
+                    reach: .make(user: true, projects: agent == .claude ? projects.paths(server.name, kind: .mcp) : []),
+                    lastUsed: used[server.name], canPin: server.floatingPackage != nil && !server.isProtected)
+                row.ownerAgent = agent
+                return row
             }
-            let server = byAgent.values.flatMap { $0 }.first { $0.name == name }
-            return ResourceRow(
-                name: name, kind: .mcp,
-                summary: server?.summary,
-                detail: mcpDetail(server),
-                state: state,
-                // 各エージェントの設定が実体。registry には載せない（4.1）が、
-                // 書いたのはユーザー自身なので「自分で入れたもの」に並べる。
-                origin: .user,
-                isDisabled: false,
-                reach: .make(user: true, projects: projects.paths(name, kind: .mcp)),
-                update: .unmanaged,
-                lastUsed: lastUsed(name, kind: .mcp, used: used),
-                running: live[name],
-                canPin: server?.floatingPackage != nil
-            )
         }
-        .sorted { $0.name < $1.name }
     }
 
     /// MCP に更新機能は無い。必要なのはピン留め管理（DESIGN.md 7.2）。
@@ -478,34 +452,24 @@ public struct Inventory: Sendable {
 
     // MARK: - Plugins（読み取りのみ。書き込みは CLI に委譲。3.1）
 
-    static func pluginRows(env: Environment, agents: [Agent: Detection],
-                           used: [String: Date] = [:]) -> [ResourceRow] {
-        let plugins = PluginScanner.scan(env: env)
-        let duplicates = PluginScanner.duplicates(plugins)
-        return Dictionary(grouping: plugins, by: \.id)
-            .map { id, found in
-                var state: [Agent: ResourceRow.State] = [:]
-                for agent in Agent.allCases {
-                    let installed = found.contains { $0.agent == agent && $0.enabled }
-                    state[agent] = cell(agent, kind: .plugin,
-                                        detection: agents[agent] ?? .undetected,
-                                        visible: installed)
-                }
-                return ResourceRow(
-                    name: id, kind: .plugin,
-                    summary: found.first?.version.map { "v\($0)" },
-                    detail: pluginDetail(id, found, duplicates: duplicates),
-                    state: state,
-                    // Plugin は各 CLI が管理する（4.1）。入れたのはユーザー自身。
-                    origin: .user,
-                    isDisabled: false,
-                    reach: .make(user: found.contains { $0.scope == "user" },
-                                 projects: found.compactMap(\.projectPath)),
-                    update: found.contains(where: \.autoUpdate) ? .unmanaged : .unknown,
-                    lastUsed: lastUsed(id, kind: .plugin, used: used)
-                )
+    static func pluginRows(env: Environment, agents: [Agent: Detection], used: [String: Date] = [:],
+                           installed: [InstalledPlugin]? = nil) -> [ResourceRow] {
+        let plugins = installed ?? PluginScanner.scan(env: env)
+        return Agent.allCases.flatMap { agent in
+            Dictionary(grouping: plugins.filter { $0.agent == agent }, by: \.id).map { id, found in
+                var row = ResourceRow(name: id, kind: .plugin,
+                    summary: found.first?.version.map { "v\($0)" }, detail: pluginDetail(id, found, duplicates: PluginScanner.duplicates(found)),
+                    state: Dictionary(uniqueKeysWithValues: Agent.allCases.map {
+                        ($0, $0 == agent ? (found.contains(where: \.enabled) ? .explicit : .absent) : ($0.supports(.plugin) ? .absent : .unsupported))
+                    }),
+                    origin: found.contains(where: \.isBundled) ? .bundled : .user,
+                    isDisabled: !found.contains(where: \.enabled),
+                    reach: .make(user: found.contains { $0.scope == "user" }, projects: found.compactMap(\.projectPath)),
+                    lastUsed: lastUsed(id, kind: .plugin, used: used))
+                row.ownerAgent = agent
+                return row
             }
-            .sorted { $0.name < $1.name }
+        }
     }
 
     static func pluginDetail(_ id: String, _ found: [InstalledPlugin],
@@ -597,7 +561,7 @@ public struct ProjectScan: Sendable {
     /// 見えるのは Claude だけとする。`<proj>/.claude/` を他エージェントが読むかは
     /// 未実測で、3.7 の「非対応と未検出を混ぜない」に倣って**推測で埋めない**。
     func onlyRows(existing: [ResourceRow], used: [String: Date]) -> [ResourceRow] {
-        let known = Set(existing.map(\.id))
+        let known = Set(existing.filter { $0.ownerAgent == nil || $0.ownerAgent == .claude }.map { "\($0.kind.rawValue):\($0.name)" })
         return byKind.flatMap { kind, byName -> [ResourceRow] in
             byName.compactMap { name, projects in
                 guard !known.contains("\(kind.rawValue):\(name)") else { return nil }

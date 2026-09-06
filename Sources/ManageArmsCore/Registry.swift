@@ -4,6 +4,7 @@ import Foundation
 /// `~/.agents/.skill-lock.json` は読み取り専用で参照するだけで、ここには書かない。
 public struct Registry: Codable, Equatable, Sendable {
     public var resources: [Entry] = []
+    public var projects: [String] = []
     /// ETag と更新チェック結果は repo/branch 単位で持つ（7.3 の「リポジトリ単位で束ねる」）。
     public var repos: [String: RepoState] = [:]
     /// 使用実績（3.9）。過去は変化しないのでキャッシュしてよい — 3.5 の唯一の例外。
@@ -51,7 +52,7 @@ public struct Registry: Codable, Equatable, Sendable {
 
     public init() {}
 
-    enum CodingKeys: String, CodingKey { case resources, repos, usage }
+    enum CodingKeys: String, CodingKey { case resources, repos, usage, projects }
 
     /// **欠けているキーは既定値で埋める。**
     /// 合成された `init(from:)` はキーが 1 つ足りないだけで失敗し、`load` の
@@ -60,17 +61,18 @@ public struct Registry: Codable, Equatable, Sendable {
     /// 前のバージョンが書いたファイルを読めることを構造的に保証しておく。
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        projects = try container.decodeIfPresent([String].self, forKey: .projects) ?? []
         resources = try container.decodeIfPresent([Entry].self, forKey: .resources) ?? []
         repos = try container.decodeIfPresent([String: RepoState].self, forKey: .repos) ?? [:]
         usage = try container.decodeIfPresent(Usage.self, forKey: .usage) ?? Usage()
     }
 
-    public func entry(named name: String) -> Entry? {
-        resources.first { $0.name == name }
+    public func entry(named name: String, kind: Kind? = nil) -> Entry? {
+        resources.first { $0.name == name && (kind == nil || $0.kind == kind?.rawValue) }
     }
 
     public mutating func upsert(_ entry: Entry) {
-        if let i = resources.firstIndex(where: { $0.name == entry.name }) {
+        if let i = resources.firstIndex(where: { $0.name == entry.name && $0.kind == entry.kind }) {
             resources[i] = entry
         } else {
             resources.append(entry)
@@ -78,6 +80,20 @@ public struct Registry: Codable, Equatable, Sendable {
     }
 
     // MARK: - 永続化
+
+    /// `load` と違い**壊れていたら投げる**。`load` は既定値で握り潰すので、
+    /// そのまま `save` すると利用者の全リソースの出所情報を空で上書きしてしまう。
+    public static func read(env: Environment) throws -> Registry {
+        guard FileManager.default.fileExists(atPath: env.registryFile.path) else { return Registry() }
+        return try decoder.decode(Registry.self, from: Data(contentsOf: env.registryFile))
+    }
+
+    /// **壊れた `registry.json` の上に破壊的操作を始めない。**
+    /// 実体を移動・削除した後で `save` が落ちると、ファイルは動いたのに
+    /// registry には残る、という戻せない食い違いになる。先に落とす。
+    public static func assertReadable(env: Environment) throws {
+        _ = try read(env: env)
+    }
 
     public static func load(env: Environment) -> Registry {
         guard let data = try? Data(contentsOf: env.registryFile),
@@ -89,6 +105,7 @@ public struct Registry: Codable, Equatable, Sendable {
     /// アトミックに書く。書き込み中のクラッシュで壊れると
     /// 全リソースの出所情報が飛ぶ（9 章）。
     public func save(env: Environment) throws {
+        try Self.assertReadable(env: env)      // 壊れたファイルを空で上書きしない
         try FileManager.default.createDirectory(
             at: env.appSupport, withIntermediateDirectories: true)
         try Self.encoder.encode(self).write(to: env.registryFile, options: .atomic)

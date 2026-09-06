@@ -11,6 +11,7 @@ public struct InstalledPlugin: Equatable, Sendable {
     public let enabled: Bool
     /// marketplace 側で自動更新が有効。アプリは手を出さない（7.5）。
     public let autoUpdate: Bool
+    public var isBundled = false
 }
 
 public enum PluginScanner {
@@ -42,42 +43,31 @@ public enum PluginScanner {
     }
 
     static func claude(env: Environment, autoUpdate: Set<String>) -> [InstalledPlugin] {
-        guard let out = try? env.run(["claude", "plugin", "list", "--json"]),
-              let data = out.data(using: .utf8),
-              let list = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
-        else { return [] }
-        return list.compactMap { item in
-            guard let id = item["id"] as? String else { return nil }
-            let marketplace = id.split(separator: "@").last.map(String.init) ?? ""
-            return InstalledPlugin(
-                id: id, agent: .claude,
-                version: item["version"] as? String,
-                scope: item["scope"] as? String ?? "user",
-                projectPath: item["projectPath"] as? String,
+        (try? read(.claude, env: env)) ?? []
+    }
+
+    public static func read(_ agent: Agent, env: Environment) throws -> [InstalledPlugin] {
+        guard agent == .claude || agent == .codex else { return [] }
+        let output = try env.run([agent.cliName!, "plugin", "list", "--json"])
+        let object = try JSONSerialization.jsonObject(with: Data(output.utf8))
+        let list = agent == .claude ? object as? [[String: Any]] : (object as? [String: Any])?["installed"] as? [[String: Any]]
+        guard let list else { throw MCPScanner.ReadFailure("Pluginの一覧をCLIから読み取れません") }
+        let auto = autoUpdateMarketplaces(env: env)
+        return try list.map { item in
+            guard let id = item[agent == .claude ? "id" : "pluginId"] as? String else {
+                throw MCPScanner.ReadFailure("Pluginの識別子がありません")
+            }
+            var plugin = InstalledPlugin(id: id, agent: agent, version: item["version"] as? String,
+                scope: item["scope"] as? String ?? "user", projectPath: item["projectPath"] as? String,
                 enabled: item["enabled"] as? Bool ?? true,
-                autoUpdate: autoUpdate.contains(marketplace)
-            )
+                autoUpdate: auto.contains(String(id.split(separator: "@").last ?? "")))
+            plugin.isBundled = item["isBuiltIn"] as? Bool == true || item["managed"] as? Bool == true
+                || item["scope"] as? String == "managed"
+            return plugin
         }
     }
 
-    /// Codex は `{"installed": [...], "available": [...]}`。導入済みだけ見る。
-    static func codex(env: Environment) -> [InstalledPlugin] {
-        guard let out = try? env.run(["codex", "plugin", "list", "--json"]),
-              let data = out.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let list = object["installed"] as? [[String: Any]]
-        else { return [] }
-        return list.compactMap { item in
-            guard let id = item["pluginId"] as? String else { return nil }
-            return InstalledPlugin(
-                id: id, agent: .codex,
-                version: item["version"] as? String,
-                scope: "user", projectPath: nil,
-                enabled: item["enabled"] as? Bool ?? true,
-                autoUpdate: false
-            )
-        }
-    }
+    static func codex(env: Environment) -> [InstalledPlugin] { (try? read(.codex, env: env)) ?? [] }
 
     /// 同一プラグインが複数プロジェクトに個別インストールされている状態を見つける。
     /// **このアプリ最大の見せ場**（DESIGN.md 5.2）。
@@ -85,5 +75,51 @@ public enum PluginScanner {
     public static func duplicates(_ plugins: [InstalledPlugin]) -> [String: [InstalledPlugin]] {
         Dictionary(grouping: plugins.filter { $0.scope == "local" }, by: \.id)
             .filter { $0.value.count > 1 }
+    }
+}
+
+public enum PluginManager {
+    public static func add(_ selector: String, source: String = "", to agent: Agent, env: Environment) throws {
+        guard [.claude, .codex].contains(agent), !selector.isEmpty, !selector.hasPrefix("-"),
+              selector.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || "@._-/".contains($0)) }) else {
+            throw MCPScanner.ReadFailure("Claude CodeまたはCodexを選び、plugin@marketplace の形式で入力してください")
+        }
+        let cli = agent.cliName!
+        if !source.isEmpty {
+            guard !source.hasPrefix("-"), let url = URL(string: source),
+                  url.scheme == "https", url.host != nil else {
+                throw MCPScanner.ReadFailure("配布元はHTTPSのURLで入力してください")
+            }
+            _ = try env.run([cli, "plugin", "marketplace", "add", source])
+        }
+        _ = try env.run(agent == .claude
+            ? [cli, "plugin", "install", selector, "-s", "user"]
+            : [cli, "plugin", "add", selector])
+        guard try PluginScanner.read(agent, env: env).contains(where: { $0.id == selector || $0.id.split(separator: "@").first.map(String.init) == selector }) else {
+            throw MCPScanner.ReadFailure("CLIは成功しましたが、Pluginが見つかりません。一覧を更新してエージェント側を確認してください。")
+        }
+    }
+
+    public static func remove(_ name: String, from agent: Agent, project: String? = nil, env: Environment) throws {
+        let found = try PluginScanner.read(agent, env: env).filter {
+            $0.id == name && $0.projectPath == project && (project != nil || $0.scope == "user")
+        }
+        guard found.count == 1, let plugin = found.first, !plugin.isBundled,
+              !name.hasPrefix("-") else { throw MCPScanner.ReadFailure("削除対象のPluginが見つからないか、複数該当するか、保護されています") }
+        var argv = [agent.cliName!, "plugin", "remove", name]
+        if agent == .claude {
+            // `project` は `<proj>/.claude/settings.json` = git で共有されるファイル。
+            // 消えたことに気づくのは別のマシンや他のメンバー（DESIGN.md 5.2 / 9 章）。
+            // アプリが代わりに消してよいのは各 CLI 自身の領域だけ。
+            guard ["user", "local"].contains(plugin.scope) else {
+                throw MCPScanner.ReadFailure("プロジェクト共有のPluginはアプリからは削除しません。コマンドを実行してください")
+            }
+            argv += ["-s", plugin.scope]
+        }
+        if let project {
+            _ = try env.run(["sh", "-c", "cd " + ResourceRow.quote(project) + " && " + argv.map(ResourceRow.quote).joined(separator: " ")])
+        } else {
+            _ = try env.run(argv)
+        }
     }
 }

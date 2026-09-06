@@ -69,7 +69,7 @@ extension Agent {
             [".cursor/skills", ".cursor/skills-cursor", ".cursor/cloud-skills",
              ".claude/skills", ".codex/skills", ".grok/skills", ".agents/skills"]
         case .codex:
-            [".codex/skills", ".agents/skills"]
+            [".codex/skills", ".codex/skills/.system", ".agents/skills"]
         case .gemini:
             []
         }
@@ -80,7 +80,7 @@ extension Agent {
     /// `cloud-skills` は Cursor 側が同期する。**ユーザーが入れたものと混ぜない** —
     /// 混ぜると自分が入れたものが 20 件の同梱スキルに埋もれる。
     public static let bundledSkillRoots: Set<String> = [
-        ".cursor/skills-cursor", ".cursor/cloud-skills",
+        ".cursor/skills-cursor", ".cursor/cloud-skills", ".codex/skills/.system",
     ]
 
     /// 指定のルート群に置かれたスキルが、このエージェントから見えるか。

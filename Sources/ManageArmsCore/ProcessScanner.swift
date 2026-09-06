@@ -60,7 +60,7 @@ public enum ProcessScanner {
         -> [String: RunningMCP]
     {
         var result: [String: RunningMCP] = [:]
-        for server in servers {
+        for server in servers where server.command != nil && server.enabled {
             let tokens = signatures(of: server)
             guard !tokens.isEmpty else { continue }
             let matched = rows.filter { row in tokens.contains { row.command.contains($0) } }

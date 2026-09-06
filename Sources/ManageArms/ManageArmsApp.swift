@@ -45,6 +45,8 @@ final class AppModel {
     var isChecking = false
     var isAnalyzing = false
     var isPinning = false
+    var isMutating = false
+    private var isRefreshingActivity = false
     var isCleaning = false
     /// 一括削除シートの中身。nil で閉じる。
     var cleanup: [CleanupItem]?
@@ -65,6 +67,7 @@ final class AppModel {
         Task {
             let loaded = await Self.loadOffMain()
             inventory = loaded
+            refreshActivity()
             permissions = await Task.detached { PermissionScanner.scan(env: .live) }.value
             duplicateCounts = PermissionScanner.duplicates(permissions)
                 .mapValues(\.count)
@@ -89,8 +92,9 @@ final class AppModel {
     /// 有効/無効は全エージェント一括（DESIGN.md 3.2）。
     /// エージェント別の on/off は Cursor / Codex が共有ルートを直読みするため不可能。
     func toggle(_ row: ResourceRow) {
+        guard row.isManaged, !isChecking, !isAnalyzing else { return }
         do {
-            var registry = Registry.load(env: .live)
+            var registry = try Registry.read(env: .live)
             switch (row.kind, row.isDisabled) {
             case (.subagent, true):  try SubagentManager.enable(row.name, env: .live, registry: &registry)
             case (.subagent, false): try SubagentManager.disable(row.name, env: .live, registry: &registry)
@@ -115,8 +119,14 @@ final class AppModel {
             let failures = await Task.detached { () -> [String] in
                 targets.compactMap { item in
                     // 書き込みは CLI に委譲する（3.1）。cd が要るので sh 経由で渡す。
-                    do { _ = try Environment.live.run(["sh", "-c", item.command]); return nil }
-                    catch { return "\(item.name): \(error)" }
+                    do {
+                        if item.kind == .plugin {
+                            try PluginManager.remove(item.name, from: .claude, project: item.project, env: .live)
+                        } else if item.kind == .mcp {
+                            try MCPManager.removeProject(item.name, project: item.project, env: .live)
+                        }
+                        return nil
+                    } catch { return "\(item.name): \(error)" }
                 }
             }.value
             if !failures.isEmpty { errorMessage = failures.joined(separator: "\n") }
@@ -126,29 +136,12 @@ final class AppModel {
         }
     }
 
-    /// 自分で入れたものをこのアプリの管理下に取り込む（DESIGN.md 8 章）。
-    /// **実体は動かさない** — registry に足して symlink を張るだけ。
-    func adopt(_ row: ResourceRow) {
-        guard row.adoption == .possible else { return }
-        do {
-            var registry = Registry.load(env: .live)
-            if row.kind == .subagent {
-                try SubagentManager.adopt(row.name, env: .live, registry: &registry)
-            } else {
-                try SkillManager.adopt(row.name, env: .live, registry: &registry)
-            }
-            reload()
-        } catch {
-            errorMessage = "\(error)"
-        }
-    }
-
     /// 削除（DESIGN.md 8 章）。実体はゴミ箱へ移すので Finder から戻せる。
     /// registry に載っているものだけ — 他ツールが入れたものは WriteGuard が弾く。
     func remove(_ row: ResourceRow) {
-        guard row.isManaged else { return }
+        guard row.isManaged, !isChecking, !isAnalyzing else { return }
         do {
-            var registry = Registry.load(env: .live)
+            var registry = try Registry.read(env: .live)
             if row.kind == .subagent {
                 try SubagentManager.remove(row.name, env: .live, registry: &registry)
             } else {
@@ -162,12 +155,16 @@ final class AppModel {
 
     /// 明示的な「更新を確認」。起動時の自動チェックはしない（DESIGN.md 7.3）。
     func checkUpdates(force: Bool = true) {
-        guard !isChecking else { return }
+        guard !isChecking, !isAnalyzing, !isMutating, !isPinning else { return }
         isChecking = true
         Task {
-            var registry = Registry.load(env: .live)
+            guard var registry = try? Registry.read(env: .live) else {
+                errorMessage = String(localized: "管理情報を読み取れません。設定を修復してから再試行してください。")
+                isChecking = false
+                return
+            }
             let errors = await UpdateChecker.check(&registry, env: .live, force: force)
-            try? registry.save(env: .live)
+            do { try registry.save(env: .live) } catch { errorMessage = "\(error)" }
             if let failure = errors.values.compactMap({ $0 }).first {
                 errorMessage = "\(failure)"
             }
@@ -178,7 +175,7 @@ final class AppModel {
 
     /// 取得して差分を作るところまで。適用は確認後（7.4）。
     func showDiff(for row: ResourceRow) {
-        guard let entry = inventory.registry.entry(named: row.name) else { return }
+        guard let entry = inventory.registry.entry(named: row.name, kind: row.kind) else { return }
         Task {
             do {
                 preview = try await Updater.preview(entry, env: .live,
@@ -192,7 +189,7 @@ final class AppModel {
     func applyPreview() {
         guard let preview else { return }
         do {
-            var registry = Registry.load(env: .live)
+            var registry = try Registry.read(env: .live)
             try Updater.apply(preview, env: .live, registry: &registry)
             self.preview = nil
             reload()
@@ -211,7 +208,7 @@ final class AppModel {
     /// 初回は 140 MB のセッションログを全部読むため起動時には走らせない。
     /// 2 回目以降は前回以降に書かれたログだけの増分（実測 1.27 秒 → 0.001 秒）。
     func analyzeUsage() {
-        guard !isAnalyzing else { return }
+        guard !isAnalyzing, !isChecking, !isMutating, !isPinning else { return }
         isAnalyzing = true
         Task {
             let loaded = Registry.load(env: .live)
@@ -226,18 +223,16 @@ final class AppModel {
 
     /// `@latest` を今の最新版に固定する（DESIGN.md 7.2）。
     /// MCP に更新機能は無く、必要なのはこれ。
-    func pin(_ row: ResourceRow) {
+    func pin(_ row: ResourceRow, agent: Agent) {
         guard !isPinning, row.kind == .mcp else { return }
         isPinning = true
         Task {
             defer { isPinning = false }
             // 行の情報ではなく設定を読み直す。押すまでの間に変わっているかもしれない。
-            let byAgent = MCPScanner.scan(env: .live)
-            guard let server = byAgent.values.flatMap({ $0 }).first(where: { $0.name == row.name })
-            else { return }
-            let owners = byAgent.filter { $0.value.contains { $0.name == row.name } }.map(\.key)
             do {
-                try await MCPPin.pin(server, in: owners, env: .live)
+                guard let server = try MCPScanner.read(agent, env: .live).first(where: { $0.name == row.name }),
+                      !server.isProtected else { throw MCPScanner.ReadFailure("MCPサーバーが見つからないか保護されています") }
+                try await MCPPin.pin(server, in: [agent], env: .live)
                 reload()
             } catch {
                 errorMessage = "\(error)"
@@ -247,15 +242,72 @@ final class AppModel {
 
     /// 上流が方針転換した時に更新を止める（7.4）。
     func togglePin(_ row: ResourceRow) {
-        guard var entry = inventory.registry.entry(named: row.name) else { return }
+        guard var entry = inventory.registry.entry(named: row.name, kind: row.kind) else { return }
         entry.pinned.toggle()
         do {
-            var registry = Registry.load(env: .live)
+            var registry = try Registry.read(env: .live)
             registry.upsert(entry)
             try registry.save(env: .live)
             reload()
         } catch {
             errorMessage = "\(error)"
+        }
+    }
+
+    func addProject() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            var registry = try Registry.read(env: .live)
+            if !registry.projects.contains(url.path) { registry.projects.append(url.path) }
+            try registry.save(env: .live)
+            reload()
+        } catch { errorMessage = "\(error)" }
+    }
+
+    func refreshActivity() {
+        guard !isRefreshingActivity else { return }
+        isRefreshingActivity = true
+        let definitions = inventory.mcpServers
+        Task {
+            let snapshot = await Task.detached { ProcessScanner.snapshot(env: .live) }.value
+            for index in inventory.rows.indices {
+                guard let owner = inventory.rows[index].ownerAgent, inventory.rows[index].kind == .mcp else { continue }
+                let live = ProcessScanner.running(definitions[owner] ?? [], in: snapshot)
+                let match = live[inventory.rows[index].name]
+                inventory.rows[index].running = match?.owner == owner ? match : nil
+            }
+            isRefreshingActivity = false
+        }
+    }
+
+    func removeExisting(_ row: ResourceRow, agent: Agent, project: String?, file: URL? = nil) {
+        guard !isMutating, row.origin != .bundled else { return }
+        isMutating = true
+        Task {
+            let failure = await Task.detached { () -> String? in
+                do {
+                    if let file {
+                        try SkillManager.removeExisting(file, kind: row.kind, project: project, env: .live)
+                    } else if row.kind == .plugin {
+                        try PluginManager.remove(row.name, from: agent, project: project, env: .live)
+                    } else if row.kind == .mcp {
+                        if let project {
+                            guard agent == .claude else { throw MCPScanner.ReadFailure("このプロジェクト範囲には対応していません") }
+                            try MCPManager.removeProject(row.name, project: project, env: .live)
+                        } else {
+                            try MCPManager.remove(row.name, from: agent, env: .live)
+                        }
+                    }
+                    return nil
+                } catch { return "\(error)" }
+            }.value
+            errorMessage = failure
+            isMutating = false
+            reload()
         }
     }
 

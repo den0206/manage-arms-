@@ -44,13 +44,14 @@ public enum Updater {
 
         let source = GitHubSource(repo: repo, branch: entry.branch, subdir: entry.subdir)
         let staging = try await Fetcher.stage(source)
-        guard let candidate = staging.candidates.first(where: { $0.name == entry.name })
-                ?? staging.candidates.first else {
+        guard let candidate = staging.candidates.first(where: { $0.name == entry.name && $0.kind.rawValue == entry.kind }) else {
             staging.discard()
             throw Failure.candidateMissing(entry.name)
         }
 
-        let current = env.skillStore.appending(path: entry.name).appending(path: "SKILL.md")
+        let current = entry.kind == Kind.subagent.rawValue
+            ? (entry.disabled ? env.disabledAgentStore : env.agentStore).appending(path: "\(entry.name).md")
+            : (entry.disabled ? env.disabledStore : env.skillStore).appending(path: entry.name).appending(path: "SKILL.md")
         return UpdatePreview(
             name: entry.name,
             oldSha: entry.sha,
@@ -58,7 +59,7 @@ public enum Updater {
             staging: staging,
             candidate: candidate,
             diff: diff(old: text(of: current),
-                       new: text(of: candidate.localURL.appending(path: "SKILL.md")))
+                       new: text(of: candidate.kind == .subagent ? candidate.localURL : candidate.localURL.appending(path: "SKILL.md")))
         )
     }
 
@@ -67,11 +68,14 @@ public enum Updater {
         _ preview: UpdatePreview, env: Environment, registry: inout Registry
     ) throws {
         let fm = FileManager.default
-        let destination = env.skillStore.appending(path: preview.name)
 
-        guard var entry = registry.entry(named: preview.name) else {
+        guard var entry = registry.entry(named: preview.name, kind: preview.candidate.kind) else {
             throw Failure.notManaged(preview.name)
         }
+        let destination = entry.kind == Kind.subagent.rawValue
+            ? (entry.disabled ? env.disabledAgentStore : env.agentStore).appending(path: "\(entry.name).md")
+            : (entry.disabled ? env.disabledStore : env.skillStore).appending(path: entry.name)
+        guard !entry.pinned else { throw Failure.pinned(entry.name) }
         try WriteGuard.assertMutable(destination, env: env, registry: registry)
 
         // 旧実体を一時退避してから入れ替える。消してから入れると失敗時に戻せない。
@@ -80,7 +84,7 @@ public enum Updater {
         if hadExisting { try fm.moveItem(at: destination, to: backup) }
 
         do {
-            try fm.createDirectory(at: env.skillStore, withIntermediateDirectories: true)
+            try fm.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
             try fm.copyItem(at: preview.candidate.localURL, to: destination)
         } catch {
             if hadExisting {

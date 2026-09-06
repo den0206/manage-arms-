@@ -44,7 +44,7 @@ public enum PasteInput: Equatable, Sendable {
     /// 実行ファイルらしき先頭トークンを持つ 1 行だけをコマンドとして受ける。
     static func parseCommand(_ text: String) -> [String]? {
         guard !text.contains("\n") else { return nil }
-        let parts = text.split(separator: " ").map(String.init)
+        guard let parts = commandWords(text) else { return nil }
         guard let head = parts.first else { return nil }
         let runners = ["npx", "uvx", "uv", "bunx", "pnpm", "node", "python", "python3", "deno"]
         guard runners.contains(head) || head.hasPrefix("/") || head.hasPrefix("./") else {
@@ -52,6 +52,48 @@ public enum PasteInput: Equatable, Sendable {
         }
         return parts
     }
+    /// Tokenize quoted arguments without evaluating shell syntax.
+    static func commandWords(_ text: String) -> [String]? {
+        var words: [String] = [], word = ""
+        var quote: Character?, escaped = false, started = false
+        for character in text {
+            if escaped { word.append(character); escaped = false; started = true; continue }
+            if character == "\\", quote != "'" { escaped = true; started = true; continue }
+            if let active = quote {
+                if character == active { quote = nil } else { word.append(character) }
+                continue
+            }
+            if character == "'" || character == "\"" { quote = character; started = true; continue }
+            if "|;&<>`$\n\r".contains(character) { return nil }
+            if character.isWhitespace {
+                if started { words.append(word); word = ""; started = false }
+            } else { word.append(character); started = true }
+        }
+        guard quote == nil, !escaped else { return nil }
+        if started { words.append(word) }
+        return words
+    }
+
+    public static func mcpServers(_ raw: String, name: String) throws -> [MCPServer] {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.hasPrefix("{") {
+            let object = try JSONSerialization.jsonObject(with: Data(text.utf8))
+            guard let dict = object as? [String: Any] else { throw MCPScanner.ReadFailure("MCP設定はJSONオブジェクトで入力してください") }
+            if dict["command"] != nil || dict["url"] != nil {
+                guard let server = MCPServer.parse(name: name, dict) else { throw MCPScanner.ReadFailure("MCPの定義を読み取れません") }
+                return [server]
+            }
+            return try MCPScanner.decode(dict["mcpServers"] ?? dict)
+        }
+        if let url = URL(string: text), ["http", "https"].contains(url.scheme), url.host != nil {
+            return [MCPServer(name: name, transport: .http(url: text, headers: [:]))]
+        }
+        guard let words = parseCommand(text), let command = words.first else {
+            throw MCPScanner.ReadFailure("MCP設定JSON・HTTPのURL・引用符付きの起動コマンドのいずれかを入力してください。シェルの式は使えません")
+        }
+        return [MCPServer(name: name, transport: .stdio(command: command, args: Array(words.dropFirst()), env: [:]))]
+    }
+
 }
 
 public enum GitHubURL {

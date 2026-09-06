@@ -32,7 +32,7 @@ public enum SkillManager {
 
         try linkForClaude(name, env: env, registry: registry)
 
-        var entry = registry.entry(named: name) ?? Registry.Entry(name: name, kind: .skill)
+        var entry = registry.entry(named: name, kind: .skill) ?? Registry.Entry(name: name, kind: .skill)
         entry.disabled = false
         registry.upsert(entry)
         try registry.save(env: env)
@@ -61,7 +61,7 @@ public enum SkillManager {
         try fm.createDirectory(at: env.disabledStore, withIntermediateDirectories: true)
         try fm.moveItem(at: store, to: parked)
 
-        var entry = registry.entry(named: name) ?? Registry.Entry(name: name, kind: .skill)
+        var entry = registry.entry(named: name, kind: .skill) ?? Registry.Entry(name: name, kind: .skill)
         entry.disabled = true
         registry.upsert(entry)
         try registry.save(env: env)
@@ -88,28 +88,13 @@ public enum SkillManager {
 }
 
 extension SkillManager {
-    /// ユーザーが自分で入れたスキルを、このアプリの管理下に取り込む（DESIGN.md 8 章）。
-    ///
-    /// **ファイルは 1 バイトも動かさない。** 実体は既に `~/.agents/skills/` にあるので、
-    /// registry に 1 行足して Claude 用の symlink を張るだけ。
-    /// 取り込むと有効/無効の切り替えと削除ができるようになる（`WriteGuard` が通る）。
-    /// 取得元が分からないので**更新はできない**（`repo` が nil = `.unknown`）。
-    public static func adopt(_ name: String, env: Environment, registry: inout Registry) throws {
-        guard registry.entry(named: name) == nil else { throw Failure.alreadyExists(name) }
-        guard FileManager.default.fileExists(
-            atPath: env.skillStore.appending(path: name).path(percentEncoded: false))
-        else { throw Failure.notFound(name) }
-
-        registry.upsert(Registry.Entry(name: name, kind: .skill))
-        do {
-            // 他ツールが張った symlink が居座っていれば WriteGuard が弾く。
-            // その場合は取り込まない（横取りしない）。
-            try linkForClaude(name, env: env, registry: registry)
-        } catch {
-            registry.resources.removeAll { $0.name == name }
-            throw error
-        }
-        try registry.save(env: env)
+    @discardableResult
+    public static func removeExisting(_ url: URL, kind: Kind, project: String? = nil,
+                                      env: Environment) throws -> URL? {
+        try WriteGuard.assertUserArtifact(url, kind: kind, project: project, env: env)
+        var result: NSURL?
+        try FileManager.default.trashItem(at: url, resultingItemURL: &result)
+        return result as URL?
     }
 
     /// 実体をゴミ箱へ移し、registry から外す。**完全削除しない** —
@@ -135,7 +120,7 @@ extension SkillManager {
         }
         guard trashed != nil else { throw Failure.notFound(name) }
 
-        registry.resources.removeAll { $0.name == name }
+        registry.resources.removeAll { $0.name == name && $0.kind == Kind.skill.rawValue }
         try registry.save(env: env)
         return trashed
     }

@@ -12,6 +12,11 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 
 ### Added
 
+- Guided MCP and plugin installation with an explicit agent destination, registration checks,
+  direct removal of existing user tools, and protected indicators for recognized bundled tools.
+- Visible-window MCP process polling and scan diagnostics that distinguish failures from empty lists.
+- Explicit project folder registration for discovering Claude project settings.
+
 - One screen per agent for MCP servers, Skills, Subagents and Plugins across Claude Code,
   Cursor, Codex and Gemini CLI. Pick an agent in the sidebar and you see only what that
   agent carries. What you installed yourself is listed first — including plugins and MCP
@@ -83,5 +88,20 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 - The permissions list no longer repeats what the filter already says. The
   "machine-specific" and "duplicated" markers are hidden in the filter that selects for
   them, and `allow` is no longer tinted, so the rarer `deny` and `ask` stand out.
+- Removed "adopt into ManageArms" for skills and subagents you installed yourself. You can
+  now move such a file to the Trash directly, so the extra registration step is gone.
+- Plugins shared through a project (`<project>/.claude/settings.json`) are no longer removed
+  by the app. That file is shared through git, so ManageArms shows the command instead.
+
+### Fixed
+
+- Keep same-named resources separate by kind and MCP/plugin registrations separate by agent;
+  pin MCP versions only for the selected agent and preserve unrelated Cursor settings.
+- Refuse malformed configuration overwrites and protect bundled paths and links from deletion.
+- Correct Claude MCP environment/header argument placement and Codex plugin command syntax.
+- Correct the same argument placement for Gemini CLI, where the server name could be
+  consumed as the value of a preceding `-e` flag.
+- Messages for failed scans, additions and removals are now translated instead of always
+  appearing in English.
 
 [Unreleased]: https://github.com/den0206/manage-arms/compare/Ver_0.0.1...HEAD

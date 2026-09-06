@@ -9,19 +9,53 @@ public enum MCPScanner {
     /// 読み取り先は `Agent.mcpSource` が持つ。**ここでエージェントを直書きしない** —
     /// 直書きすると、増えたエージェントが黙って欠落する（コンパイラが気づけない）。
     public static func scan(env: Environment) -> [Agent: [MCPServer]] {
-        var result: [Agent: [MCPServer]] = [:]
-        for agent in Agent.allCases {
-            switch agent.mcpSource {
-            case .file(let root, let path):
-                let base = root == .home ? env.home : env.appSupport
-                result[agent] = fromJSON(base.appending(path: path), key: "mcpServers")
-            case .cli(let argv):
-                result[agent] = fromCLI(argv, env: env)
-            case .dir, nil:
-                continue                         // 読み取る経路が無いエージェント
+        Dictionary(uniqueKeysWithValues: Agent.allCases.map { ($0, (try? read($0, env: env)) ?? []) })
+    }
+
+    /// 走査・追加・削除の失敗を利用者に見せるための型。
+    ///
+    /// **`description` は UI にそのまま出るので必ずローカライズする。**
+    /// `String` を返すプロパティは SwiftUI が自動で引かないので、
+    /// ここで `String(localized:)` を通す（CLAUDE.md「ローカライズ」）。
+    /// キーは日本語文字列そのもの。
+    public struct ReadFailure: Error, CustomStringConvertible {
+        public let description: String
+        public init(_ key: String.LocalizationValue) { description = String(localized: key) }
+    }
+
+    public static func read(_ agent: Agent, env: Environment) throws -> [MCPServer] {
+        switch agent.mcpSource {
+        case .file(let root, let path):
+            let url = (root == .home ? env.home : env.appSupport).appending(path: path)
+            guard FileManager.default.fileExists(atPath: url.path) else { return [] }
+            let object = try JSONSerialization.jsonObject(with: Data(contentsOf: url))
+            guard let dictionary = object as? [String: Any] else { throw ReadFailure("MCP設定を読み取れません") }
+            guard let servers = dictionary["mcpServers"] else { return [] }
+            return try decode(servers)
+        case .cli(let argv):
+            let output = try env.run(argv)
+            let object = try JSONSerialization.jsonObject(with: Data(output.utf8))
+            if let array = object as? [[String: Any]] {
+                return try array.map { item in
+                    guard let name = item["name"] as? String,
+                          let server = MCPServer.parse(name: name, item) else { throw ReadFailure("MCPの一覧をCLIから読み取れません") }
+                    return server
+                }
             }
+            if let dict = object as? [String: Any] { return try decode(dict["mcpServers"] ?? dict) }
+            throw ReadFailure("MCPの一覧をCLIから読み取れません")
+        default: return []
         }
-        return result
+    }
+
+    static func decode(_ object: Any) throws -> [MCPServer] {
+        guard let dict = object as? [String: Any] else { throw ReadFailure("MCPサーバー定義を読み取れません") }
+        return try dict.sorted { $0.key < $1.key }.map { name, value in
+            guard let item = value as? [String: Any], let server = MCPServer.parse(name: name, item) else {
+                throw ReadFailure("MCPサーバー定義が不正です")
+            }
+            return server
+        }
     }
 
     /// プロジェクト単位の MCP（DESIGN.md 5.1）。プロジェクトの絶対パス → サーバー名 → スコープ。
@@ -60,22 +94,7 @@ public enum MCPScanner {
         return MCPServer.parseAll(["mcpServers": servers])
     }
 
-    /// 設定ファイルを直読みできないエージェント（Codex は `config.toml` で TOML パースが要る）。
-    /// 出力は `[{...}]` と `{"name": {...}}` の両方を実測しているので、どちらも受ける。
-    static func fromCLI(_ argv: [String], env: Environment) -> [MCPServer] {
-        guard let out = try? env.run(argv),
-              let data = out.data(using: .utf8),
-              let list = try? JSONSerialization.jsonObject(with: data)
-        else { return [] }
-        if let array = list as? [[String: Any]] {
-            return array.compactMap { item in
-                guard let name = item["name"] as? String else { return nil }
-                return MCPServer.parse(name: name, item)
-            }.sorted { $0.name < $1.name }
-        }
-        if let object = list as? [String: Any] { return MCPServer.parseAll(object) }
-        return []
-    }
+
 }
 
 /// 追加 / 削除。3 エージェントは CLI に委譲し、Cursor だけ直接編集する（DESIGN.md 3.1）。
@@ -94,18 +113,72 @@ public enum MCPManager {
 
     public static func add(_ server: MCPServer, to agent: Agent, env: Environment) throws {
         guard agent.supports(.mcp) else { throw Failure.unsupported(agent) }
-        if agent == .cursor { return try editCursor(env: env) { $0[server.name] = encode(server) } }
+        try validate(server, for: agent)
+        if agent == .cursor {
+            return try editCursor(env: env) {
+                guard $0[server.name] == nil else { throw Failure.alreadyExists(server.name) }
+                $0[server.name] = encode(server)
+            }
+        }
+        guard !(try MCPScanner.read(agent, env: env)).contains(where: { $0.name == server.name }) else {
+            throw Failure.alreadyExists(server.name)
+        }
         guard let argv = MCPCommand.add(server, to: agent) else { throw Failure.unsupported(agent) }
         _ = try env.run(argv)
     }
 
     public static func remove(_ name: String, from agent: Agent, env: Environment) throws {
         guard agent.supports(.mcp) else { throw Failure.unsupported(agent) }
+        guard !name.isEmpty, !name.hasPrefix("-") else { throw MCPScanner.ReadFailure("MCP接続名が不正です") }
+        if try MCPScanner.read(agent, env: env).contains(where: { $0.name == name && $0.isProtected }) {
+            throw MCPScanner.ReadFailure("このMCPサーバーはエージェントが管理しています")
+        }
         if agent == .cursor { return try editCursor(env: env) { $0.removeValue(forKey: name) } }
         guard let argv = MCPCommand.remove(name, from: agent) else {
             throw Failure.unsupported(agent)
         }
         _ = try env.run(argv)
+    }
+
+    public static func removeProject(_ name: String, project: String, env: Environment) throws {
+        guard !name.isEmpty, !name.hasPrefix("-"), let scope = ProjectScan.load(env: env).mcpScope(name, in: project) else {
+            throw MCPScanner.ReadFailure("MCPの適用範囲が不明です。変更していません")
+        }
+        let url = scope == "project" ? URL(filePath: project).appending(path: ".mcp.json") : env.home.appending(path: ".claude.json")
+        guard var root = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any] else {
+            throw MCPScanner.ReadFailure("プロジェクトのMCP設定を読み取れません")
+        }
+        if scope == "local" {
+            guard let projects = root["projects"] as? [String: [String: Any]], let entry = projects[project] else {
+                throw MCPScanner.ReadFailure("プロジェクトの設定が見つかりません")
+            }
+            root = entry
+        }
+        guard let servers = root["mcpServers"] as? [String: [String: Any]], let definition = servers[name],
+              let server = MCPServer.parse(name: name, definition), !server.isProtected else {
+            throw MCPScanner.ReadFailure("MCPサーバーが見つからないか保護されています")
+        }
+        let argv = ["claude", "mcp", "remove", name, "-s", scope]
+        _ = try env.run(["sh", "-c", "cd " + ResourceRow.quote(project) + " && " + argv.map(ResourceRow.quote).joined(separator: " ")])
+    }
+
+    public static func validate(_ server: MCPServer, for agent: Agent) throws {
+        guard !server.isProtected else { throw MCPScanner.ReadFailure("このMCPサーバーはエージェントが管理しています") }
+        guard !server.name.isEmpty, !server.name.hasPrefix("-"),
+              server.name.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || "_.-".contains($0)) }) else {
+            throw MCPScanner.ReadFailure("MCP接続名は英数字・ハイフン・アンダースコアで入力してください")
+        }
+        switch server.transport {
+        case .http(let address, let headers):
+            guard let url = URL(string: address), ["https", "http"].contains(url.scheme), url.host != nil else {
+                throw MCPScanner.ReadFailure("MCPの接続先はHTTPまたはHTTPSのURLで入力してください")
+            }
+            if agent == .codex && !headers.isEmpty {
+                throw MCPScanner.ReadFailure("Codex CLIはこのHTTPヘッダを登録できません。先にCodex側で認証を設定してください。")
+            }
+        case .stdio(let command, _, _):
+            guard !command.isEmpty, !command.hasPrefix("-") else { throw MCPScanner.ReadFailure("MCPの起動コマンドを入力してください") }
+        }
     }
 
     // MARK: - Cursor だけ直接編集
@@ -114,12 +187,20 @@ public enum MCPManager {
     /// `~/.claude.json`（98 KB・全状態が同居）とは事情が違う。
     /// **`mcpServers` 以外のキーは触らない。** 書き込みはアトミック。
     static func editCursor(env: Environment,
-                           _ mutate: (inout [String: Any]) -> Void) throws {
+                           _ mutate: (inout [String: Any]) throws -> Void) throws {
         let url = env.home.appending(path: ".cursor/mcp.json")
-        var root = (try? Data(contentsOf: url))
-            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+        var root: [String: Any] = [:]
+        if FileManager.default.fileExists(atPath: url.path) {
+            guard let decoded = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any] else {
+                throw MCPScanner.ReadFailure("Cursorの設定を読み取れません。変更していません")
+            }
+            root = decoded
+        }
+        if let existing = root["mcpServers"], !(existing is [String: Any]) {
+            throw MCPScanner.ReadFailure("CursorのmcpServersを読み取れません。変更していません")
+        }
         var servers = root["mcpServers"] as? [String: Any] ?? [:]
-        mutate(&servers)
+        try mutate(&servers)
         root["mcpServers"] = servers
 
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),

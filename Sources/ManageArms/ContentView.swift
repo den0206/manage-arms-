@@ -26,7 +26,14 @@ struct ContentView: View {
         NavigationSplitView {
             sidebar
         } detail: {
-            detail
+            VStack(spacing: 0) {
+                if !model.inventory.issues.isEmpty {
+                    DisclosureGroup("読み取りに失敗した項目があります") {
+                        ForEach(model.inventory.issues, id: \.self) { Text($0).font(.caption).textSelection(.enabled) }
+                    }.padding(12).background(.orange.opacity(0.1))
+                }
+                detail
+            }
                 .overlay(alignment: .top) { BusyBar(active: busy) }
         }
         .alert("操作できませんでした",
@@ -42,6 +49,7 @@ struct ContentView: View {
                 showAdd = false
                 model.reload()
             }
+            .onAppear { if case .agent(let agent) = screen { add.agent = agent } }
         }
         .sheet(isPresented: .init(get: { model.cleanup != nil },
                                   set: { if !$0 { model.cleanup = nil } })) {
@@ -52,6 +60,13 @@ struct ContentView: View {
             DiffSheet(preview: box.value, model: model)
         }
         .toolbar { toolbar }
+        .disabled(model.isMutating)
+        .task {
+            while !Task.isCancelled {
+                if NSApp.windows.contains(where: { $0.isVisible && !$0.isMiniaturized }) { model.refreshActivity() }
+                do { try await Task.sleep(for: .seconds(3)) } catch { break }
+            }
+        }
     }
 
     private var sidebar: some View {
@@ -67,8 +82,10 @@ struct ContentView: View {
                     .tag(Screen.agent(agent))
                 }
             }
-            Section("そのほか") {
+            Section("メンテナンス") {
                 Label("権限", systemImage: "lock").tag(Screen.permissions)
+                Button("プロジェクトを追加…") { model.addProject() }
+                    .help("選択したフォルダのClaude設定を一覧に追加します")
             }
         }
         .navigationSplitViewColumnWidth(min: 208, ideal: 228, max: 300)
@@ -87,6 +104,7 @@ struct ContentView: View {
             }
             Spacer(minLength: 0)
         }
+        .help("起動状態はウィンドウ表示中に3秒ごとに確認します。Tool呼び出し中を示すものではありません。")
         .font(.caption2)
         .foregroundStyle(.tertiary)
         .lineLimit(1)
@@ -109,7 +127,7 @@ struct ContentView: View {
     private var toolbar: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
             Button { showAdd = true } label: { Label("追加", systemImage: "plus") }
-                .help("GitHub の URL からスキルを追加します")
+                .help("スキル・MCP・Pluginを追加します")
         }
         ToolbarItem(placement: .primaryAction) {
             Button {
@@ -711,6 +729,8 @@ struct ResourceRowView: View {
     /// プロジェクトのタブならそのパス。削除コマンドのスコープに効く。
     var project: String?
     @State private var confirmDelete = false
+    @State private var confirmExisting = false
+    @State private var removalFile: URL?
     @State private var hovering = false
 
     var body: some View {
@@ -756,6 +776,21 @@ struct ResourceRowView: View {
             }
             Spacer(minLength: 8)
             controls
+                .disabled(model.isMutating || model.isPinning || model.isChecking || model.isAnalyzing)
+        }
+        .confirmationDialog("「\(row.name)」を削除しますか？", isPresented: $confirmExisting) {
+            Button("削除", role: .destructive) { model.removeExisting(row, agent: agent, project: project, file: removalFile) }
+            Button("キャンセル", role: .cancel) {}
+        } message: {
+            if let removalFile {
+                if project != nil {
+                    Text("ゴミ箱へ移動：\(removalFile.path)。これはプロジェクトで共有されるファイルです。他のメンバーや別のマシンにも影響します。")
+                } else {
+                    Text("ゴミ箱へ移動：\(removalFile.path)。この配置場所を共有するエージェントにも影響します。")
+                }
+            } else {
+                Text("\(agent.displayName) / \(project ?? String(localized: "ユーザー全体")) の登録を削除します。必要な場合は再追加してください。")
+            }
         }
         .padding(.vertical, 7)
         .padding(.horizontal, 6)
@@ -789,41 +824,53 @@ struct ResourceRowView: View {
         }
     }
 
+    private var removableFiles: [URL] {
+        guard row.kind == .skill || row.kind == .subagent else { return [] }
+        let suffix = row.kind == .subagent ? ".md" : ""
+        let roots: [URL]
+        if let project {
+            roots = [URL(filePath: project).appending(path: row.kind == .skill ? ".claude/skills" : ".claude/agents")]
+        } else {
+            let allowed = row.kind == .skill ? agent.skillRoots : agent.subagentRoots
+            roots = row.roots.filter(allowed.contains).map { ManageArmsCore.Environment.live.home.appending(path: $0) }
+        }
+        return roots.map { $0.appending(path: row.name + suffix) }.filter {
+            (try? WriteGuard.assertUserArtifact($0, kind: row.kind, project: project, env: .live)) != nil
+        }
+    }
+
     @ViewBuilder
     private var controls: some View {
-        if row.isManaged {
-            Toggle("", isOn: .init(get: { !row.isDisabled }, set: { _ in model.toggle(row) }))
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.mini)
-                .help(row.isDisabled ? "有効にする（全エージェント）" : "無効にする（全エージェント）")
-            Button(role: .destructive) {
-                confirmDelete = true
-            } label: {
-                Image(systemName: "trash")
+        if row.origin == .bundled {
+            Label("同梱・変更不可", systemImage: "lock.fill").font(.caption).foregroundStyle(.secondary)
+        } else if row.isManaged && project == nil {
+            VStack(alignment: .trailing, spacing: 6) {
+                Toggle("共有先すべてで有効", isOn: .init(get: { !row.isDisabled }, set: { _ in model.toggle(row) }))
+                    .toggleStyle(.switch).controlSize(.small).font(.caption)
+                Button("削除…", role: .destructive) { confirmDelete = true }
+                    .contextMenuAndConfirm(row: row, model: model, confirmDelete: $confirmDelete)
             }
-            .buttonStyle(.borderless)
-            .help("削除する")
-            .contextMenuAndConfirm(row: row, model: model, confirmDelete: $confirmDelete)
         } else {
-            VStack(alignment: .trailing, spacing: 4) {
-                // 実体が置き場にあるものは、ファイルを動かさずに管理下へ入れられる（8 章）。
-                if row.adoption == .possible {
-                    Button("このアプリで管理") { model.adopt(row) }
-                        .buttonStyle(.link).font(.caption)
-                        .help("registry に登録して、切り替えと削除ができるようにします。ファイルは動かしません")
+            VStack(alignment: .trailing, spacing: 6) {
+                if row.kind == .mcp || row.kind == .plugin {
+                    Button("削除…", role: .destructive) { removalFile = nil; confirmExisting = true }
+                        .disabled(agent != .cursor && model.inventory.agents[agent]?.isUsable != true)
+                    if row.kind == .mcp && row.canPin && project == nil {
+                        Button("最新版に固定…") { model.pin(row, agent: agent) }.font(.caption)
+                    }
+                } else if !removableFiles.isEmpty {
+                    Menu("削除…") {
+                        ForEach(removableFiles, id: \.path) { file in
+                            Button(file.path) { removalFile = file; confirmExisting = true }
+                        }
+                    }
+                } else {
+                    Label("保護対象・管理元で変更", systemImage: "lock.fill").font(.caption)
                 }
-                if row.kind == .mcp && row.canPin {
-                    // MCP は消せないが `@latest` の固定はできる（7.2）。
-                    Button("ピン留め") { model.pin(row) }
-                        .buttonStyle(.link).font(.caption)
-                        .disabled(model.isPinning)
-                        .help("いま npm にある最新版に固定し、起動ごとに変わらないようにします")
-                }
-                RemovalHelp(row: row, agent: agent, model: model, project: project)
             }
         }
     }
+
 }
 
 /// 表がスコープごとに分かれているので、行に出すのは**重複しているときだけ**
@@ -855,7 +902,7 @@ struct ScopeNote: View {
             }
             .font(.caption2)
         case (.project, .both):
-            Label("ユーザー全体にもあります。こちら側は消せます", systemImage: "exclamationmark.circle")
+            Label("ユーザー全体にもあります。内容の違いを確認してください", systemImage: "exclamationmark.circle")
                 .font(.caption2).foregroundStyle(.orange)
         default:
             EmptyView()
@@ -863,96 +910,6 @@ struct ScopeNote: View {
     }
 }
 
-/// 「消せない」で終わらせず、**どこで消すのかを出す**（DESIGN.md 3.1 — 書き込みは
-/// 各 CLI に委譲しているので、削除もそちらが正しい経路）。
-struct RemovalHelp: View {
-    let row: ResourceRow
-    let agent: Agent
-    let model: AppModel
-    var project: String?
-    @State private var shown = false
-    @State private var copied = false
-
-    var body: some View {
-        Button("削除するには…") { shown = true }
-            .buttonStyle(.link).font(.caption)
-            .popover(isPresented: $shown, arrowEdge: .trailing) {
-                VStack(alignment: .leading, spacing: 10) {
-                    SheetHeader(title: "「\(row.name)」の消し方")
-                    Text(reason).font(.callout).foregroundStyle(.secondary)
-                    if let command {
-                        HStack(spacing: 8) {
-                            Text(verbatim: command)
-                                .font(.system(.caption, design: .monospaced))
-                                .textSelection(.enabled)
-                                .padding(8)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(.quinary, in: RoundedRectangle(cornerRadius: 6))
-                            Button {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(command, forType: .string)
-                                withAnimation(Motion.pop) { copied = true }
-                            } label: {
-                                Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                                    .contentTransition(.symbolEffect(.replace))
-                                    .foregroundStyle(copied ? AnyShapeStyle(.green)
-                                                            : AnyShapeStyle(.primary))
-                            }
-                            .help("コピー")
-                        }
-                    }
-                    // どのスコープを消すのかは、コマンド自体に焼き込んである。
-                    // 取り違えるとユーザー全体の分が消えるので、言葉でも念を押す。
-                    if project != nil {
-                        Text("このプロジェクトの分だけを消します。")
-                            .font(.caption).foregroundStyle(.tertiary)
-                    } else if !row.reach.projectPaths.isEmpty {
-                        Text("ユーザー全体の分だけを消します。プロジェクト側は各プロジェクトのタブから消してください。")
-                            .font(.caption).foregroundStyle(.orange)
-                    }
-                    if case .needsMove(let root) = row.adoption {
-                        Divider()
-                        Text("実体を ~/\(root) から ~/.agents/skills へ移すと、このアプリで切り替え・削除できるようになります（移動は手で行ってください）。")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                .padding(16)
-                .frame(width: 420)
-            }
-            .onChange(of: shown) { _, open in if !open { copied = false } }
-    }
-
-    private var reason: String {
-        if row.origin == .bundled {
-            return String(localized: "エージェントに同梱されているものです。消してもエージェントの更新で戻ります。")
-        }
-        switch row.kind {
-        case .plugin:
-            return String(localized: "プラグインは各 CLI が入れています。**入れたのと同じ CLI**で消してください。")
-        case .mcp where agent == .cursor:
-            // Cursor に CLI は無い。設定ファイルを直接編集するのが唯一の経路（3.1）。
-            return String(localized: "Cursor には CLI が無いので、設定ファイルの mcpServers から該当のエントリを消してください。")
-        case .mcp:
-            return String(localized: "MCP は各エージェントの設定ファイルにあります。動いている Claude と競合するため、書き換えは CLI に任せます。")
-        case .skill, .subagent:
-            return String(localized: "このアプリが入れたものではないため、実体を直接消してください。")
-        }
-    }
-
-    /// **コマンドをでっち上げない。** 実在を確認したのは `claude plugin remove` /
-    /// `codex plugin remove` / `<cli> mcp remove` だけ（`--help` で確認）。
-    /// スコープの決定は Core の純粋関数に任せる（テストがある）。
-    private var command: String? {
-        row.removalCommand(
-            agent: agent,
-            project: project,
-            mcpScope: project.flatMap { model.inventory.projectScan.mcpScope(row.name, in: $0) })
-    }
-}
-
-/// 種別の目印。**記号だけで区別する** — 色付きの角丸タイルを 1 行ごとに並べると、
-/// 一覧が模様になって、肝心の名前より先にアイコンが目に入る。
-/// 幅を固定しているのは、行が何行になっても本文の左端が縦に揃うようにするため。
 struct KindIcon: View {
     let kind: Kind
     var size: CGFloat = Theme.glyph
@@ -1007,11 +964,11 @@ struct UsageLabel: View {
             if row.running != nil {
                 HStack(spacing: 4) {
                     RunningDot()
-                    Text("実行中")
+                    Text("起動検出")
                 }
                 .foregroundStyle(.green)
             } else if row.kind == .mcp {
-                Text("停止中").foregroundStyle(.secondary)
+                Text("起動未確認").foregroundStyle(.secondary)
             } else if scannedAt == nil {
                 Text("使用状況は未集計").foregroundStyle(.quaternary)
             } else if !row.usageObservable {
@@ -1020,7 +977,7 @@ struct UsageLabel: View {
                 Text("最終使用 \(last.formatted(.relative(presentation: .numeric)))")
                     .foregroundStyle(.secondary)
             } else {
-                Text("一度も使っていません").foregroundStyle(.orange)
+                Text("使用記録なし").foregroundStyle(.orange)
             }
         }
         .font(.caption2)
@@ -1031,10 +988,10 @@ struct UsageLabel: View {
         if let running = row.running {
             let owner = running.owner?.displayName ?? String(localized: "所属不明のプロセス")
             return String(localized:
-                "\(owner) が使用中 · 稼働 \(running.elapsed) · pid \(Int(running.pid))")
+                "\(owner) のプロセスを検出 · 稼働 \(running.elapsed) · pid \(Int(running.pid))")
         }
         if row.kind == .mcp {
-            return String(localized: "登録されていますが、いま起動しているプロセスはありません")
+            return String(localized: "ローカルプロセスを確認できません。HTTP接続や所属不明のプロセスは停止と断定できません。")
         }
         if scannedAt == nil {
             return String(localized: "未集計 —「使用状況を分析」を押すと集計します")

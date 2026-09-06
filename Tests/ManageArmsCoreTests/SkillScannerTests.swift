@@ -48,7 +48,7 @@ struct SkillScannerTests {
         #expect(skills.first?.root == ".agents/skills")
     }
 
-    @Test("7 つのスキルルートすべてを走査する")
+    @Test("既知のスキルルートすべてを走査する")
     func scansEveryRoot() throws {
         let f = try Fixture()
         for source in Source.skills {
@@ -123,7 +123,7 @@ struct SkillScannerTests {
         try f.dir(".codex/skills/.system/imagegen")
         try Data().write(to: root.appending(path: ".sync-manifest.json"))
         try f.skill(".codex/skills", "real", body: Self.valid("real"))
-        let skills = SkillScanner.scan(env: f.env)
+        let skills = SkillScanner.scan(root: root, rootLabel: ".codex/skills")
         #expect(skills.map(\.name) == ["real"])
     }
 
