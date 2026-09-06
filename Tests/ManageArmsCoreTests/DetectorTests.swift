@@ -243,3 +243,117 @@ struct AgentSettingTests {
         #expect(inventory.agents[.codex] == .configOnly)   // ~/.codex はあるが CLI は無い
     }
 }
+
+/// DESIGN.md 3.5 — CLI 呼び出しは毎回走らせない。
+/// **不変条件5「キャッシュしない」の唯一の例外**なので、範囲を検査する。
+@Suite("CLI 呼び出しの間引き")
+struct CLIScanTests {
+
+    /// 呼ばれた CLI を数える。並列実行されるので lock で守る。
+    final class Counter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var count = 0
+        var value: Int { lock.withLock { count } }
+        func bump() { lock.withLock { count += 1 } }
+    }
+
+    /// 進められる時計。`Environment.test` の `now` は `@Sendable` なので
+    /// ローカル変数を捕まえて書き換えられない。
+    final class Clock: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = Date(timeIntervalSince1970: 0)
+        func now() -> Date { lock.withLock { value } }
+        func advance(_ seconds: TimeInterval) {
+            lock.withLock { value = value.addingTimeInterval(seconds) }
+        }
+    }
+
+    /// 設定ディレクトリを置いた偽ホーム。無いと走査対象にならず CLI を呼ばない。
+    static func makeHome() throws -> URL {
+        let url = URL(filePath: NSTemporaryDirectory())
+            .appending(path: "manage-arms-cli-\(UUID().uuidString)")
+        for dir in [".claude", ".codex", ".cursor", ".gemini"] {
+            try FileManager.default.createDirectory(
+                at: url.appending(path: dir), withIntermediateDirectories: true)
+        }
+        return url
+    }
+
+    static func makeEnv(_ counter: Counter, clock: Clock = Clock()) throws -> Environment {
+        Environment.test(home: try makeHome(),
+                         run: { _ in counter.bump(); return "" },
+                         now: { clock.now() })
+    }
+
+    @Test("間隔の内側では CLI を呼び直さない")
+    func reusesWithinInterval() throws {
+        let counter = Counter()
+        let environment = try Self.makeEnv(counter)
+        _ = CLIScan.snapshot(env: environment, registry: Registry())
+        let first = counter.value
+        #expect(first > 0, "1 回目で CLI が呼ばれていない")
+        _ = CLIScan.snapshot(env: environment, registry: Registry())
+        #expect(counter.value == first, "間隔の内側なのに呼び直している")
+    }
+
+    @Test("間隔を過ぎたら呼び直す")
+    func refreshesAfterInterval() throws {
+        let counter = Counter()
+        let clock = Clock()
+        let environment = try Self.makeEnv(counter, clock: clock)
+        _ = CLIScan.snapshot(env: environment, registry: Registry())
+        let first = counter.value
+        clock.advance(CLIScan.interval + 1)
+        _ = CLIScan.snapshot(env: environment, registry: Registry())
+        #expect(counter.value > first)
+    }
+
+    /// **押した操作は待たせない。** 管理対象の切り替えや CLI パスの手動指定は、
+    /// 間隔を待たずに効かないと「設定したのに変わらない」に見える。
+    @Test("設定が変わったら間隔を待たずに呼び直す")
+    func settingChangeBypassesInterval() throws {
+        let counter = Counter()
+        let environment = try Self.makeEnv(counter)
+        _ = CLIScan.snapshot(env: environment, registry: Registry())
+        let first = counter.value
+
+        var registry = Registry()
+        registry.update(.codex) { $0.enabled = false }
+        _ = CLIScan.snapshot(env: environment, registry: registry)
+        #expect(counter.value > first)
+    }
+
+    @Test("force は間隔を無視する（明示的な再読み込み）")
+    func forceIgnoresInterval() throws {
+        let counter = Counter()
+        let environment = try Self.makeEnv(counter)
+        _ = CLIScan.snapshot(env: environment, registry: Registry())
+        let first = counter.value
+        _ = CLIScan.snapshot(env: environment, registry: Registry(), force: true)
+        #expect(counter.value > first)
+    }
+
+    /// 偽ホームごとに別の結果を見る（10.3）。ここが漏れるとテストが互いを汚す。
+    @Test("ホームが違えば持ち回さない")
+    func keyedByHome() throws {
+        let counter = Counter()
+        _ = CLIScan.snapshot(env: try Self.makeEnv(counter), registry: Registry())
+        let first = counter.value
+        _ = CLIScan.snapshot(env: try Self.makeEnv(counter), registry: Registry())
+        #expect(counter.value > first)
+    }
+
+    /// **ファイル由来の結果は 1 つも持たない**（不変条件5）。
+    /// 設定ファイル直読みの MCP は毎回読み直す — アプリ自身が書くファイルなので、
+    /// ここを間引くと自分の書き込みが数分反映されない。
+    @Test("持つのは CLI 由来のものだけ")
+    func holdsOnlyCLIResults() throws {
+        let counter = Counter()
+        let environment = try Self.makeEnv(counter)
+        let snapshot = CLIScan.snapshot(env: environment, registry: Registry())
+        for agent in Agent.allCases {
+            if case .cli = agent.mcpSource { continue }
+            #expect(snapshot.mcp[agent] == nil, "\(agent.rawValue) はファイル直読みなのに持っている")
+        }
+    }
+}
