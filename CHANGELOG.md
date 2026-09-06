@@ -14,6 +14,8 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 
 ### Changed
 
+- Settings now has an Appearance option: follow the system, or force light or dark. It applies
+  to the whole app, including the menu bar menu and sheets, and is remembered across launches.
 - Refreshed the app icon: a calmer indigo backdrop with a colour-coded node for each agent, so
   it stays readable at Dock and menu-bar sizes.
 

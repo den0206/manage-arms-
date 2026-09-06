@@ -90,6 +90,8 @@ final class AppModel {
     private(set) var detectsBrowserURLs = false
     /// メニューバー常駐（DESIGN.md 3.5）。
     private(set) var staysInMenuBar = true
+    /// 外観（システム / ライト / ダーク）。
+    private(set) var appearance = Appearance.system
     /// 検知から来た追加候補。ContentView が拾って AddSheet を開く。
     var incomingLead: ToolLead?
     /// メニューバー・⌘, から開きたい画面。ContentView が拾って切り替える。
@@ -99,6 +101,8 @@ final class AppModel {
         let registry = Registry.load(env: .live)
         detectsBrowserURLs = registry.detectsBrowserURLs
         staysInMenuBar = registry.staysInMenuBar
+        appearance = Appearance(stored: registry.appearance)
+        appearance.apply()
         watcher.onAdd = { [weak self] in self?.incomingLead = $0 }
         watcher.onError = { [weak self] in self?.errorMessage = $0 }
         // 許可されずに止まったら、設定も OFF に戻す（ON なのに動かない状態を残さない）。
@@ -119,6 +123,13 @@ final class AppModel {
     func setMenuBarResident(_ on: Bool) {
         staysInMenuBar = on
         save { $0.menuBar = on ? nil : false }            // 既定値（ON）は書き出さない
+    }
+
+    /// 外観の切り替え。既定（システム）は書き出さない。
+    func setAppearance(_ value: Appearance) {
+        appearance = value
+        value.apply()
+        save { $0.appearance = value == .system ? nil : value.rawValue }
     }
 
     private func save(_ change: (inout Registry) -> Void) {

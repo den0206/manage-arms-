@@ -299,3 +299,9 @@
 "メニューバーに常駐する" = "Keep ManageArms in the menu bar";
 "OFFにすると、ウィンドウを閉じた時点でアプリを終了します。常駐中もウィンドウを閉じていれば一覧はメモリから捨てます。" = "When off, ManageArms quits as soon as you close its window. While it stays in the menu bar with the window closed, the scanned list is dropped from memory.";
 "ブラウザ検知" = "Browser detection";
+
+/* Appearance */
+"外観" = "Appearance";
+"システムに合わせる" = "Match system";
+"ライト" = "Light";
+"ダーク" = "Dark";

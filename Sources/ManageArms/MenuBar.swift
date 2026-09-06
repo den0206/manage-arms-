@@ -94,12 +94,22 @@ struct MenuBarIcon: View {
 
 /// 設定画面。**サイドバーの 1 画面**として出す（別ウィンドウにしない）。
 /// メニューバーの「設定…」も ⌘, もここへ来る。
-/// **置くのは利用者が決めることだけ** — 検出結果や表示の好みは持たない（DESIGN.md 4.1）。
+/// **置くのは利用者が決めることだけ** — 検出結果は持たない（DESIGN.md 4.1）。
 struct SettingsView: View {
     let model: AppModel
 
     var body: some View {
         Form {
+            Section {
+                Picker("外観", selection: .init(get: { model.appearance },
+                                               set: { model.setAppearance($0) })) {
+                    ForEach(Appearance.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+            } header: {
+                Text("外観")
+            }
             Section {
                 Toggle("メニューバーに常駐する",
                        isOn: .init(get: { model.staysInMenuBar },

@@ -26,6 +26,39 @@ enum Theme {
     static let glyph: CGFloat = 20
 }
 
+/// 外観の切り替え（DESIGN.md 3.5）。既定はシステム追従で、`registry.json` には
+/// 利用者が選んだときだけ書く。
+///
+/// **`NSApplication.appearance` を差し替える。** `.preferredColorScheme` は
+/// ウィンドウの中しか変えられず、メニューバーのメニュー・シート・パネルが取り残される。
+enum Appearance: String, CaseIterable, Identifiable {
+    case system, light, dark
+
+    var id: Self { self }
+
+    /// `registry.json` の値から。未知の文字列は既定（システム）に倒す。
+    init(stored: String?) { self = Appearance(rawValue: stored ?? "") ?? .system }
+
+    var title: LocalizedStringKey {
+        switch self {
+        case .system: "システムに合わせる"
+        case .light:  "ライト"
+        case .dark:   "ダーク"
+        }
+    }
+
+    /// nil は「システムに合わせる」。
+    var nsAppearance: NSAppearance? {
+        switch self {
+        case .system: nil
+        case .light:  NSAppearance(named: .aqua)
+        case .dark:   NSAppearance(named: .darkAqua)
+        }
+    }
+
+    @MainActor func apply() { NSApplication.shared.appearance = nsAppearance }
+}
+
 /// 動きの語彙。**「動きを減らす」設定を必ず尊重する** — アクセシビリティは削らない。
 /// `Animation?` を返すので、そのまま `.animation(Motion.pop, value:)` に渡せば
 /// 設定が入っている環境では動かなくなる。
