@@ -10,6 +10,8 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-09-06
+
 ### Fixed
 
 - Skill last-used dates now include Claude Code, Codex and Cursor session logs. Existing
@@ -175,5 +177,6 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 - Messages for failed scans, additions and removals are now translated instead of always
   appearing in English.
 
-[Unreleased]: https://github.com/den0206/manage-arms/compare/Ver_0.0.1...HEAD
+[Unreleased]: https://github.com/den0206/manage-arms/compare/Ver_0.1.0...HEAD
+[0.1.0]: https://github.com/den0206/manage-arms/compare/Ver_0.0.1...Ver_0.1.0
 [0.0.1]: https://github.com/den0206/manage-arms/releases/tag/Ver_0.0.1
