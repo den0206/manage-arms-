@@ -163,6 +163,17 @@ struct FetcherTests {
         #expect(Fetcher.identify(dir).isEmpty)
     }
 
+    /// frontmatter が危険な名前を名乗ったら、ディレクトリ名に落として拾う。
+    /// **候補ごと捨てない** — 中身は正しいスキルかもしれない。
+    @Test("危険な name を名乗る SKILL.md はディレクトリ名で拾う")
+    func fallsBackToDirectoryName() throws {
+        let dir = try Self.temp().appending(path: "grilling")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try "---\nname: ../../evil\ndescription: d\n---\n"
+            .write(to: dir.appending(path: "SKILL.md"), atomically: true, encoding: .utf8)
+        #expect(Fetcher.identify(dir).map(\.name) == ["grilling"])
+    }
+
     @Test("何も無ければ候補ゼロ")
     func identifiesNothing() throws {
         let dir = try Self.temp()
@@ -208,6 +219,22 @@ struct InstallerTests {
                               source: GitHubSource(repo: "o/r", branch: "main", subdir: "s/\(name)"),
                               candidates: [candidate])
         }
+    }
+
+    /// **F-1 の回帰テスト。** frontmatter の `name` は取得先が書いた文字列なので、
+    /// そのままパスに使うと管理ルートの外へ書ける（9 章の作成方向の穴）。
+    @Test("名前がパスに解決される候補は導入しない")
+    func rejectsTraversalName() throws {
+        var f = try Fixture()
+        let evil = Candidate(kind: .skill, name: "../../.claude/skills/evil",
+                             description: nil, localURL: f.candidate.localURL)
+        #expect(throws: WriteGuard.Denial.self) {
+            try Installer.install(evil, from: f.staging, env: f.env, registry: &f.registry)
+        }
+        // 管理ルートの外に何も作られていない
+        let escaped = f.env.home.appending(path: ".claude/skills/evil")
+        #expect(!FileManager.default.fileExists(atPath: escaped.path(percentEncoded: false)))
+        #expect(f.registry.resources.isEmpty)
     }
 
     @Test("実体が置かれ registry に取得元が記録され Claude symlink が張られる")
