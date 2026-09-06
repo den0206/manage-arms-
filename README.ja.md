@@ -30,7 +30,7 @@ AI コーディングエージェント（Claude Code / Cursor / Codex / Gemini 
 
 ## インストール
 
-[Releases](https://github.com/den0206/manage-arms/releases) から DMG をダウンロードし、
+[Releases](https://github.com/den0206/manage-arms-releases/releases/latest) から DMG をダウンロードし、
 `ManageArms.app` をアプリケーションフォルダへドラッグする。
 
 DMG から直接起動した場合は、起動時にアプリケーションフォルダへの移動を促す。
@@ -105,8 +105,13 @@ docs/signing.md         Developer ID 署名と公証のセットアップ
 `main` から `release/Ver_X.Y.Z` ブランチを切って push すると、CI がテスト → 署名ビルド →
 公証 → DMG → GitHub Release までを行う。手順とセットアップは [docs/signing.md](docs/signing.md)。
 
+**Release の公開先は別の公開リポジトリ**
+[den0206/manage-arms-releases](https://github.com/den0206/manage-arms-releases)。
+ソースは Private のまま、ダウンロード先だけを公開する。利用者向けの README（英語・日本語）・
+変更履歴・Issue テンプレートもそちらにあり、Release の公開を受けて最新版の表示が自動で追従する。
+
 **署名・公証は必須。** シークレットが 1 つでも欠けていればワークフローは即座に停止し、
-未署名の DMG は作られない。
+未署名の DMG は作られない。既にあるタグは上書きせず、`Ver_X.Y.Z+N` として公開する。
 
 ## 互換性の検証と対応範囲
 

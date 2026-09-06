@@ -150,11 +150,16 @@ CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh                            # .ap
 - **PR ゲート**: `main` 向け PR で `.github/workflows/ci.yml` が「完了の定義」を実行する。
 - **リリース**: `main` から `release/Ver_X.Y.Z` を切って push → `release.yml` が
   テスト → 署名ビルド → `.app` 公証 → DMG → DMG 署名・公証 → Gatekeeper 検証 →
-  GitHub Release 作成 → `main` へ CHANGELOG 反映。
-- **署名・公証は必須。** シークレットが 1 つでも欠けていれば checkout より前に落ちる。
+  **公開リポジトリへ Release 作成** → ソースへ同じタグを付与 → `main` へ CHANGELOG 反映。
+- **配布は `den0206/manage-arms-releases`（公開）、ソースはこのリポジトリ（Private）**
+  （DESIGN 13.8）。利用者向けの README・CHANGELOG・デモ・Issue テンプレートは配布側にあり、
+  Release の公開を受けて配布側の `sync-release-docs.yml` が最新版表示を追従させる。
+  **こちらの README は開発者向け。** 利用者向けの文言を足すなら配布側を直す。
+- **署名・公証・公開は必須。** シークレット（署名 4 + 公証 3 + `RELEASES_TOKEN`）が
+  1 つでも欠けていれば checkout より前に落ちる。
   未署名の DMG は出回ると回収できないので作らせない。手順は `docs/signing.md`。
-- **公開済みリリースは不変。** 同じタグが既にあれば上書きせずジョブを落とす。
-  やり直したいときは新しいパッチ版として出す。
+- **公開済みリリースは不変。** 同じタグが既にあれば上書きせず `Ver_X.Y.Z+N` に採番する。
+  タグの権威は publish 先の公開リポジトリ（ソース側のタグは記録用の写し）。
 - サードパーティ Action は使わない（許可は公式 `actions/checkout` のみ）。
 
 ## 過剰実装のレビュー

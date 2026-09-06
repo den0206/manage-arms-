@@ -5,13 +5,14 @@ AI コーディングエージェント（Claude Code / Cursor / Codex / Gemini 
 を 1 つの GUI で横断管理する macOS アプリ。
 
 - **プラットフォーム**: macOS 26 以降 / SwiftUI
-- **配布**: DMG の直配布（App Sandbox 非対応のため App Store 不可）。13 章
+- **配布**: DMG の直配布（App Sandbox 非対応のため App Store 不可）。公開先は
+  [den0206/manage-arms-releases](https://github.com/den0206/manage-arms-releases)。13 章
 - **状態**: **v1〜v4 実装済み**（Skills / Subagents / Plugins / 使用実績 / MCP / 権限）、
   および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト 322 件
 - **実装**: SPM パッケージ。`swift test` / `CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh`
   （`.xcodeproj` は不要。実 CLI・実ネットワークを使う確認は `MANUAL=1 swift test`）
 - **作業の進め方**: [CLAUDE.md](CLAUDE.md)。利用者向けの入口は [README.md](README.md)
-- **最終更新**: 2026-09-06（外観をライト / ダーク / システムで切り替えられるようにした）
+- **最終更新**: 2026-09-06（配布を公開リポジトリ manage-arms-releases に分け、+N 採番にした）
 
 ---
 
@@ -1722,8 +1723,9 @@ DMG を開いてそのまま起動されることが実際に起きる。その�
 ### 13.6 バージョニングとリリース
 
 - `main` から `release/Ver_X.Y.Z` を切って push すると CI が全部やる
-- **公開済みリリースは不変。** 同じタグが既にあれば上書きせずジョブを落とす
-  （やり直したいときは新しいパッチ版として出す）
+- **配布は公開リポジトリ `den0206/manage-arms-releases`、ソースは Private のまま**（13.8）
+- **公開済みリリースは不変。** 同じタグが既にあれば上書きせず、`X.Y.Z` は保ったまま
+  `+N` を付けて採番する（`Ver_0.0.1` があれば `Ver_0.0.1+1`）
 - `CFBundleShortVersionString` は Apple の形式要件で数値 3 成分のみ。
   再ビルド番号込みの完全版は独自キー `MAFullVersion` に持つ（アップデート確認を作るときに使う）
 - Release 本文は `CHANGELOG.md` の `[Unreleased]` を CI が版見出しへ切り出したもの。
@@ -1735,7 +1737,22 @@ DMG を開いてそのまま起動されることが実際に起きる。その�
 |---|---|
 | **アプリ内自己更新** | 検証を誤ると更新経路がマルウェアの侵入口になる。`codesign -R` の designated requirement、TOCTOU、置換ヘルパー、再起動をまたぐ結果通知と、費用対効果が合わない。まずは「アップデート確認 → リリースページを開く」で止める |
 | Sparkle 等の更新フレームワーク | 依存ライブラリゼロの方針。そもそも自己更新をやらない |
-| 公開リリース専用リポジトリの分離 | ソースを Private にしたまま未認証で Release を読ませるための仕組み。アップデート確認を作るまで不要 |
+
+### 13.8 配布は公開リポジトリ、ソースは Private
+
+DMG は誰でも取れる必要があるが、ソースを公開する必要は無い。そこで
+**Release だけを公開リポジトリ `den0206/manage-arms-releases` に出す**。
+利用者向けドキュメント（README 2 言語・CHANGELOG・デモ GIF・Issue テンプレート）は
+そちらに置き、このリポジトリの README は開発者向けのまま残す。
+
+| 決めたこと | 理由 |
+|---|---|
+| Release の publish 先は `RELEASES_REPO`（公開） | ダウンロード URL を公開したまま、ソースは Private に保てる |
+| `RELEASES_TOKEN`（PAT）で書く | `GITHUB_TOKEN` は自リポジトリにしか書けない |
+| 既存タグの照会も公開リポジトリの `ls-remote` | **タグの権威は publish 先**。ソース側のタグは記録用の写しなので、採番の基準にすると食い違う |
+| 公開後にソースへも同じタグを push | 配布物とビルド元コミットの対応を残す |
+| README の版依存表示はマーカーで囲む | 公開リポジトリの `sync-release-docs.yml` が Release 公開を受けて書き換える。**マーカーの外にベタ書きすると古いまま取り残される** |
+| Release バッジは版を URL に埋めた静的バッジ | 動的バッジは URL が変わらないため、GitHub の画像プロキシが旧版を掴んだままになる |
 
 ---
 

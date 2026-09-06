@@ -107,7 +107,7 @@ xcrun notarytool store-credentials manage-arms-notary \
 - 書き出しパスワード = `MACOS_CERT_PASSWORD`
 - `base64 -i developerID.p12 | pbcopy` → `MACOS_CERT_P12`
 
-## 6. GitHub Secrets（7 つすべて必須）
+## 6. GitHub Secrets（8 つすべて必須）
 
 リポジトリ → Settings → Secrets and variables → Actions
 
@@ -120,8 +120,13 @@ xcrun notarytool store-credentials manage-arms-notary \
 | `NOTARY_APPLE_ID` | Apple ID（メール） |
 | `NOTARY_TEAM_ID` | §1 の Team ID |
 | `NOTARY_PASSWORD` | §4 の App 用パスワード |
+| `RELEASES_TOKEN` | 公開リポジトリ `den0206/manage-arms-releases` に `contents:write` を持つ PAT |
 
 1 つでも欠けると `release.yml` は最初のステップで落ちる（未署名の DMG は作らない）。
+
+`RELEASES_TOKEN` が要るのは、**Release を別リポジトリへ publish する**ため。
+`GITHUB_TOKEN` は自リポジトリにしか書けない。fine-grained PAT なら
+`den0206/manage-arms-releases` のみにスコープを絞り、権限は Contents: Read and write だけでよい。
 
 > 証明書・パスワードは GitHub Secrets にのみ置き、ワークフロー本文・ログには出さない。
 > `base64` の復号は `$RUNNER_TEMP` 上で行い、キーチェーンはジョブ終了で破棄される。
@@ -185,6 +190,11 @@ xcrun notarytool log <submission-id> --keychain-profile manage-arms-notary
    （そのまま Release 本文になる。**手で版見出しへ移さないこと** — CI がやる）
 2. `main` から `release/Ver_X.Y.Z` ブランチを切って push
 3. `release.yml` が シークレット検査 → テスト → 署名ビルド → `.app` 公証・ステープル → DMG →
-   DMG 署名・公証・ステープル → Gatekeeper 検証 → Release 公開 → `main` へ CHANGELOG 反映
-4. 修正が必要なら**新しいパッチ版として出す**。同じ `Ver_X.Y.Z` は上書きせず、
-   タグが既にあればジョブが落ちる（公開済みリリースは不変）
+   DMG 署名・公証・ステープル → Gatekeeper 検証 → **公開リポジトリへ Release 公開** →
+   ソースへ同じタグを付与 → `main` へ CHANGELOG 反映
+4. 公開先は `den0206/manage-arms-releases`（公開）。**ソースはこのまま Private**。
+   利用者はそちらの Releases から DMG を取る
+5. 同じ `Ver_X.Y.Z` が既にあれば、上書きせず `Ver_X.Y.Z+1`、`+2` … と採番して公開する
+   （公開済みリリースは不変。`+N` は同一 `X.Y.Z` の再ビルド番号）
+6. 公開リポジトリ側は Release の公開を受けて `sync-release-docs.yml` が走り、
+   README の最新版表示・バッジ・CHANGELOG・Issue テンプレートの記入例を追従させる

@@ -31,7 +31,7 @@ The design document is [DESIGN.md](DESIGN.md) (Japanese).
 
 ## Install
 
-Download the DMG from [Releases](https://github.com/den0206/manage-arms/releases) and drag
+Download the DMG from [Releases](https://github.com/den0206/manage-arms-releases/releases/latest) and drag
 `ManageArms.app` into your Applications folder.
 
 If you launch it straight from the mounted disk image, the app offers to move itself into
@@ -117,8 +117,15 @@ Push a `release/Ver_X.Y.Z` branch off `main` and CI runs tests → signed build 
 notarization → DMG → GitHub Release. Setup and procedure are in
 [docs/signing.md](docs/signing.md) (Japanese).
 
+**Releases are published to a separate public repository**,
+[den0206/manage-arms-releases](https://github.com/den0206/manage-arms-releases) — the source
+stays private while the downloads stay public. That repository also holds the user-facing
+README (English and Japanese), the changelog and the issue templates, and updates its own
+"latest release" markers whenever a release is published.
+
 **Signing and notarization are mandatory.** If any secret is missing the workflow stops
-immediately; an unsigned DMG is never produced.
+immediately; an unsigned DMG is never produced. A tag that already exists is never
+overwritten — the build is published as `Ver_X.Y.Z+N` instead.
 
 ## Compatibility checks and limitations
 
