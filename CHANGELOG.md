@@ -103,6 +103,11 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 
 ### Fixed
 
+- Pasting a repository root now lists the skills nested under it. Skills laid out as
+  `skills/<category>/<name>` were invisible because only one directory level was searched, and a
+  repository carrying `.claude-plugin/plugin.json` stopped the search entirely — its skills are
+  now listed alongside the plugin. Subagent detection still looks only at the directory you
+  pointed at.
 - Keep same-named resources separate by kind and MCP/plugin registrations separate by agent;
   pin MCP versions only for the selected agent and preserve unrelated Cursor settings.
 - Refuse malformed configuration overwrites and protect bundled paths and links from deletion.

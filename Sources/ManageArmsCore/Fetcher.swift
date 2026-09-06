@@ -214,18 +214,21 @@ public enum Fetcher {
             fm.fileExists(atPath: base.appending(path: path).path(percentEncoded: false))
         }
 
+        // marketplace を兼ねたリポジトリは plugin.json と skills/ の両方を持つ。
+        // どちらかで打ち切ると片方が選べなくなるので、併記して確認画面で選ばせる（6 章）。
+        var found: [Candidate] = []
         if exists(".claude-plugin/plugin.json") {
-            return [Candidate(kind: .plugin, name: base.lastPathComponent,
-                              description: nil, localURL: base)]
+            found.append(Candidate(kind: .plugin, name: base.lastPathComponent,
+                                   description: nil, localURL: base))
         }
         if exists("SKILL.md") {
             let front = FrontmatterParser.read(base.appending(path: "SKILL.md"))
             guard case .parsed(let matter) = front else {
-                return [Candidate(kind: .skill, name: base.lastPathComponent,
-                                  description: nil, localURL: base)]
+                return found + [Candidate(kind: .skill, name: base.lastPathComponent,
+                                          description: nil, localURL: base)]
             }
-            return [Candidate(kind: .skill, name: matter.name ?? base.lastPathComponent,
-                              description: matter.description, localURL: base)]
+            return found + [Candidate(kind: .skill, name: matter.name ?? base.lastPathComponent,
+                                      description: matter.description, localURL: base)]
         }
 
         // `.md` に frontmatter の `tools:` があれば Subagent（6 章）。
@@ -238,21 +241,32 @@ public enum Fetcher {
             return Candidate(kind: .subagent, name: String(file.dropLast(3)),
                              description: matter.description, localURL: url)
         }
-        if !subagents.isEmpty { return subagents }
+        if !subagents.isEmpty { return found + subagents }
 
-        // リポジトリ直下を指された場合、1 階層下に複数のスキルが並んでいることがある
-        // （vercel-labs/skills の skills/ 配下など）。
+        return found + skills(under: base, depth: 3)
+    }
+
+    /// リポジトリ直下を指された場合、スキルは何段か下に並んでいることがある。
+    /// `skills/<name>`（vercel-labs/skills）だけでなく
+    /// `skills/<category>/<name>`（mattpocock/skills）もあるので数段たどる。
+    /// Subagent の判定は指されたディレクトリ直下だけで行う — 下層の `.md` まで
+    /// frontmatter を読むと、ただの文書が候補に混ざる。
+    static func skills(under base: URL, depth: Int) -> [Candidate] {
+        guard depth > 0 else { return [] }
+        let fm = FileManager.default
         let children = (try? fm.contentsOfDirectory(atPath: base.path(percentEncoded: false)))?
             .filter { !$0.hasPrefix(".") }.sorted() ?? []
         return children.flatMap { child -> [Candidate] in
             var isDir: ObjCBool = false
             let url = base.appending(path: child)
             guard fm.fileExists(atPath: url.path(percentEncoded: false), isDirectory: &isDir),
-                  isDir.boolValue,
-                  fm.fileExists(atPath: url.appending(path: "SKILL.md")
-                                          .path(percentEncoded: false))
+                  isDir.boolValue
             else { return [] }
-            return identify(url)
+            if fm.fileExists(atPath: url.appending(path: "SKILL.md")
+                                        .path(percentEncoded: false)) {
+                return identify(url)
+            }
+            return skills(under: url, depth: depth - 1)
         }
     }
 }

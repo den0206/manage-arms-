@@ -122,6 +122,47 @@ struct FetcherTests {
         #expect(found.map(\.name) == ["alpha", "beta"])
     }
 
+    /// mattpocock/skills は `skills/<category>/<name>/SKILL.md`。
+    /// 1 階層しか見ないと 37 個のスキルが 1 つも出てこない。
+    @Test("2 段下に並んだスキルも拾う")
+    func identifiesNested() throws {
+        let dir = try Self.temp()
+        let leaf = dir.appending(path: "skills/productivity/grilling")
+        try FileManager.default.createDirectory(at: leaf, withIntermediateDirectories: true)
+        try "---\nname: grilling\ndescription: d\n---\n"
+            .write(to: leaf.appending(path: "SKILL.md"), atomically: true, encoding: .utf8)
+        #expect(Fetcher.identify(dir).map(\.name) == ["grilling"])
+    }
+
+    /// marketplace 兼スキル置き場のリポジトリ。plugin.json で打ち切ると
+    /// 中のスキルが 1 つも選べなくなる。
+    @Test("plugin.json があってもスキルを打ち切らない")
+    func pluginDoesNotHideSkills() throws {
+        let dir = try Self.temp()
+        let meta = dir.appending(path: ".claude-plugin")
+        try FileManager.default.createDirectory(at: meta, withIntermediateDirectories: true)
+        try "{}".write(to: meta.appending(path: "plugin.json"), atomically: true, encoding: .utf8)
+        let leaf = dir.appending(path: "skills/productivity/grilling")
+        try FileManager.default.createDirectory(at: leaf, withIntermediateDirectories: true)
+        try "---\nname: grilling\ndescription: d\n---\n"
+            .write(to: leaf.appending(path: "SKILL.md"), atomically: true, encoding: .utf8)
+
+        let found = Fetcher.identify(dir)
+        #expect(found.map(\.kind) == [.plugin, .skill])
+        #expect(found.last?.name == "grilling")
+    }
+
+    /// 下層の `.md` まで frontmatter を読むと、ただの文書が候補に混ざる。
+    @Test("Subagent の判定は指されたディレクトリ直下だけ")
+    func subagentsAreNotSearchedDeep() throws {
+        let dir = try Self.temp()
+        let docs = dir.appending(path: "docs")
+        try FileManager.default.createDirectory(at: docs, withIntermediateDirectories: true)
+        try "---\nname: notes\ntools: Read\n---\n"
+            .write(to: docs.appending(path: "notes.md"), atomically: true, encoding: .utf8)
+        #expect(Fetcher.identify(dir).isEmpty)
+    }
+
     @Test("何も無ければ候補ゼロ")
     func identifiesNothing() throws {
         let dir = try Self.temp()

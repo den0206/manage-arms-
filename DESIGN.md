@@ -672,6 +672,13 @@ Cursor は使っているかもしれず、こちらに見えていないだけ�
 
 種別判定は取得した中身を見る: `SKILL.md` があれば Skill、
 `.claude-plugin/plugin.json` があれば Plugin、frontmatter に `tools:` があれば Subagent。
+**Plugin と Skill は排他ではない** — marketplace を兼ねたリポジトリは両方を持つので、
+どちらかで打ち切らず併記して確認画面で選ばせる。
+
+リポジトリ直下を貼られた場合、スキルは何段か下に並んでいる。`skills/<name>`
+（vercel-labs/skills）だけでなく `skills/<category>/<name>`（mattpocock/skills）もあるので
+**3 段までたどる**。Subagent の判定は指されたディレクトリ直下だけで行う —
+下層の `.md` まで frontmatter を読むと、ただの文書が候補に混ざる。
 
 **自動では入れない。** README からのコマンド抽出は必ず外すため、勝手にインストールすると
 初心者ほど詰む。
