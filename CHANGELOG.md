@@ -70,6 +70,8 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 
 ### Changed
 
+- Agent names are shown without an icon in the sidebar, on Home and in the toolbar. The app no
+  longer looks up desktop app icons, so the list no longer depends on which apps are installed.
 - ManageArms now requires macOS 26 or later.
 - Reworked the visual design across every screen. The home screen leads with the add box
   and summarises what you have installed as counts per kind, and each agent is a card you

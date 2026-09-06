@@ -163,58 +163,6 @@ struct ContentView: View {
     }
 }
 
-/// エージェントの目印。**実物のアプリが入っていればそのアイコンを使う。**
-/// ロゴ画像は同梱しない（他社の商標を配布物に入れない・9 章のディスク規律にも反する）。
-/// Codex / Gemini CLI は CLI しか無くアイコンを持たないので SF Symbol に落ちる。
-struct AgentIcon: View {
-    let agent: Agent
-    var size: CGFloat = 16
-
-    var body: some View {
-        if let icon = Self.icons[agent] {
-            Image(nsImage: icon).resizable().frame(width: size, height: size)
-        } else {
-            Image(systemName: agent.symbol)
-                .font(.system(size: size * 0.72))
-                .foregroundStyle(.secondary)
-                .frame(width: size, height: size)
-        }
-    }
-
-    /// 1 度だけ引く。NSWorkspace のアイコンは OS が持っているので自前で持たない（9 章）。
-    static let icons: [Agent: NSImage] = Dictionary(
-        uniqueKeysWithValues: Agent.allCases.compactMap { agent in
-            agent.appBundleID
-                .flatMap { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }
-                .map { (agent, NSWorkspace.shared.icon(forFile: $0.path(percentEncoded: false))) }
-        })
-}
-
-extension Agent {
-    /// デスクトップアプリの bundle id。**無いのが普通** — Claude Code / Codex /
-    /// Gemini CLI はコマンドラインツールで、アイコンを持たない。
-    var appBundleID: String? {
-        switch self {
-        case .claude: "com.anthropic.claudefordesktop"
-        case .cursor: "com.todesktop.230313mzl4w4u92"
-        case .codex, .gemini: nil
-        }
-    }
-
-    /// アプリが無いときの代替。**エージェントごとに変える** —
-    /// 同じアイコンが 4 つ並ぶと、選択中がどれか分からない。
-    /// 色は付けない（無彩色で形だけ変える）— 4 色に塗り分けると、
-    /// 色が状態を表している他の場所（緑=稼働 / 橙=注意）と読み違える。
-    var symbol: String {
-        switch self {
-        case .claude: "asterisk"
-        case .cursor: "cursorarrow"
-        case .codex:  "chevron.left.forwardslash.chevron.right"
-        case .gemini: "sparkle"
-        }
-    }
-}
-
 struct AgentSidebarRow: View {
     let agent: Agent
     let detection: Detection
@@ -222,7 +170,6 @@ struct AgentSidebarRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            AgentIcon(agent: agent, size: 17)
             Text(agent.displayName).lineLimit(1)
             Spacer(minLength: 4)
             if detection == .undetected {
@@ -422,7 +369,6 @@ struct AgentRow: View {
     var body: some View {
         Button(action: open) {
             HStack(spacing: 8) {
-                AgentIcon(agent: agent, size: 18)
                 Text(agent.displayName).font(.callout.weight(.medium))
                 StatusDot(detection: detection)
                 detail
@@ -500,11 +446,6 @@ struct AgentPage: View {
             }
         }
         .navigationTitle(agent.displayName)
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                AgentIcon(agent: agent, size: 18)
-            }
-        }
     }
 
     /// スコープはタブで切り替える。**同時に見せるのは 1 つの表だけ。**
