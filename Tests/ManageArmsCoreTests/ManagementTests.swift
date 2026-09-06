@@ -135,10 +135,13 @@ struct ManagementTests {
         let calls = Recorder()
         let env = Environment.test(home: URL(filePath: "/unused"), run: { argv in
             calls.record(argv)
-            return #"{"installed":[{"pluginId":"demo@market"}]}"#
+            // 削除が効いた CLI を再現する（効かない側は PluginScannerTests）。
+            let removed = calls.all.contains { $0.contains("remove") }
+            return removed ? #"{"installed":[]}"# : #"{"installed":[{"pluginId":"demo@market"}]}"#
         })
         try PluginManager.remove("demo@market", from: .codex, env: env)
-        #expect(calls.all.last == ["codex", "plugin", "remove", "demo@market"])
+        #expect(calls.all.contains(["codex", "plugin", "remove", "demo@market"]))
+        #expect(!calls.all.contains { $0.contains("-s") }, "Codex は -s を受け付けない")
     }
 
     @Test("無効化したSubagentの更新で同名Skillを変更しない")

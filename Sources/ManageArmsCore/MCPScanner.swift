@@ -138,6 +138,14 @@ public enum MCPManager {
             throw Failure.unsupported(agent)
         }
         _ = try env.run(argv)
+        // CLI の終了コードを信用せず、消えたことを読んで確かめる（Plugin と同じ理由）。
+        // **読めなかったときは「消えていない」と決めつけない。** ここで誤って投げると、
+        // remove の直後に add する `MCPPin.pin` が復元前に中断し、
+        // 消えたままになる。残っていると確認できたときだけ失敗にする。
+        if let remaining = try? MCPScanner.read(agent, env: env),
+           remaining.contains(where: { $0.name == name }) {
+            throw MCPScanner.ReadFailure("\(name) は削除されませんでした。エージェントが管理している可能性があります")
+        }
     }
 
     public static func removeProject(_ name: String, project: String, env: Environment) throws {
@@ -160,6 +168,11 @@ public enum MCPManager {
         }
         let argv = ["claude", "mcp", "remove", name, "-s", scope]
         _ = try env.run(["sh", "-c", "cd " + ResourceRow.quote(project) + " && " + argv.map(ResourceRow.quote).joined(separator: " ")])
+        // `byProject` は project と local を 1 つの表に畳むので、同名が両方にあると
+        // 消した側の有無を nil では判定できない。**消したスコープが残っているか**で見る。
+        guard MCPScanner.byProject(env: env)[project]?[name] != scope else {
+            throw MCPScanner.ReadFailure("\(name) は削除されませんでした。エージェントが管理している可能性があります")
+        }
     }
 
     public static func validate(_ server: MCPServer, for agent: Agent) throws {

@@ -63,6 +63,35 @@ struct PluginScannerTests {
         #expect(found.first { $0.id.hasPrefix("mine") }?.isBundled == false)
     }
 
+    /// **保護メタデータの名前を当てにいかない。** 新しい印が付いた瞬間に
+    /// また「消えない削除」を出すことになるので、消えたことを読んで確かめる。
+    @Test("CLIが成功しても消えていなければ失敗にする")
+    func removeVerifiesEffect() throws {
+        let home = URL(filePath: NSTemporaryDirectory())
+            .appending(path: "manage-arms-plug-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        // `codex plugin remove` は 0 を返すが一覧は変わらない、を再現する。
+        let env = Environment.test(home: home, run: { _ in Self.codexJSON })
+
+        #expect(throws: (any Error).self) {
+            try PluginManager.remove("mine@my-marketplace", from: .codex, env: env)
+        }
+    }
+
+    /// 実行後の確認でも失敗にはなるが、**破壊的なコマンドを走らせないこと**が要点。
+    @Test("既定で入っているPluginは削除コマンドを実行しない")
+    func bundledIsNotRemovable() throws {
+        let calls = Recorder()
+        let env = Environment.test(home: URL(filePath: "/unused"), run: { argv in
+            calls.record(argv); return Self.codexJSON
+        })
+        #expect(throws: (any Error).self) {
+            try PluginManager.remove("plugin-management@openai-curated-remote",
+                                     from: .codex, env: env)
+        }
+        #expect(!calls.all.contains { $0.contains("remove") })
+    }
+
     /// **このアプリ最大の見せ場**（5.2）。実測: ponytail が 5 プロジェクトに個別導入。
     @Test("同一プラグインの複数プロジェクト重複を検出する")
     func findsDuplicates() throws {

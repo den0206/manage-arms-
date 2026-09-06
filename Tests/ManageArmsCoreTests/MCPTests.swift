@@ -151,7 +151,8 @@ struct MCPCommandTests {
 @Suite("MCP の走査と Cursor の直接編集")
 struct MCPScannerTests {
 
-    static func fixture(_ files: [String: String]) throws -> Environment {
+    static func fixture(_ files: [String: String],
+                        run: @escaping @Sendable ([String]) -> String = { _ in "[]" }) throws -> Environment {
         let home = URL(filePath: NSTemporaryDirectory())
             .appending(path: "manage-arms-mcp-\(UUID().uuidString)")
         let fm = FileManager.default
@@ -162,7 +163,7 @@ struct MCPScannerTests {
                                    withIntermediateDirectories: true)
             try body.write(to: url, atomically: true, encoding: .utf8)
         }
-        return Environment.test(home: home, run: { _ in "[]" })
+        return Environment.test(home: home, run: run)
     }
 
     @Test("4 エージェントぶんを読む")
@@ -215,6 +216,57 @@ struct MCPScannerTests {
         ])
         try MCPManager.remove("a", from: .cursor, env: env)
         #expect(MCPScanner.scan(env: env)[.cursor]?.map(\.name) == ["b"])
+    }
+
+    /// CLI の終了コードを信用しない。Plugin と同じ理由（DESIGN 3.1）。
+    @Test("CLIが成功しても消えていなければ失敗にする")
+    func removeVerifiesEffect() throws {
+        let env = try Self.fixture([:], run: { command in
+            command == ["codex", "mcp", "list", "--json"]
+                ? #"[{"name":"a","command":"x"}]"# : ""
+        })
+        #expect(throws: (any Error).self) { try MCPManager.remove("a", from: .codex, env: env) }
+    }
+
+    /// **確認が失敗しても削除を失敗にしない。** ここで投げると `MCPPin.pin` が
+    /// remove の直後に中断し、復元されないまま消える。
+    @Test("削除後の確認が読めなくても成功にする")
+    func removeSucceedsWhenUnreadable() throws {
+        // 削除前は読めて、削除後だけ読めない CLI を演じる。
+        let calls = Recorder()
+        let env = try Self.fixture([:], run: { command in
+            calls.record(command)
+            guard command == ["codex", "mcp", "list", "--json"] else { return "" }
+            return calls.all.contains { $0.contains("remove") }
+                ? "not json" : #"[{"name":"a","command":"x"}]"#
+        })
+        try MCPManager.remove("a", from: .codex, env: env)
+    }
+
+    /// `byProject` は project と local を 1 つの表に畳む。nil で見ると、
+    /// 同名が両方にあるときに「消えていない」と誤判定する。
+    @Test("同名が project と local の両方にあっても成功にする")
+    func removeProjectWithBothScopes() throws {
+        let home = URL(filePath: NSTemporaryDirectory())
+            .appending(path: "manage-arms-mcp-\(UUID().uuidString)")
+        let project = home.appending(path: "work/app")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        let path = project.path(percentEncoded: false)
+        try #"{"mcpServers":{"shared":{"command":"x"}}}"#
+            .write(to: project.appending(path: ".mcp.json"), atomically: true, encoding: .utf8)
+        try JSONSerialization
+            .data(withJSONObject: ["projects": [path: ["mcpServers": ["shared": ["command": "x"]]]]])
+            .write(to: home.appending(path: ".claude.json"))
+
+        // 呼ばれたら local を消す CLI を演じる（project 側の "shared" は残る）。
+        let env = Environment.test(home: home, run: { _ in
+            try? JSONSerialization
+                .data(withJSONObject: ["projects": [path: ["mcpServers": [String: Any]()]]])
+                .write(to: home.appending(path: ".claude.json"))
+            return ""
+        })
+        #expect(MCPScanner.byProject(env: env)[path]?["shared"] == "local", "local が project を上書きする")
+        try MCPManager.removeProject("shared", project: path, env: env)
     }
 
     @Test("ファイルが無くても追加できる")

@@ -7,7 +7,7 @@ AI コーディングエージェント（Claude Code / Cursor / Codex / Gemini 
 - **プラットフォーム**: macOS 26 以降 / SwiftUI
 - **配布**: DMG の直配布（App Sandbox 非対応のため App Store 不可）。13 章
 - **状態**: **v1〜v4 実装済み**（Skills / Subagents / Plugins / 使用実績 / MCP / 権限）、
-  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト 303 件
+  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト 308 件
 - **実装**: SPM パッケージ。`swift test` / `CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh`
   （`.xcodeproj` は不要。実 CLI・実ネットワークを使う確認は `MANUAL=1 swift test`）
 - **作業の進め方**: [CLAUDE.md](CLAUDE.md)。利用者向けの入口は [README.md](README.md)
@@ -972,6 +972,33 @@ Plugin だけは例外がある。**Codex は自社の既定プラグインを C
 消してもエージェントが入れ直すものに削除ボタンを出すことになる
 （`codex plugin remove` は成功を返すが消えないことを実測で確認）。
 
+#### 既定判定の裏取り（2026-09-06 実測）
+
+| 種別 | エージェント | 根拠 | 実測 |
+|---|---|---|---|
+| Skill | Cursor | `~/.cursor/skills-cursor` | ✅ 24 件 |
+| Skill | Cursor | `~/.cursor/cloud-skills` | このマシンには未生成 |
+| Skill | Codex | `~/.codex/skills/.system` | ✅ 6 件（`imagegen` / `openai-docs` / `plugin-creator` / `review-agent` / `skill-creator` / `skill-installer`） |
+| Skill | Claude | — | 同梱スキル（`/doctor` `/code-review` 等）は CLI の中にあり、走査ルートに現れない |
+| Subagent | 全部 | — | `Explore` / `Plan` / `general-purpose` は CLI 内蔵。`~/.claude/agents` は空 |
+| Plugin | Codex | `installPolicy: INSTALLED_BY_DEFAULT` | ✅ 3 件 |
+| Plugin | Claude | `isBuiltIn` / `managed` / `scope: managed` | ⚠️ **未観測**（実際の出力にこれらのキーは無い） |
+| MCP | 全部 | `isBuiltIn` / `managed` | ⚠️ **未観測**（このマシンに MCP 登録は 0 件） |
+
+**⚠️ の 2 つは、印の名前を当てにいっている状態。** 名前を増やしても同じことが繰り返される
+（`installPolicy` を知らなかったのがまさにそれ）。そこで**判定を厚くするのではなく、
+効果を確かめる**方に寄せる: Plugin と MCP の削除は CLI の終了コードを信用せず、
+実行後にもう一度読んで消えたことを確認し、残っていればエラーにする
+（`PluginManager.remove` / `MCPManager.remove` / `MCPManager.removeProject`）。
+どの CLI がどんな印を新しく付けても、「消えない削除」だけは必ず表に出る。
+`bundled` の分類は引き続き**実測した印だけ**で行い、語感で推測しない。
+
+**確認は「残っていると読めたとき」だけ失敗にする。** 読めなかったのを失敗と混ぜると、
+`MCPPin.pin`（remove → add）が復元前に中断して設定が消えたままになる。
+プロジェクト側は `byProject` が project と local を 1 つの表に畳むので、
+名前の有無ではなく**消したスコープが残っているか**で見る
+（同名が両方にあると、片方を消しただけで「消えていない」と誤判定する）。
+
 ### スコープの見せ方（5.1）— タブで 1 つずつ
 
 **1 つの表にユーザー全体とプロジェクトを混ぜない。** 混ぜると
@@ -1663,7 +1690,8 @@ DMG を開いてそのまま起動されることが実際に起きる。その�
   同梱領域・Plugin配下へのリンクを拒否する。リンク先の実体は削除しない。
   アプリ管理下の共有リソースは従来の切替を残し「共有先すべてで有効」と明示する。
 - 同梱SkillはCursorの既知ルートとCodex `.codex/skills/.system` を保護する。
-  MCP/Pluginで `isBuiltIn` / `managed` 等の保護メタデータを得た場合も変更を拒否する。
+  MCP/Pluginで `isBuiltIn` / `managed` / `installPolicy: INSTALLED_BY_DEFAULT` 等の
+  保護メタデータを得た場合も変更を拒否する。
   初回検出や公式配布元というだけでは同梱と推測しない。未知の同梱形式の判定には
   Agent側が提供する情報の追加検証が必要。
 - MCP/Pluginの行はAgent別の識別子を持つ。registryは名前と種別の組で更新する。

@@ -105,10 +105,13 @@ public enum PluginManager {
         }
     }
 
+    /// 削除したはずの 1 件を指す述語。実行前後で同じものを見る。
+    static func target(_ name: String, project: String?) -> (InstalledPlugin) -> Bool {
+        { $0.id == name && $0.projectPath == project && (project != nil || $0.scope == "user") }
+    }
+
     public static func remove(_ name: String, from agent: Agent, project: String? = nil, env: Environment) throws {
-        let found = try PluginScanner.read(agent, env: env).filter {
-            $0.id == name && $0.projectPath == project && (project != nil || $0.scope == "user")
-        }
+        let found = try PluginScanner.read(agent, env: env).filter(target(name, project: project))
         guard found.count == 1, let plugin = found.first, !plugin.isBundled,
               !name.hasPrefix("-") else { throw MCPScanner.ReadFailure("削除対象のPluginが見つからないか、複数該当するか、保護されています") }
         var argv = [agent.cliName!, "plugin", "remove", name]
@@ -125,6 +128,15 @@ public enum PluginManager {
             _ = try env.run(["sh", "-c", "cd " + ResourceRow.quote(project) + " && " + argv.map(ResourceRow.quote).joined(separator: " ")])
         } else {
             _ = try env.run(argv)
+        }
+        // **CLI の終了コードを信用しない。** エージェント既定の Plugin は
+        // `codex plugin remove` が成功を返しても消えない（実測）。保護メタデータの
+        // 名前を当てにいくと、新しい印が付いた瞬間にまた「消えない削除」を出す。
+        // どの CLI でも効く保証は、消えたことをもう一度読んで確かめること（3.1）。
+        // 読めなかったときは「消えていない」と決めつけない（`MCPManager.remove` と同じ）。
+        if let remaining = try? PluginScanner.read(agent, env: env),
+           remaining.contains(where: target(name, project: project)) {
+            throw MCPScanner.ReadFailure("\(name) は削除されませんでした。エージェントが既定で入れているPluginの可能性があります")
         }
     }
 }

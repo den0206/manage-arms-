@@ -108,6 +108,12 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 
 ### Fixed
 
+- Removing an MCP server or a plugin now confirms it is actually gone instead of trusting the
+  CLI's exit code, and reports a failure when it is still there. Agent-default entries can report
+  success without being removed, which previously left the row in place with no explanation.
+  The confirmation only reports a failure when the entry can be read back and is still present,
+  so an unreadable list is never mistaken for a failed removal, and removing a project-scoped
+  server no longer reports failure when a server of the same name also exists at project scope.
 - Codex plugins that ship installed by default (`installPolicy: INSTALLED_BY_DEFAULT`, the
   `openai-curated-remote` set) are now grouped under Bundled and shown as protected. They were
   listed user-wide with a Remove button, which buried the plugins you installed yourself and

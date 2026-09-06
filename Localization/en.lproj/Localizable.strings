@@ -246,6 +246,8 @@
 "MCPサーバー定義が不正です" = "An MCP server definition is invalid.";
 "MCP接続名が不正です" = "The MCP connection name is invalid.";
 "このMCPサーバーはエージェントが管理しています" = "This MCP server is managed by the agent.";
+"%@ は削除されませんでした。エージェントが既定で入れているPluginの可能性があります" = "%@ was not removed. The agent may install this plugin by default.";
+"%@ は削除されませんでした。エージェントが管理している可能性があります" = "%@ was not removed. The agent may be managing it.";
 "MCPの適用範囲が不明です。変更していません" = "The MCP scope is unknown. Nothing was changed.";
 "プロジェクトのMCP設定を読み取れません" = "The project MCP configuration could not be read.";
 "プロジェクトの設定が見つかりません" = "The project configuration is missing.";
