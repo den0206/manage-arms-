@@ -46,7 +46,9 @@ public enum Exec {
         public let code: Int32
         public let stderr: String
         public var description: String {
-            "`\(command.prefix(3).joined(separator: " "))` が終了コード \(code) で失敗: \(stderr)"
+            // 補間の中に文字列リテラルを置かない（検査スクリプトが文言を抽出できなくなる）。
+            let head = command.prefix(3).joined(separator: " ")
+            return String(localized: "`\(head)` が終了コード \(Int(code)) で失敗: \(stderr)")
         }
     }
 

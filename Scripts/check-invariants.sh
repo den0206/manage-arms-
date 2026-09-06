@@ -77,6 +77,17 @@ else
     echo "✓ ローカライズのキー集合は ja / en で一致しています（$(grep -c '^"' Localization/ja.lproj/Localizable.strings) キー）"
 fi
 
+# **キー集合の一致だけでは足りない。** 「ja にも en にも無い」文言は上の検査を素通りする。
+# 実際 `WriteGuard.Denial` などの Core 層のエラー文は、どちらにも登録されないまま
+# 英語 UI に日本語で出ていた（`String` を返すプロパティは SwiftUI が自動で引かない）。
+# こちらは Sources 側から見て「UI に届く文言が実際に翻訳されるか」を検査する。
+UNTRANSLATED=$(python3 Scripts/check-localization.py)
+if [ -n "$UNTRANSLATED" ]; then
+    fail "Localizable.strings で引けない日本語リテラルがあります（英語 UI に日本語のまま出ます）" "$UNTRANSLATED"
+else
+    echo "✓ Sources の日本語リテラルはすべて Localizable.strings で引けます"
+fi
+
 # --- 4. Apple Events の限定（DESIGN.md 3.5 の例外 / 6 章）------------------------
 # ブラウザの URL を読むのはこの機能だけ。ここが散ると「監視しない」という前提が
 # 静かに崩れ、利用者が見ているページをアプリの各所が読める状態になる。

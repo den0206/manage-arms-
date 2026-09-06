@@ -8,8 +8,10 @@ public enum Installer {
         case unsupportedKind(Kind)
         public var description: String {
             switch self {
-            case .alreadyInstalled(let n): "\(n) は既に入っています"
-            case .unsupportedKind(let k):  "\(k.rawValue) の追加はまだ対応していません"
+            case .alreadyInstalled(let n):
+                String(localized: "\(n) は既に入っています")
+            case .unsupportedKind(let k):
+                String(localized: "\(k.rawValue) の追加はまだ対応していません")
             }
         }
     }

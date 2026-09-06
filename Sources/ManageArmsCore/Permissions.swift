@@ -15,8 +15,9 @@ public struct PermissionEntry: Identifiable, Equatable, Sendable {
     public let isMachineSpecific: Bool
 
     public var id: String { "\(file.path(percentEncoded: false))|\(bucket.rawValue)|\(value)" }
+    /// **`String` を返すので SwiftUI は自動で引かない**（CLAUDE.md「ローカライズ」）。
     public var scopeName: String {
-        project.map { ($0 as NSString).lastPathComponent } ?? "ユーザー全体"
+        project.map { ($0 as NSString).lastPathComponent } ?? String(localized: "ユーザー全体")
     }
 
     public init(project: String?, file: URL, bucket: Bucket, value: String,

@@ -11,8 +11,10 @@ public enum SkillManager {
         case alreadyExists(String)
         public var description: String {
             switch self {
-            case .notFound(let n):      "\(n) が見つかりません"
-            case .alreadyExists(let p): "\(p) に既に別のものがあります。上書きしません"
+            case .notFound(let n):
+                String(localized: "\(n) が見つかりません")
+            case .alreadyExists(let p):
+                String(localized: "\(p) に既に別のものがあります。上書きしません")
             }
         }
     }

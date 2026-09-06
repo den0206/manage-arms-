@@ -526,10 +526,10 @@ public struct Inventory: Sendable {
     static func mcpDetail(_ server: MCPServer?) -> String {
         guard let server else { return "" }
         if let package = server.floatingPackage {
-            return "⚠️ \(package)@latest — 起動ごとに最新を取得（サイレントに壊れる可能性）"
+            return String(localized: "⚠️ \(package)@latest — 起動ごとに最新を取得（サイレントに壊れる可能性）")
         }
         if case .http = server.transport { return "HTTP" }
-        return "バージョン固定済み"
+        return String(localized: "バージョン固定済み")
     }
 
     // MARK: - Plugins（読み取りのみ。書き込みは CLI に委譲。3.1）
@@ -558,24 +558,31 @@ public struct Inventory: Sendable {
                              duplicates: [String: [InstalledPlugin]]) -> String {
         var parts: [String] = []
         if let dupes = duplicates[id] {
-            parts.append("⚠️ \(dupes.count) プロジェクトに重複導入")
+            parts.append(String(localized: "⚠️ \(dupes.count) プロジェクトに重複導入"))
         } else if let scope = found.first?.scope {
-            parts.append(scope == "user" ? "ユーザー全体" : "このプロジェクト")
+            parts.append(scope == "user"
+                ? String(localized: "ユーザー全体") : String(localized: "このプロジェクト"))
         }
-        if found.contains(where: \.autoUpdate) { parts.append("自動更新") }
+        if found.contains(where: \.autoUpdate) { parts.append(String(localized: "自動更新")) }
         return parts.joined(separator: " · ")
     }
 
-    static let parkedLabel = "無効化（退避中）"
+    /// 退避中であることを示す擬似ルート名。**`roots` の値としても使う**ので、
+    /// 実在のルート（`.agents/skills` など）と衝突しない文字列にしておく。
+    static let parkedLabel = String(localized: "無効化（退避中）")
 
     static func detail(_ found: [Skill]) -> String {
         found.map { skill in
             switch skill.status {
             case .ok: skill.root
-            case .brokenLink: "\(skill.root)（リンク切れ）"
-            case .noSkillFile: "\(skill.root)（SKILL.md なし）"
-            case .truncatedFrontmatter: "\(skill.root)（frontmatter が 4 KB を超過）"
-            case .missingFrontmatter: "\(skill.root)（frontmatter なし）"
+            case .brokenLink:
+                String(localized: "\(skill.root)（リンク切れ）")
+            case .noSkillFile:
+                String(localized: "\(skill.root)（SKILL.md なし）")
+            case .truncatedFrontmatter:
+                String(localized: "\(skill.root)（frontmatter が 4 KB を超過）")
+            case .missingFrontmatter:
+                String(localized: "\(skill.root)（frontmatter なし）")
             }
         }
         .sorted()
