@@ -8,7 +8,8 @@ AI コーディングエージェント（Claude Code / Cursor / Codex / Gemini 
 - **配布**: DMG の直配布（App Sandbox 非対応のため App Store 不可）。公開先は
   [den0206/manage-arms-releases](https://github.com/den0206/manage-arms-releases)。13 章
 - **状態**: **v1〜v4 実装済み**（Skills / Subagents / Plugins / 使用実績 / MCP / 権限）、
-  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト 322 件
+  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト定義 339 件
+  （`@Test` の数。`arguments:` 付きは実行時にさらに分かれる）
 - **実装**: SPM パッケージ。`swift test` / `CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh`
   （`.xcodeproj` は不要。実 CLI・実ネットワークを使う確認は `MANUAL=1 swift test`）
 - **作業の進め方**: [CLAUDE.md](CLAUDE.md)。利用者向けの入口は [README.md](README.md)
@@ -223,7 +224,14 @@ enum Source {
   代わりに `NSApplication.didBecomeActiveNotification` で再スキャンする。
   ただし **CLI 呼び出し（`claude mcp list` は node 起動を伴い秒単位）は毎回走らせない** —
   ファイル走査はアクティブ化ごと、CLI 呼び出しは前回から一定間隔
-  （数分）空いた時だけ再実行する
+  （数分）空いた時だけ再実行する。実装は `CLIScan`（`interval` 180 秒）で、
+  **不変条件5「キャッシュしない」の唯一の例外**。持つのは CLI に訊かないと
+  分からないことだけで、設定ファイル直読みの結果は 1 つも入れない
+  （アプリ自身が `~/.cursor/mcp.json` を書くため、間引くと自分の書き込みが
+  数分反映されない）。ウィンドウを閉じたら `releaseForBackground` が捨てる。
+  管理対象の切り替え・CLI パスの手動指定・CLI を伴う削除の直後と、
+  ツールバーの再読み込みは `forceCLI` で間隔を飛ばす —
+  **押した操作が効かないのは、待たされるより悪い**
 - **メニューバーに常駐する（既定 ON、設定で OFF にできる）。** ブラウザ検知は
   ウィンドウを閉じている間こそ効く機能なので、閉じたら終了する形とは両立しない。
   OFF にすれば `applicationShouldTerminateAfterLastWindowClosed` が true に戻り、
@@ -1244,6 +1252,12 @@ Cursor の MCP に `claude mcp remove chrome-devtools` を出すことになり�
 削除前の中身は `~/Library/Application Support/ManageArms/permission-backups/`
 に残す。**プロジェクト側に `.bak` を作らない** — git status に出てしまう。
 
+**設定ファイル 1 つあたり 5 世代まで**（`PermissionWriter.generations`）。
+編集のたびに増やし続けると、ストレージの規律（9 章）を自分で破ることになる。
+ファイル名は `<ISO8601>__<slug>`。区切りが `__` なのは slug がパス由来で `-` を
+含むためで、`-` で区切ると同じ設定ファイルの世代をまとめられない。
+0.1.0 が書いた旧形式（区切り無し）は**帰属を判定できないので刈らない**。
+
 ---
 
 ## 9. アプリ自身のリソース規律
@@ -1308,11 +1322,27 @@ SwiftUI / AppKit の共有ページを含むため 150 MB 前後になり、ア�
 **「触ってよい対象の限定」**で行う。3.4 の走査範囲と同じ発想で、
 新しいリソース種別を足しても安全側に倒れる。
 
-**アプリが削除・移動してよいのは次の 2 つだけ:**
+**アプリが削除・移動してよいのは次の 3 つだけ:**
 
 1. **自分が張った symlink** — リンク先が `~/.agents/skills/` 配下であることを
    `resolvingSymlinksInPath` で検証したもののみ
 2. **`registry.json` に載っている実体** — `~/.agents/skills/<name>/`
+3. **自分が書いた権限バックアップ** — `permission-backups/` 直下の通常ファイルのみ
+   （`WriteGuard.assertAppBackup`。世代刈りのためだけに要る）
+
+**削除・移動だけでは足りない。作成もガードを通す。**
+`assertMutable` は既にあるものを壊す操作しか見ていないため、
+**取得物が名乗った名前**（`SKILL.md` の frontmatter の `name`）が
+そのままパス要素になる経路に穴が空いていた。`../../` を含む名前を名乗れば
+`skillStore.appending(path:)` が管理ルートの外を指す。
+`WriteGuard.assertValidName` を `Fetcher` の候補生成・`Installer.install`・
+`ManagedLifecycle` の各入口で通す（`check-invariants.sh` が呼び出しを検査する）。
+
+**壊す前に検査を全部済ませる。** `disable` / `remove` は以前 symlink を先に外して
+いたため、その後の `guard` で失敗すると「Claude からは消えたのに registry は
+有効のまま」という、画面から追えない食い違いが残った。破壊の順序は
+**実体の退避 → symlink の解除**にする — 途中で失敗しても残るのはリンク切れで、
+一覧が「読み込めません」として拾える。
 
 これ以外は一切触らない。特に **`registry.json` に無いスキル**
 （`vercel-labs/skills` が入れた `find-skills` など）は

@@ -247,7 +247,7 @@ final class AppModel {
     /// registry に載っているものだけ — 他ツールが入れたものは WriteGuard が弾く。
     func remove(_ row: ResourceRow) {
         guard row.isManaged, !isChecking, !isAnalyzing else { return }
-        mutate { try Inventory.remove(row, env: .live) }
+        mutate { _ = try Inventory.remove(row, env: .live) }
     }
 
     /// 明示的な「更新を確認」。起動時の自動チェックはしない（DESIGN.md 7.3）。
