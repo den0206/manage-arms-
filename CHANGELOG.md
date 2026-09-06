@@ -10,6 +10,11 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 
 ## [Unreleased]
 
+### Fixed
+
+- Skill last-used dates now include Claude Code, Codex and Cursor session logs. Existing
+  registries backfill newly supported sources on the next usage analysis.
+
 ## [0.0.1] — 2026-09-06
 
 ### Changed

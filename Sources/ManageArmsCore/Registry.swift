@@ -50,12 +50,28 @@ public struct Registry: Codable, Equatable, Sendable {
     }
 
     public struct Usage: Codable, Equatable, Sendable {
-        /// ここまでのログは集計済み。次回はこれより新しいファイルだけ読む。
+        /// 最後に全 Agent の集計を完了した時刻。画面の「未集計」判定に使う。
         /// `nil` は「未集計」。**「一度も使われていない」と区別する**（5.3）。
         public var scannedUpTo: Date?
         public var lastUsed: [String: Date] = [:]
-        public init(scannedUpTo: Date? = nil, lastUsed: [String: Date] = [:]) {
-            self.scannedUpTo = scannedUpTo; self.lastUsed = lastUsed
+        /// ログ形式ごとの増分走査位置。新しい Agent を足した初回だけ全走査する。
+        public var scannedSources: [String: Date] = [:]
+
+        public init(scannedUpTo: Date? = nil, lastUsed: [String: Date] = [:],
+                    scannedSources: [String: Date] = [:]) {
+            self.scannedUpTo = scannedUpTo
+            self.lastUsed = lastUsed
+            self.scannedSources = scannedSources
+        }
+
+        enum CodingKeys: String, CodingKey { case scannedUpTo, lastUsed, scannedSources }
+
+        public init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            scannedUpTo = try c.decodeIfPresent(Date.self, forKey: .scannedUpTo)
+            lastUsed = try c.decodeIfPresent([String: Date].self, forKey: .lastUsed) ?? [:]
+            scannedSources = try c.decodeIfPresent([String: Date].self,
+                                                    forKey: .scannedSources) ?? [:]
         }
     }
 

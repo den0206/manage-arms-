@@ -3,7 +3,7 @@ import Foundation
 /// 読み取ってよい場所の全列挙。DESIGN.md 3.4 —
 /// 除外リストではなくホワイトリストにすることで、新しいディレクトリが増えても踏まない。
 ///
-/// ここに載らないパスは存在しても一生読まない。特に `~/.claude/projects`（129 MB）、
+/// ここに載らないパスは存在しても一生読まない。特に各 Agent のセッションログや
 /// `~/.codex/logs_2.sqlite`（44 MB）、`file-history`（17 MB）を踏むと UI が固まる。
 public enum Source: Equatable, Sendable {
     case file(Root, String)
@@ -16,9 +16,9 @@ public enum Source: Equatable, Sendable {
 extension Source {
     /// 走査対象の全ケース。`SourceTests` がこの列挙を検査する。
     ///
-    /// **使用実績ログ（`~/.claude/projects`）はここに入れない。**
+    /// **使用実績ログ（Claude / Codex / Cursor）はここに入れない。**
     /// 読むのは `UsageScanner` だけで、明示的な「使用状況を分析」からしか呼ばれない
-    /// （3.9）。一覧スキャンがあの 140 MB を踏むと 3.4 の前提が崩れる。
+    /// （3.9）。一覧スキャンが大量の履歴を踏むと 3.4 の前提が崩れる。
     public static let all: [Source] = skills + subagents + mcp + plugins + app
 
     /// 走査するスキルルート。**各 `Agent.skillRoots` の和集合**（3.2 の実測表）。

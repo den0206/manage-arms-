@@ -21,6 +21,67 @@ struct UsageTests {
         #expect(date == UsageScanner.date(from: "2026-09-04T23:02:11.123Z"))
     }
 
+    @Test("Codex の明示 Skill 呼び出しを取る")
+    func parsesCodexSkill() throws {
+        let parsed = UsageScanner.parse(Self.line("""
+        {"timestamp":"2026-09-06T04:30:22.976Z","type":"event_msg","payload":{
+        "type":"item_completed","item":{"type":"UserMessage","content":
+        [{"type":"skill","name":"improve-codebase-architecture","path":"/x/SKILL.md"}]}}}
+        """))
+        let (_, names) = try #require(parsed)
+        #expect(names == ["improve-codebase-architecture"])
+    }
+
+    @Test("Codex の暗黙 Skill 読み込みを取る")
+    func parsesCodexSkillRead() throws {
+        let (_, names) = try #require(UsageScanner.parse(Self.line(#"""
+        {"timestamp":"2026-09-06T04:30:38Z","payload":{"type":"custom_tool_call",
+        "name":"exec","input":"const r = tools.exec_command({\"cmd\":\"sed -n '1,200p' /Users/me/.agents/skills/grilling/SKILL.md\"})"}}
+        """#)))
+        #expect(names == ["grilling"])
+
+        let (_, unquotedNames) = try #require(UsageScanner.parse(Self.line(#"""
+        {"timestamp":"2026-09-06T04:30:38Z","payload":{"type":"custom_tool_call",
+        "name":"exec","input":"tools.exec_command({cmd:\"cat /Users/me/.agents/skills/grilling/SKILL.md\"})"}}
+        """#)))
+        #expect(unquotedNames == ["grilling"])
+    }
+
+    @Test("Codex の Skill ファイル操作を使用と誤認しない")
+    func ignoresCodexSkillWrite() {
+        #expect(UsageScanner.parse(Self.line(#"""
+        {"timestamp":"2026-09-06T04:30:38Z","payload":{"type":"custom_tool_call",
+        "name":"exec","input":"git add /Users/me/.agents/skills/grilling/SKILL.md"}}
+        """#)) == nil)
+        #expect(UsageScanner.parse(Self.line(#"""
+        {"timestamp":"2026-09-06T04:30:38Z","payload":{"type":"custom_tool_call",
+        "name":"exec","input":"tools.exec_command({cmd:\"cat > /Users/me/.agents/skills/grilling/SKILL.md\"})"}}
+        """#)) == nil)
+        #expect(UsageScanner.parse(Self.line(#"""
+        {"timestamp":"2026-09-06T04:30:38Z","payload":{"type":"custom_tool_call",
+        "name":"exec","input":"tools.exec_command({cmd:\"sed -i '' /Users/me/.agents/skills/grilling/SKILL.md\"})"}}
+        """#)) == nil)
+    }
+
+    @Test("Codex の patch 内にある Skill 例を使用と誤認しない")
+    func ignoresCodexSkillExampleInPatch() {
+        #expect(UsageScanner.parse(Self.line(#"""
+        {"timestamp":"2026-09-06T04:30:38Z","payload":{"type":"custom_tool_call",
+        "name":"exec","input":"const patch = \"sed /x/cursor-skill/SKILL.md\"; tools.apply_patch(patch)"}}
+        """#)) == nil)
+    }
+
+    @Test("Cursor の Skill 読み込みは transcript の更新時刻を使う")
+    func parsesCursorSkillRead() throws {
+        let fallback = Date(timeIntervalSince1970: 1_800_000_000)
+        let (date, names) = try #require(UsageScanner.parse(Self.line("""
+        {"role":"assistant","message":{"content":[{"type":"tool_use","name":"Read",
+        "input":{"path":"/Users/me/.cursor/skills-cursor/create-rule/SKILL.md"}}]}}
+        """), fallbackDate: fallback))
+        #expect(date == fallback)
+        #expect(names == ["create-rule"])
+    }
+
     /// プラグイン由来は `ponytail:ponytail-review` の形で記録される（実測）。
     /// Plugin 行の最終使用日に使うため、前半も名前として数える（spike #15）。
     @Test("プラグイン由来はプラグイン名でも数える")
@@ -102,6 +163,27 @@ struct UsageTests {
         #expect(found.count == 2)
     }
 
+    @Test("Claude・Codex・Cursor のログをまとめて走査する")
+    func scansEverySupportedAgent() throws {
+        let cursor = """
+        {"role":"assistant","message":{"content":[{"type":"tool_use","name":"Read",\
+        "input":{"path":"/x/cursor-skill/SKILL.md"}}]}}
+        """
+        let codex = """
+        {"timestamp":"2026-09-06T00:00:00Z","payload":{"type":"item_completed",\
+        "item":{"content":[{"type":"skill","name":"codex-skill"}]}}}
+        """
+        let (env, home) = try Self.fixture([
+            ".claude/projects/a/s.jsonl": Self.skillLine("claude-skill", "2026-01-01T00:00:00Z"),
+            ".codex/sessions/2026/09/06/rollout.jsonl": codex,
+            ".cursor/projects/a/agent-transcripts/id/id.jsonl": cursor,
+        ])
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        #expect(UsageScanner.scan(env: env).keys.sorted()
+                == ["claude-skill", "codex-skill", "cursor-skill"])
+    }
+
     @Test("jsonl 以外は読まない")
     func ignoresOtherFiles() throws {
         let (env, home) = try Self.fixture([
@@ -140,6 +222,24 @@ struct UsageTests {
         #expect(registry.usage.lastUsed["old"] != nil, "前回の集計結果が消えている")
         #expect(registry.usage.lastUsed["alpha"] != nil)
         #expect(registry.usage.scannedUpTo != nil, "未集計のままだと 5.3 の区別ができない")
+        #expect(registry.usage.scannedSources.keys.sorted() == ["claude", "codex", "cursor"])
+    }
+
+    @Test("旧 registry の走査時刻で新しい Agent の履歴を読み飛ばさない")
+    func rescansNewSourcesAfterUpgrade() throws {
+        let codex = """
+        {"timestamp":"2026-09-06T00:00:00Z","payload":{"type":"item_completed",\
+        "item":{"content":[{"type":"skill","name":"codex-skill"}]}}}
+        """
+        let (env, home) = try Self.fixture([
+            ".codex/sessions/2026/09/06/rollout.jsonl": codex,
+        ])
+        defer { try? FileManager.default.removeItem(at: home) }
+        var registry = Registry()
+        registry.usage.scannedUpTo = Date.distantFuture
+
+        registry = UsageScanner.refreshed(registry, env: env)
+        #expect(registry.usage.lastUsed["codex-skill"] != nil)
     }
 
     @Test("ログが 1 つも無くても集計済みにはなる")
@@ -154,7 +254,7 @@ struct UsageTests {
 
     // MARK: - 走査範囲（10.2 の生命線）
 
-    /// 使用実績ログは `Source.all` に載せない。載ると一覧スキャンが 140 MB を踏む。
+    /// 使用実績ログは `Source.all` に載せない。載ると一覧スキャンが全履歴を踏む。
     @Test("使用実績ログは通常の走査対象に含まれない")
     func logRootsAreOutsideSourceAll() {
         let env = Environment.test(home: URL(filePath: "/tmp/fake-home"))
@@ -170,20 +270,22 @@ struct UsageTests {
     // MARK: - 表示の区別（5.3）
 
     static func row(_ name: String, kind: Kind = .skill,
-                    claude: ResourceRow.State, lastUsed: Date? = nil) -> ResourceRow {
+                    claude: ResourceRow.State, cursor: ResourceRow.State = .absent,
+                    codex: ResourceRow.State = .absent, lastUsed: Date? = nil) -> ResourceRow {
         ResourceRow(name: name, kind: kind, summary: nil, detail: "",
-                    state: [.claude: claude], origin: .managed, isDisabled: false,
+                    state: [.claude: claude, .cursor: cursor, .codex: codex],
+                    origin: .managed, isDisabled: false,
                     lastUsed: lastUsed)
     }
 
-    /// **Claude から見えないものを「未使用」と表示すると嘘になる。**
-    /// Cursor は実際に使っているかもしれず、こちらのログに残らないだけ。
-    @Test("Claude から見えない行は観測範囲外として扱う")
+    @Test("ログ対応 Agent のどれかから見える行は使用実績を観測できる")
     func unobservableRows() {
         #expect(Self.row("a", claude: .explicit).usageObservable)
         #expect(!Self.row("b", claude: .absent).usageObservable)
         #expect(!Self.row("c", claude: .unsupported).usageObservable)
         #expect(!Self.row("d", claude: .undetected).usageObservable)
+        #expect(Self.row("e", claude: .absent, cursor: .explicit).usageObservable)
+        #expect(Self.row("f", claude: .absent, codex: .explicit).usageObservable)
     }
 
     /// Plugin だけ一覧上の id とログ上の名前が食い違う（spike #15）。
@@ -220,6 +322,7 @@ struct UsageTests {
         registry.upsert(Registry.Entry(name: "a", kind: .skill, repo: "o/r"))
         registry.usage.lastUsed["a"] = Date(timeIntervalSince1970: 1_700_000_000)
         registry.usage.scannedUpTo = Date(timeIntervalSince1970: 1_700_000_100)
+        registry.usage.scannedSources["claude"] = Date(timeIntervalSince1970: 1_700_000_100)
 
         let data = try Registry.encoder.encode(registry)
         #expect(try Registry.decoder.decode(Registry.self, from: data) == registry)

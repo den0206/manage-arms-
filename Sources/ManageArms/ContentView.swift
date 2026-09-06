@@ -1038,7 +1038,7 @@ struct UsageLabel: View {
         }
         if !row.usageObservable {
             return String(localized:
-                "Claude のセッションログしか読めないため不明です。使われていないという意味ではありません")
+                "対応 Agent のセッションログから観測できないため不明です。使われていないという意味ではありません")
         }
         if let last = row.lastUsed {
             return String(localized:

@@ -205,7 +205,7 @@ struct ManualCheck {
     }
 
     /// 実機のセッションログを集計する。読み取りのみ（DESIGN.md 3.9）。
-    /// 全走査は 140 MB を読むためスイートには載せない。
+    /// 複数 Agent の全ログを読むためスイートには載せない。
     @Test("実環境の使用実績と未使用の洗い出し")
     func realUsage() {
         let env = Environment.live

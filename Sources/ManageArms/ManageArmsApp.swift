@@ -279,8 +279,8 @@ final class AppModel {
 
     /// 明示的な「使用状況を分析」（DESIGN.md 3.9）。
     ///
-    /// 初回は 140 MB のセッションログを全部読むため起動時には走らせない。
-    /// 2 回目以降は前回以降に書かれたログだけの増分（実測 1.27 秒 → 0.001 秒）。
+    /// 初回は複数 Agent のセッションログを全部読むため起動時には走らせない。
+    /// 2 回目以降は前回以降に書かれたログだけの増分（実測 2.54 秒 → 0.013 秒）。
     func analyzeUsage() {
         guard !isAnalyzing, !isChecking, !isMutating, !isPinning else { return }
         isAnalyzing = true

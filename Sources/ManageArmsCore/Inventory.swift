@@ -37,12 +37,10 @@ public struct ResourceRow: Identifiable, Sendable {
             : (Kind.allCases.firstIndex(of: a.kind) ?? 0) < (Kind.allCases.firstIndex(of: b.kind) ?? 0)
     }
 
-    /// 使用実績を観測できる行か。**読めるログは Claude のものだけ**（3.9）。
-    ///
-    /// `~/.cursor/skills-cursor/` にしか無いスキルを「未使用」と出すと嘘になる。
-    /// Cursor は実際に使っているかもしれず、こちらに見えていないだけ。
-    /// 3.7 の「未検出と非対応を混ぜない」と同じ誤りなので、観測範囲外は別扱いにする。
-    public var usageObservable: Bool { state[.claude] == .explicit }
+    /// 使用実績を観測できる行か。ログを読める Agent のどれかから見えればよい（3.9）。
+    public var usageObservable: Bool {
+        [Agent.claude, .cursor, .codex].contains { state[$0] == .explicit }
+    }
 
     public init(name: String, kind: Kind, summary: String?, detail: String,
                 state: [Agent: State], origin: Origin, isDisabled: Bool,

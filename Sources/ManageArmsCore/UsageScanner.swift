@@ -2,7 +2,7 @@ import Foundation
 
 /// セッションログから「最後にいつ使われたか」を集計する。DESIGN.md 3.9。
 ///
-/// **`Source.all` には絶対に載せない。** ここが読むのは `~/.claude/projects`（140 MB）で、
+/// **`Source.all` には絶対に載せない。** ここが読むセッションログは
 /// 3.4 が踏まないと決めた領域そのもの。一覧スキャンの経路からは呼ばれず、
 /// 明示的な「使用状況を分析」からしか到達しない（10.2 が経路を検査する）。
 ///
@@ -10,14 +10,28 @@ import Foundation
 /// 1 ターンで消える瞬間的イベントにしかならないため、点灯ではなく最終使用日を出す。
 public enum UsageScanner {
 
-    /// 使用実績ログのルート。
-    ///
-    /// Codex（`~/.codex/sessions/**/rollout-*.jsonl`）は `type: function_call` を使う
-    /// 別形式で、スキル呼び出しの表現が確認できていないため対象外（spike #15）。
-    /// 対応するまで Codex 由来の使用実績は出さない — 出せないことと
-    /// 「使われていない」ことを混同させない（5.3）。
+    struct LogSource {
+        let id: String
+        let root: URL
+        let usesFileDate: Bool
+    }
+
+    static func logSources(env: Environment) -> [LogSource] {
+        [
+            LogSource(id: Agent.claude.rawValue,
+                      root: env.home.appending(path: ".claude/projects"), usesFileDate: false),
+            LogSource(id: Agent.codex.rawValue,
+                      root: env.home.appending(path: ".codex/sessions"), usesFileDate: false),
+            // Cursor の transcript は行に時刻が無い。最終使用日はファイル更新時刻になる。
+            // ponytail: Cursor が行時刻を保存したら、その値を parse して mtime 近似を外す。
+            LogSource(id: Agent.cursor.rawValue,
+                      root: env.home.appending(path: ".cursor/projects"), usesFileDate: true),
+        ]
+    }
+
+    /// 使用実績ログのルート。通常の一覧走査には混ぜない（3.4 / 10.2）。
     public static func logRoots(env: Environment) -> [URL] {
-        [env.home.appending(path: ".claude/projects")]
+        logSources(env: env).map(\.root)
     }
 
     /// 名前 → 最終使用日。
@@ -27,23 +41,27 @@ public enum UsageScanner {
     /// 前回以前の集計結果をそのまま使い回せる（3.9 が 3.5 の例外を認めている理由）。
     public static func scan(env: Environment, since: Date? = nil) -> [String: Date] {
         var found: [String: Date] = [:]
-        let keys: [URLResourceKey] = [.contentModificationDateKey, .isRegularFileKey]
-        for root in logRoots(env: env) {
-            guard let walker = FileManager.default.enumerator(
-                at: root, includingPropertiesForKeys: keys) else { continue }
-            for case let url as URL in walker where url.pathExtension == "jsonl" {
-                if let since, let modified = try? url.resourceValues(
-                    forKeys: [.contentModificationDateKey]).contentModificationDate,
-                   modified <= since { continue }
-                merge(file: url, into: &found)
-            }
+        for source in logSources(env: env) {
+            scan(source, since: since, into: &found)
         }
         return found
     }
 
+    static func scan(_ source: LogSource, since: Date?, into found: inout [String: Date]) {
+        let keys: [URLResourceKey] = [.contentModificationDateKey, .isRegularFileKey]
+        guard let walker = FileManager.default.enumerator(
+            at: source.root, includingPropertiesForKeys: keys) else { return }
+        for case let url as URL in walker where url.pathExtension == "jsonl" {
+            let modified = try? url.resourceValues(
+                forKeys: [.contentModificationDateKey]).contentModificationDate
+            if let since, let modified, modified <= since { continue }
+            merge(file: url, fallbackDate: source.usesFileDate ? modified : nil, into: &found)
+        }
+    }
+
     /// 増分スキャンして registry を更新する。呼び出し側はこれだけ使えばよい。
     ///
-    /// 初回はログ全体（実測 140 MB）を読むため、明示的な操作からバックグラウンドで
+    /// 初回は複数 Agent のログ全体を読むため、明示的な操作からバックグラウンドで
     /// 呼ぶこと。起動時には走らせない（3.9 / 7.3 の「常駐しない」と同じ理由）。
     /// `inout` ではなく値を返す。全走査は数秒かかるためメインスレッドの外で回す必要があり、
     /// `inout` は `Task.detached` に渡せない。
@@ -51,22 +69,29 @@ public enum UsageScanner {
         // 走査中に書かれた行を取りこぼさないよう、開始時刻を基準にする。
         let startedAt = env.now()
         var updated = registry
-        for (name, date) in scan(env: env, since: registry.usage.scannedUpTo)
-        where updated.usage.lastUsed[name] == nil || updated.usage.lastUsed[name]! < date {
-            updated.usage.lastUsed[name] = date
+        for source in logSources(env: env) {
+            var found: [String: Date] = [:]
+            scan(source, since: registry.usage.scannedSources[source.id], into: &found)
+            for (name, date) in found
+            where updated.usage.lastUsed[name] == nil || updated.usage.lastUsed[name]! < date {
+                updated.usage.lastUsed[name] = date
+            }
+            updated.usage.scannedSources[source.id] = startedAt
         }
         updated.usage.scannedUpTo = startedAt
         return updated
     }
 
     /// 1 ファイル読む。`mappedIfSafe` で最大 10 MB のログでも RSS に載せない（9 章）。
-    static func merge(file url: URL, into found: inout [String: Date]) {
+    static func merge(file url: URL, fallbackDate: Date?, into found: inout [String: Date]) {
         guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return }
         for line in data.split(separator: UInt8(ascii: "\n")) {
             // 候補行だけ JSON にかける。大半の行は tool_use を含まない。
-            guard line.range(of: skillMarker) != nil || line.range(of: mcpMarker) != nil
+            guard line.range(of: skillMarker) != nil || line.range(of: codexSkillMarker) != nil
+                    || line.range(of: skillPathMarker) != nil
+                    || line.range(of: mcpMarker) != nil
             else { continue }
-            guard let (date, names) = parse(Data(line)) else { continue }
+            guard let (date, names) = parse(Data(line), fallbackDate: fallbackDate) else { continue }
             for name in names where found[name] == nil || found[name]! < date {
                 found[name] = date
             }
@@ -74,6 +99,8 @@ public enum UsageScanner {
     }
 
     static let skillMarker = Data("\"Skill\"".utf8)
+    static let codexSkillMarker = Data("\"type\":\"skill\"".utf8)
+    static let skillPathMarker = Data("SKILL.md".utf8)
     static let mcpMarker = Data("mcp__".utf8)
 
     /// 1 行を解析して (時刻, 使われた名前) を返す。
@@ -81,7 +108,7 @@ public enum UsageScanner {
     /// `Codable` ではなく `JSONSerialization` で書く。読む対象は他社製品の出力で
     /// **予告なく書式が変わる**（10.5）。1 つのキーの型が変わっただけで
     /// 行ごと落ちる `Codable` より、辞書を歩いて取れるものだけ取る方が壊れにくい。
-    static func parse(_ line: Data) -> (Date, [String])? {
+    static func parse(_ line: Data, fallbackDate: Date? = nil) -> (Date, [String])? {
         guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any]
         else { return nil }
 
@@ -102,16 +129,92 @@ public enum UsageScanner {
                 // `mcp__chrome-devtools__take_snapshot` → `chrome-devtools`
                 let server = tool.dropFirst(5).components(separatedBy: "__").first ?? ""
                 if !server.isEmpty { names.append(server) }
+            } else if tool == "Read",
+                      let path = (block["input"] as? [String: Any])?["path"] as? String {
+                names += skillNames(in: path)
+            }
+        }
+        collectCodexSkills(in: object, into: &names)
+        if let payload = object["payload"] as? [String: Any],
+           let type = payload["type"] as? String,
+           ["custom_tool_call", "function_call"].contains(type),
+           let tool = payload["name"] as? String,
+           ["exec", "exec_command"].contains(tool),
+           let input = (payload["input"] ?? payload["arguments"]) as? String {
+            for command in commands(in: input)
+            where isSkillRead(command) {
+                names += skillNames(in: command)
             }
         }
         // 日付の解析は本当に当たった行だけで行う。`ISO8601DateFormatter` は
         // Sendable でなく static に置けないので、都度作る方を選ぶ。
         // 全履歴でも当たるのは数十行なので生成コストは問題にならない。
         guard !names.isEmpty,
-              let stamp = object["timestamp"] as? String,
-              let date = date(from: stamp)
+              let date = (object["timestamp"] as? String).flatMap(date(from:)) ?? fallbackDate
         else { return nil }
-        return (date, names)
+        var seen: Set<String> = []
+        return (date, names.filter { seen.insert($0).inserted })
+    }
+
+    /// Codex の明示呼び出しは UserMessage 内の `{type:"skill", name:"…"}` に残る。
+    static func collectCodexSkills(in value: Any, into names: inout [String]) {
+        if let object = value as? [String: Any] {
+            if object["type"] as? String == "skill", let name = object["name"] as? String {
+                names.append(name)
+                if let plugin = name.split(separator: ":").first, plugin.count < name.count {
+                    names.append(String(plugin))
+                }
+            }
+            for child in object.values { collectCodexSkills(in: child, into: &names) }
+        } else if let array = value as? [Any] {
+            for child in array { collectCodexSkills(in: child, into: &names) }
+        }
+    }
+
+    /// `…/<skill>/SKILL.md` から skill 名だけを取る。絶対パスや引用符には依存しない。
+    static func skillNames(in text: String) -> [String] {
+        var rest = text[...]
+        var names: [String] = []
+        while let marker = rest.range(of: "/SKILL.md") {
+            let prefix = rest[..<marker.lowerBound]
+            if let slash = prefix.lastIndex(of: "/") {
+                let name = prefix[prefix.index(after: slash)...]
+                if !name.isEmpty && !name.contains(where: { $0.isWhitespace || $0 == "\"" }) {
+                    names.append(String(name))
+                }
+            }
+            rest = rest[marker.upperBound...]
+        }
+        return names
+    }
+
+    /// Codex の `exec` は JS の中に `{cmd:"…"}` または `{"cmd":"…"}` を持つ。
+    /// tool input 全体を見ると
+    /// patch やテストデータ中の SKILL.md まで誤認するため、実行コマンドだけを戻す。
+    static func commands(in text: String) -> [String] {
+        guard let regex = try? NSRegularExpression(
+            pattern: #"(?:^|[,{]\s*)(?:cmd|"cmd")\s*:\s*("(?:\\.|[^"\\])*")"#)
+        else { return [] }
+        let source = text as NSString
+        return regex.matches(in: text, range: NSRange(location: 0, length: source.length))
+            .compactMap { match in
+                let literal = source.substring(with: match.range(at: 1))
+                return try? JSONDecoder().decode(String.self, from: Data(literal.utf8))
+            }
+    }
+
+    /// 既存の shell tokenizer で書き込み・連結コマンドを拒否し、単純な読み取りだけ数える。
+    static func isSkillRead(_ command: String) -> Bool {
+        guard let words = PasteInput.commandWords(command), let first = words.first else { return false }
+        let executable = (first as NSString).lastPathComponent
+        guard ["sed", "cat", "head", "tail", "less"].contains(executable) else { return false }
+        if executable == "sed" {
+            return !words.dropFirst().contains {
+                $0.hasPrefix("--in-place")
+                    || ($0.hasPrefix("-") && !$0.hasPrefix("--") && $0.dropFirst().contains("i"))
+            }
+        }
+        return true
     }
 
     /// Claude のタイムスタンプは秒の小数部を持つ行と持たない行が混在する。
