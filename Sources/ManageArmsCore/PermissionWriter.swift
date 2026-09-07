@@ -124,18 +124,30 @@ public enum PermissionWriter {
         let stamp = ISO8601DateFormatter().string(from: env.now())
             .replacingOccurrences(of: ":", with: "-")
         let sourceID = Self.sourceID(of: file)
-        let name = "\(backupPrefix)\(sourceID)\(stampSeparator)\(stamp)\(stampSeparator)\(UUID().uuidString).json"
+        let name = "\(backupPrefix)\(sourceID)\(stampSeparator)\(stamp)"
+            + "\(stampSeparator)\(Self.label(of: file))\(stampSeparator)\(UUID().uuidString).json"
         let destination = dir.appending(path: name)
-        let envelope: [String: Any] = [
-            "sourcePath": file.standardized.path(percentEncoded: false),
-            "content": data.base64EncodedString(),
-        ]
-        let encoded = try JSONSerialization.data(withJSONObject: envelope,
-                                                  options: [.prettyPrinted, .sortedKeys])
-        try encoded.write(to: destination, options: .withoutOverwriting)
+        // **本文は編集前のバイト列そのまま。** base64 の envelope に包むと、
+        // Finder でコピーして戻すという唯一の復元手段が使えなくなる（8 章）。
+        // 「どの設定ファイルか」は fingerprint と label が名前で担う。
+        try data.write(to: destination, options: .withoutOverwriting)
         try FileManager.default.setAttributes([.posixPermissions: 0o600],
                                               ofItemAtPath: destination.path)
-        try prune(sourceID: sourceID, in: dir, env: env)
+        try prune(of: file, in: dir, env: env)
+    }
+
+    /// 名前を見て元ファイルが分かるようにする。fingerprint は不可逆なので、
+    /// 末尾 2 要素だけ人が読める形で添える（長さは 64 文字で頭打ち）。
+    static func label(of file: URL) -> String {
+        let tail = file.standardized.pathComponents.suffix(2).joined(separator: "-")
+        return String(tail.replacingOccurrences(of: stampSeparator, with: "-").prefix(64))
+    }
+
+    /// 0.2.x が使っていた名前の後半。刈る対象を見分けるためだけに残す。
+    static func slug(of file: URL) -> String {
+        file.standardized.path(percentEncoded: false)
+            .replacingOccurrences(of: "/", with: "-")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
     }
 
     static func sourceID(of file: URL) -> String {
@@ -151,11 +163,17 @@ public enum PermissionWriter {
     ///
     /// 区切りを持たない名前は 0.1.0 が書いた旧形式なので**触らない**。
     /// 帰属を判定できないものを消すのは、このアプリが一番やってはいけないこと。
-    static func prune(sourceID: String, in dir: URL, env: Environment) throws {
+    ///
+    /// 逆に `<ISO8601>__<slug>`（0.2.x）は自分が書いたと分かるので刈る対象に含める。
+    /// 新形式だけを見ていると、旧形式が永久に残って自分でディスクを汚す。
+    static func prune(of file: URL, in dir: URL, env: Environment) throws {
         let fm = FileManager.default
         let names = (try? fm.contentsOfDirectory(atPath: dir.path(percentEncoded: false))) ?? []
-        let sourcePrefix = backupPrefix + sourceID + stampSeparator
-        let mine = names.filter { $0.hasPrefix(sourcePrefix) }.sorted()
+        let sourcePrefix = backupPrefix + sourceID(of: file) + stampSeparator
+        let legacySuffix = stampSeparator + slug(of: file)
+        // 旧形式は名前の先頭が ISO8601、新形式は "v2" 始まり。`v` は数字より後ろなので
+        // 単純な辞書順で「旧 → 新」= 古い順になる。
+        let mine = names.filter { $0.hasPrefix(sourcePrefix) || $0.hasSuffix(legacySuffix) }.sorted()
         for name in mine.dropLast(generations) {
             let url = dir.appending(path: name)
             try WriteGuard.assertAppBackup(url, env: env)
@@ -163,7 +181,7 @@ public enum PermissionWriter {
         }
         var owned = ((try? fm.contentsOfDirectory(
             at: dir, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey])) ?? [])
-            .filter { $0.lastPathComponent.hasPrefix(backupPrefix) }
+            .filter { $0.lastPathComponent.contains(stampSeparator) }
             .sorted {
                 let left = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
                 let right = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
