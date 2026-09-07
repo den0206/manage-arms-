@@ -123,6 +123,60 @@ struct WriteGuardTests {
             try WriteGuard.assertMutable(sibling, env: f.env, registry: f.registry)
         }
     }
+
+    /// `ProjectScan.skillRoots` を歩き直さずに同じ集合を引けること。
+    /// **歩く実装に戻すと UI が行数ぶん止まる**（実測 0.16 秒 × 350 行）。
+    @Test("プロジェクト配下の許可ルートは走査せずに判定できる", arguments: [
+        (".claude/skills", true),
+        ("apps/web/.claude/skills", true),
+        ("a/b/c/.claude/skills", true),
+        ("a/b/c/d/.claude/skills", false),          // skillDepth を超える
+        ("node_modules/pkg/.claude/skills", false), // walk が入らない
+        (".hidden/.claude/skills", false),
+        (".claude/agents", false),                  // skill の親ではない
+        ("skills", false),
+        (".claude/skills/nested", false),
+    ])
+    func projectSkillParents(_ relative: String, _ allowed: Bool) {
+        #expect(WriteGuard.isManagedParent(relative, kind: .skill, inProject: true) == allowed)
+    }
+
+    /// サブエージェントはプロジェクト直下だけ（走査もそこしか見ていない）。
+    @Test("プロジェクトのサブエージェントは直下だけ")
+    func projectSubagentParents() {
+        #expect(WriteGuard.isManagedParent(".claude/agents", kind: .subagent, inProject: true))
+        #expect(!WriteGuard.isManagedParent("apps/web/.claude/agents", kind: .subagent, inProject: true))
+    }
+
+    /// ユーザー側は `Agent` の宣言そのままで、同梱ルートは外れる。
+    @Test("ユーザー側の許可ルートは Agent の宣言と一致する")
+    func userParents() {
+        for root in Agent.allCases.flatMap(\.skillRoots)
+        where !Agent.bundledSkillRoots.contains(root) {
+            #expect(WriteGuard.isManagedParent(root, kind: .skill, inProject: false))
+        }
+        for root in Agent.bundledSkillRoots {
+            #expect(!WriteGuard.isManagedParent(root, kind: .skill, inProject: false))
+        }
+        #expect(!WriteGuard.isManagedParent(".claude/skills", kind: .subagent, inProject: false))
+    }
+
+    /// プロジェクトの外を指すパスで `suffix` の計算が崩れないこと。
+    @Test("プロジェクトの外は拒否する")
+    func rejectsOutsideProject() throws {
+        let f = try Fixture()
+        let project = try f.makeDir(f.env.home.appending(path: "proj"))
+        var registry = Registry()
+        registry.projects = [project.path(percentEncoded: false)]
+        try registry.save(env: f.env)
+        let outside = f.env.home.appending(path: "elsewhere/.claude/skills/x")
+        #expect(throws: (any Error).self) {
+            try WriteGuard.assertUserArtifact(outside, kind: .skill,
+                                              project: project.path(percentEncoded: false),
+                                              env: f.env)
+        }
+    }
+
 }
 
 /// **作成方向のホワイトリスト**（DESIGN.md 9 章）。

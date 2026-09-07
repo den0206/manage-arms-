@@ -28,6 +28,8 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
   from your home directory once listed it as a project and pulled every other project's skills
   into that one tab — 350 entries on the reported machine — leaving the tab blank and the app
   unresponsive. Settings lists the entries that are skipped, so it is clear why they are missing.
+- Opening a project tab is no longer slow: deciding whether an item could be deleted rescanned
+  the whole project directory once per row while the list was being drawn.
 - MCP servers configured in Cursor now appear in the list. `~/.cursor/mcp.json` accepts `//`
   comments and ManageArms did not, so one commented-out entry hid every server in the file. Files
   containing comments are never rewritten, so anything you commented out stays where you put it.

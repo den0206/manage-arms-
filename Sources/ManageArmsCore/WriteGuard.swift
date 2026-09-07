@@ -112,30 +112,49 @@ public enum WriteGuard {
                                           env: Environment) throws {
         guard kind == .skill || kind == .subagent else { throw Denial.deniedPath(url.path) }
         try assertNotBundled(url, env: env)
-        let roots: [URL]
         if let project {
             guard ProjectScan.projectPaths(in: env).contains(project) else {
                 throw Denial.outsideManagedRoots(url.path)
             }
-            // 許可ルートは走査と同じ集合にする。ここだけルート直下に絞ると、
-            // 一覧には出るのに削除だけ「保護対象」と嘘をつくことになる。
-            roots = kind == .skill
-                ? ProjectScan.skillRoots(project).map(\.url)
-                : [URL(filePath: project).appending(path: ".claude/agents")]
-        } else {
-            let labels = kind == .skill ? Agent.allCases.flatMap(\.skillRoots) : Agent.allCases.flatMap(\.subagentRoots)
-            roots = labels.filter { !Agent.bundledSkillRoots.contains($0) }.map { env.home.appending(path: $0) }
         }
         let parent = url.deletingLastPathComponent().standardizedFileURL
         let base = (project.map { URL(filePath: $0) } ?? env.home).standardizedFileURL
+        // `dropFirst` は parent が base の下にある前提でしか意味を持たない。
+        // 外にあるパスを渡されると出鱈目な suffix が出るので、先に境界を確かめる。
+        guard isInside(parent, base) || parent.path == base.path else {
+            throw Denial.outsideManagedRoots(url.path)
+        }
         let suffix = String(parent.path.dropFirst(base.path.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let expected = base.resolvingSymlinksInPath().appending(path: suffix).standardizedFileURL
-        guard roots.contains(where: { $0.standardizedFileURL.path == parent.path }),
+        guard isManagedParent(suffix, kind: kind, inProject: project != nil),
               parent.resolvingSymlinksInPath().path == expected.path,
               !url.lastPathComponent.hasPrefix("."), !isDenied(url),
               kind != .subagent || url.pathExtension == "md" else {
             throw Denial.outsideManagedRoots(url.path)
         }
+    }
+
+    /// 削除してよい親ディレクトリか（ホーム相対 / プロジェクト相対）。**純粋関数**（10.1）。
+    ///
+    /// **許可ルートを列挙し直さずに判定する。** 以前はプロジェクト側で
+    /// `ProjectScan.skillRoots(project)` を呼んでいたが、あれはプロジェクト配下を
+    /// 深さ 3 まで歩く I/O で、UI の `removableFiles` から **1 行ずつ**呼ばれていた
+    /// （実測 0.16 秒 × 350 行 = 56 秒、しかも body 評価のたびにメインスレッド上で）。
+    /// `ProjectScan.walk` が作りうる形をそのまま述語にすれば、同じ集合を歩かずに引ける。
+    ///
+    /// 判定する集合は変えない — プロジェクトのスキルはサブディレクトリの
+    /// `.claude/skills` まで、サブエージェントは直下の `.claude/agents` だけ。
+    static func isManagedParent(_ relative: String, kind: Kind, inProject: Bool) -> Bool {
+        guard kind == .skill || kind == .subagent else { return false }
+        guard inProject else {
+            let labels = kind == .skill ? Agent.allCases.flatMap(\.skillRoots)
+                                        : Agent.allCases.flatMap(\.subagentRoots)
+            return labels.contains(relative) && !Agent.bundledSkillRoots.contains(relative)
+        }
+        let leaf = kind == .skill ? ".claude/skills" : ".claude/agents"
+        if relative == leaf { return true }
+        guard kind == .skill, relative.hasSuffix("/" + leaf) else { return false }
+        return ProjectScan.isWalkablePrefix(String(relative.dropLast(leaf.count + 1)))
     }
 
     /// アプリ自身が作ったバックアップだけを消してよい（9 章）。

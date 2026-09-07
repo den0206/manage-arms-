@@ -1851,6 +1851,13 @@ DMG は誰でも取れる必要があるが、ソースを公開する必要は�
   ゴミ箱へ移せる。`WriteGuard.assertUserArtifact` で親ディレクトリと実パスを検証し、
   同梱領域・Plugin配下へのリンクを拒否する。リンク先の実体は削除しない。
   アプリ管理下の共有リソースは従来の切替を残し「共有先すべてで有効」と明示する。
+  **許可ルートは列挙し直さず述語で判定する**（`WriteGuard.isManagedParent` +
+  `ProjectScan.isWalkablePrefix`）。この判定は UI の `removableFiles` から
+  **1 行ずつ** body 評価の中で呼ばれるため、`ProjectScan.skillRoots` を呼んで
+  プロジェクト配下を歩き直すと行数ぶんメインスレッドが止まる
+  （実測 0.16 秒 × 350 行 = 56 秒 → 述語化後は 27 行で 0.028 秒）。
+  判定する集合は変えない — プロジェクトのスキルはサブディレクトリの
+  `.claude/skills` まで、サブエージェントは直下の `.claude/agents` だけ。
 - 同梱SkillはCursorの既知ルートとCodex `.codex/skills/.system` を保護する。
   MCP/Pluginで `isBuiltIn` / `managed` / `installPolicy: INSTALLED_BY_DEFAULT` 等の
   保護メタデータを得た場合も変更を拒否する。

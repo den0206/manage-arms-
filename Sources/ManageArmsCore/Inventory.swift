@@ -694,6 +694,20 @@ public struct ProjectScan: Sendable {
     static let notWalked: Set<String> = ["node_modules", "Pods", "vendor", "target",
                                          "dist", "build", "out"]
 
+    /// `walk` が `skillRoots` の prefix として返しうる形か。**純粋関数**（10.1）。
+    ///
+    /// 走査し直さずに「そのパスは走査対象だったか」を答えるために要る。
+    /// `WriteGuard.assertUserArtifact` はこれを使って、プロジェクト配下を
+    /// 歩かずに削除可否を判定する（歩くと UI の body 評価が行数ぶん止まる）。
+    static func isWalkablePrefix(_ prefix: String) -> Bool {
+        guard !prefix.isEmpty else { return true }
+        let parts = prefix.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count <= skillDepth else { return false }
+        return parts.allSatisfy {
+            !$0.isEmpty && !$0.hasPrefix(".") && !notWalked.contains(String($0))
+        }
+    }
+
     static func walk(_ dir: URL, prefix: String, depth: Int,
                      into found: inout [(prefix: String, url: URL)]) {
         let fm = FileManager.default
