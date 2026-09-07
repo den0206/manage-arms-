@@ -192,18 +192,25 @@ public struct ResourceRow: Identifiable, Sendable {
         guard kind == .skill || kind == .subagent else { return [] }
         let suffix = kind == .subagent ? ".md" : ""
         let (subdir, leaf) = ProjectScan.splitQualified(name)
-        let candidates: [URL]
+        // **同梱ルートは出さない。** 出すと「削除…」に並び、選んだ瞬間に
+        // WriteGuard で弾かれる（消せないものを消せるように見せない）。
+        // 判定は `isManagedParent` だけで済ませる — `assertUserArtifact` 全体は
+        // プロジェクトを歩く I/O を含み、body 評価のたびには走らせられない。
+        // 最新の Registry と実体の再検査は削除の直前に `removeExisting` がやる。
+        let base: URL
+        let relatives: [String]
         if let project {
             let dir = kind == .skill ? ".claude/skills" : ".claude/agents"
-            candidates = [URL(filePath: project)
-                .appending(path: subdir.isEmpty ? dir : "\(subdir)/\(dir)")]
+            base = URL(filePath: project)
+            relatives = [subdir.isEmpty ? dir : "\(subdir)/\(dir)"]
         } else {
             let allowed = kind == .skill ? agent.skillRoots : agent.subagentRoots
-            candidates = roots.filter(allowed.contains).map { env.home.appending(path: $0) }
+            base = env.home
+            relatives = roots.filter(allowed.contains)
         }
-        // 表示中の Inventory だけから候補を作る。削除直前には最新の Registry と
-        // 実体パスを `Inventory.removeExisting` が再検査する。
-        return candidates.map { $0.appending(path: leaf + suffix) }
+        return relatives
+            .filter { WriteGuard.isManagedParent($0, kind: kind, inProject: project != nil) }
+            .map { base.appending(path: $0).appending(path: leaf + suffix) }
     }
 
     /// 置いてあるのにどのエージェントからも読めない（リンク切れ / SKILL.md なし）。
