@@ -39,12 +39,12 @@ struct FetcherTests {
     }
 
     @Test("ditto で展開できる")
-    func extracts() throws {
+    func extracts() async throws {
         let dir = try Self.temp()
         let zip = dir.appending(path: "a.zip")
         try Self.makeZip(at: zip, entries: ["repo-main/SKILL.md": "---\nname: x\n---\n"])
         let out = dir.appending(path: "out")
-        try Fetcher.extract(zip, to: out)
+        try await Fetcher.extract(zip, to: out)
         #expect(FileManager.default.fileExists(
             atPath: out.appending(path: "repo-main/SKILL.md").path(percentEncoded: false)))
     }
@@ -52,7 +52,7 @@ struct FetcherTests {
     /// spike #13 で `ditto` の安全性は確認済みだが、
     /// OS 更新で挙動が変わった時に気づくためリグレッションとして残す（10.3）。
     @Test("Zip Slip — ../ を含むエントリが展開先の外に出ない")
-    func zipSlip() throws {
+    func zipSlip() async throws {
         let dir = try Self.temp()
         let zip = dir.appending(path: "slip.zip")
         try Self.makeZip(at: zip, entries: [
@@ -61,7 +61,7 @@ struct FetcherTests {
             "a/../../escaped2.txt": "ESCAPED",
         ])
         let out = dir.appending(path: "out")
-        try Fetcher.extract(zip, to: out)
+        try await Fetcher.extract(zip, to: out)
 
         let fm = FileManager.default
         #expect(!fm.fileExists(atPath: dir.appending(path: "escaped.txt")
@@ -94,7 +94,7 @@ struct FetcherTests {
     /// （ルートの `AGENTS.md` → `CLAUDE.md` 等）が symlink でも導入は通る。
     /// symlink 自体は候補にならず、実体として入るものは `validate` が改めて弾く。
     @Test("取り出さない場所の symlink で展開と種別判定を落とさない")
-    func extractsAlongsideSymlink() throws {
+    func extractsAlongsideSymlink() async throws {
         let dir = try Self.temp()
         let zip = dir.appending(path: "link.zip")
         try Self.makeZip(at: zip,
@@ -102,7 +102,7 @@ struct FetcherTests {
                                    "repo-main/skills/x/SKILL.md": "---\nname: x\n---\n"],
                          links: ["repo-main/AGENTS.md": "CLAUDE.md"])
         let out = dir.appending(path: "out")
-        #expect(throws: Never.self) { try Fetcher.extract(zip, to: out) }
+        await #expect(throws: Never.self) { try await Fetcher.extract(zip, to: out) }
 
         let base = try Fetcher.singleTopLevel(of: out)
         // 前提: ditto が symlink を symlink のまま展開している

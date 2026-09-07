@@ -114,7 +114,7 @@ public enum Fetcher {
             }
 
             let unpacked = root.appending(path: "unpacked")
-            try extract(zip, to: unpacked)
+            try await extract(zip, to: unpacked)
             try? FileManager.default.removeItem(at: zip)   // zip 本体はもう要らない
 
             // zipball は `<repo>-<branch>/` を 1 段かぶせる
@@ -306,7 +306,11 @@ public enum Fetcher {
     /// Foundation に zip 展開 API は無い。ZIPFoundation 等の依存を足すより
     /// OS 同梱の `ditto` に任せる方がメモリにも載らず依存もゼロ（3.3）。
     /// Zip Slip 安全であることは spike #13 で実測済み。
-    static func extract(_ zip: URL, to destination: URL) throws {
+    /// **`async` なのは待ち方のため。** 以前は `Thread.sleep` で回していたが、
+    /// ここは nonisolated async の中（`stage` から呼ばれる）なので、
+    /// グローバル executor のスレッドを最大 30 秒占有することになる。
+    /// 協調スレッドプールはコア数程度しか無いので、塞ぐのではなく返す。
+    static func extract(_ zip: URL, to destination: URL) async throws {
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
         let process = Process()
         process.executableURL = URL(filePath: "/usr/bin/ditto")
@@ -351,10 +355,17 @@ public enum Fetcher {
             // 1 秒間隔。この検査は展開ツリーを毎回歩くので、細かく回すと
             // 上限いっぱい（10,000 項目 × 30 秒）で数十万回の stat になる。
             // ディスクを埋めさせない役目は取得前の空き容量検査が担っている。
-            Thread.sleep(forTimeInterval: 1)
+            do { try await Task.sleep(for: .seconds(1)) }
+            catch {
+                // **キャンセルは握り潰さない。** `try?` にすると待たずに回り続け、
+                // 上限まで CPU を焼く。畳んで `ditto` を孤児にしない。
+                validationFailure = error
+                process.terminate()
+                break
+            }
         }
         if validationFailure != nil, process.isRunning {
-            Thread.sleep(forTimeInterval: 0.2)
+            try? await Task.sleep(for: .milliseconds(200))
             if process.isRunning { Darwin.kill(process.processIdentifier, SIGKILL) }
         }
         process.waitUntilExit()

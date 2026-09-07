@@ -185,7 +185,10 @@ public enum CLIScan {
     /// ウィンドウを閉じたら捨てる（3.5 / 9 章）。次に開いたときは取り直す。
     public static func clear() { store.clear() }
 
-    private static func scan(env: Environment, registry: Registry, key: Key) -> Snapshot {
+    private static func scan(env base: Environment, registry: Registry, key: Key) -> Snapshot {
+        // 手動指定のパスはここで 1 回だけ解決して持ち回る。
+        // 以降の `runCLI` が registry.json を読み直さなくなる（走査 1 回で 6〜8 回）。
+        let env = base.resolvingCLIOverrides(key.overrides)
         var agents = Detector.detectAll(env: env, overrides: key.overrides)
         for agent in Agent.allCases where !key.enabled.contains(agent) {
             agents[agent] = .disabled
