@@ -369,3 +369,22 @@ struct InstallerTests {
         }
     }
 }
+
+extension InstallerTests {
+    @Test("導入中に保存された設定と使用履歴を古いRegistryで上書きしない")
+    func installPreservesNewerRegistry() throws {
+        var f = try Fixture()
+        defer { try? FileManager.default.removeItem(at: f.env.home) }
+        try Registry.update(env: f.env) { latest in
+            latest.appearance = "dark"
+            latest.usage.lastUsed["other"] = Date(timeIntervalSince1970: 123)
+            latest.upsert(.init(name: "other", kind: .subagent, pinned: true))
+        }
+        try Installer.install(f.candidate, from: f.staging, env: f.env, registry: &f.registry)
+        let saved = try Registry.read(env: f.env)
+        #expect(saved.appearance == "dark")
+        #expect(saved.usage.lastUsed["other"] != nil)
+        #expect(saved.entry(named: "other")?.pinned == true)
+        #expect(saved.entry(named: "demo") != nil)
+    }
+}

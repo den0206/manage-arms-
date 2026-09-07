@@ -3,6 +3,8 @@ import Foundation
 /// 外部依存の集約点。テストでは偽のホームを指す `Environment` に差し替える。
 /// DESIGN.md 3.8 — protocol ではなく構造体 + クロージャなので実装は 1 つのまま。
 public struct Environment: Sendable {
+    /// 更新時の退避・復元。失敗経路も偽ホームで検証できるよう注入する。
+    var move: @Sendable (URL, URL) throws -> Void = Updater.move
     /// ホームディレクトリ。テストでは一時ディレクトリを指す。
     public var home: URL
     /// アプリ自身の保存領域（registry.json / disabled-skills/）。

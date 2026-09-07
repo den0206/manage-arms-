@@ -22,15 +22,18 @@ public struct UpdatePreview: Sendable {
     public let candidate: Candidate
     public let diff: [DiffLine]
     public let manifest: [TreeEntry]
+    public let detailsOmitted: Bool
 
     public init(name: String, oldSha: String?, newSha: String?, staging: Staging,
-                candidate: Candidate, diff: [DiffLine], manifest: [TreeEntry]? = nil) {
+                candidate: Candidate, diff: [DiffLine], manifest: [TreeEntry]? = nil,
+                detailsOmitted: Bool = false) {
         self.name = name
         self.oldSha = oldSha
         self.newSha = newSha
         self.staging = staging
         self.candidate = candidate
         self.diff = diff
+        self.detailsOmitted = detailsOmitted
         self.manifest = manifest ?? ((try? Updater.manifest(of: candidate.localURL)) ?? [])
     }
 
@@ -81,21 +84,36 @@ public enum Updater {
         if let checkedSHA { resolvedSHA = checkedSHA }
         else { resolvedSHA = try await UpdateChecker.resolve(source, env: env) }
         let staging = try await Fetcher.stage(source, resolvedSHA: resolvedSHA)
+        return try makePreview(entry, staging: staging, resolvedSHA: resolvedSHA, env: env)
+    }
+
+    /// 所有権は完成したプレビューだけへ渡す。途中で失敗した取得物は必ず片付ける。
+    static func makePreview(_ entry: Registry.Entry, staging: Staging,
+                            resolvedSHA: String, env: Environment) throws -> UpdatePreview {
+        var transferred = false
+        defer { if !transferred { staging.discard() } }
+        try Task.checkCancellation()
         guard let candidate = staging.candidates.first(where: {
             $0.name == entry.name && $0.kind.rawValue == entry.kind
         }) else {
-            staging.discard()
             throw Failure.candidateMissing(entry.name)
         }
         let current = destination(for: entry, env: env)
         let oldManifest = (try? manifest(of: current)) ?? []
         let newManifest = try manifest(of: candidate.localURL)
-        return UpdatePreview(name: entry.name, oldSha: entry.sha, newSha: resolvedSHA,
+        let review = reviewDiff(oldRoot: current, newRoot: candidate.localURL,
+                                old: oldManifest, new: newManifest)
+        let preview = UpdatePreview(name: entry.name, oldSha: entry.sha, newSha: resolvedSHA,
                              staging: staging, candidate: candidate,
-                             diff: reviewDiff(oldRoot: current,
-                                              newRoot: candidate.localURL,
-                                              old: oldManifest, new: newManifest),
-                             manifest: newManifest)
+                             diff: review.lines, manifest: newManifest,
+                             detailsOmitted: review.omitted)
+        try Task.checkCancellation()
+        transferred = true
+        return preview
+    }
+
+    static func move(_ source: URL, _ destination: URL) throws {
+        try FileManager.default.moveItem(at: source, to: destination)
     }
 
     public static func apply(
@@ -107,7 +125,7 @@ public enum Updater {
 
         let fileManager = FileManager.default
         let originalRegistry = registry
-        guard var entry = registry.entry(named: preview.name, kind: preview.candidate.kind) else {
+        guard let entry = registry.entry(named: preview.name, kind: preview.candidate.kind) else {
             throw Failure.notManaged(preview.name)
         }
         let destination = destination(for: entry, env: env)
@@ -121,6 +139,14 @@ public enum Updater {
         }
         try Fetcher.validate(preview.candidate, in: preview.staging)
 
+        // SHA だけが進んだ場合は実体を触らず、確認済みの版だけ記録する。
+        if try manifest(of: destination) == preview.manifest {
+            registry = try recordRevision(entry, preview: preview, env: env)
+            succeeded = true
+            preview.staging.finishApply()
+            return
+        }
+
         let transaction = URL(filePath: NSTemporaryDirectory())
             .appending(path: "manage-arms-update-\(UUID().uuidString)")
         let backup = transaction.appending(path: "previous")
@@ -131,28 +157,21 @@ public enum Updater {
         defer { if !keepTransaction { try? fileManager.removeItem(at: transaction) } }
         let hadExisting = fileManager.fileExists(atPath: destination.path(percentEncoded: false))
 
+        // 退避の失敗をコピー失敗と同じ catch で扱わない。元の実体はまだ消せない。
+        if hadExisting { try env.move(destination, backup) }
+
         do {
-            if hadExisting { try fileManager.moveItem(at: destination, to: backup) }
             try fileManager.createDirectory(at: destination.deletingLastPathComponent(),
                                             withIntermediateDirectories: true)
             try fileManager.copyItem(at: preview.candidate.localURL, to: destination)
-            entry.sha = preview.staging.resolvedSHA ?? preview.newSha
-            registry = try Registry.update(env: env) { latest in
-                guard var current = latest.entry(named: entry.name,
-                                                 kind: preview.candidate.kind) else {
-                    throw Failure.notManaged(entry.name)
-                }
-                guard !current.pinned else { throw Failure.pinned(entry.name) }
-                current.sha = entry.sha
-                latest.upsert(current)
-            }
+            registry = try recordRevision(entry, preview: preview, env: env)
         } catch {
             registry = originalRegistry
             do {
                 if fileManager.fileExists(atPath: destination.path(percentEncoded: false)) {
                     try fileManager.removeItem(at: destination)
                 }
-                if hadExisting { try fileManager.moveItem(at: backup, to: destination) }
+                if hadExisting { try env.move(backup, destination) }
             } catch let rollbackError {
                 keepTransaction = true
                 throw Failure.rollbackFailed(
@@ -165,6 +184,18 @@ public enum Updater {
         preview.staging.finishApply()
     }
 
+    private static func recordRevision(_ entry: Registry.Entry, preview: UpdatePreview,
+                                       env: Environment) throws -> Registry {
+        try Registry.update(env: env) { latest in
+            guard var current = latest.entry(named: entry.name, kind: preview.candidate.kind) else {
+                throw Failure.notManaged(entry.name)
+            }
+            guard !current.pinned else { throw Failure.pinned(entry.name) }
+            current.sha = preview.staging.resolvedSHA ?? preview.newSha
+            latest.upsert(current)
+        }
+    }
+
     private static func destination(for entry: Registry.Entry, env: Environment) -> URL {
         entry.kind == Kind.subagent.rawValue
             ? (entry.disabled ? env.disabledAgentStore : env.agentStore)
@@ -173,6 +204,9 @@ public enum Updater {
     }
 
     static let diffTextLimit = 256 * 1024
+    static let diffInputLimit = 1024 * 1024
+    static let diffLineLimit = 2000
+    static let diffFileLineLimit = 1000
 
     static func manifest(of root: URL) throws -> [TreeEntry] {
         let fileManager = FileManager.default
@@ -242,26 +276,46 @@ public enum Updater {
     }
 
     static func reviewDiff(oldRoot: URL, newRoot: URL,
-                           old: [TreeEntry], new: [TreeEntry]) -> [DiffLine] {
+                           old: [TreeEntry], new: [TreeEntry]) -> (lines: [DiffLine], omitted: Bool) {
         let summary = treeDiff(old: old, new: new)
         let oldByPath = Dictionary(uniqueKeysWithValues: old.map { ($0.path, $0) })
         let newByPath = Dictionary(uniqueKeysWithValues: new.map { ($0.path, $0) })
         var details: [DiffLine] = []
+        var remaining = diffInputLimit
+        var omitted = false
         for path in Set(oldByPath.keys).intersection(newByPath.keys).sorted() {
             guard let before = oldByPath[path], let after = newByPath[path],
-                  before != after, before.kind == .file, after.kind == .file,
-                  before.size <= diffTextLimit, after.size <= diffTextLimit else { continue }
+                  before != after, before.kind == .file, after.kind == .file else { continue }
+            guard before.size <= diffTextLimit, after.size <= diffTextLimit,
+                  before.size + after.size <= remaining, details.count < diffLineLimit else {
+                omitted = true
+                continue
+            }
+            remaining -= before.size + after.size
             let oldURL = fileURL(root: oldRoot, entry: before)
             let newURL = fileURL(root: newRoot, entry: after)
-            guard let oldData = try? Data(contentsOf: oldURL),
-                  let newData = try? Data(contentsOf: newURL),
-                  String(data: oldData, encoding: .utf8) != nil,
-                  String(data: newData, encoding: .utf8) != nil else { continue }
-            details += diff(old: text(of: oldURL), new: text(of: newURL)).map {
+            guard let oldText = boundedText(of: oldURL), let newText = boundedText(of: newURL),
+                  oldText.count <= diffFileLineLimit, newText.count <= diffFileLineLimit else {
+                omitted = true
+                continue
+            }
+            let changes = diff(old: oldText, new: newText)
+            let available = diffLineLimit - details.count
+            if changes.count > available { omitted = true }
+            details += changes.prefix(available).map {
                 DiffLine(kind: $0.kind, text: "\(path): \($0.text)")
             }
         }
-        return summary + details
+        return (summary + details, omitted)
+    }
+
+    private static func boundedText(of url: URL) -> [String]? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: diffTextLimit + 1),
+              data.count <= diffTextLimit, let text = String(data: data, encoding: .utf8) else { return nil }
+        return text.replacingOccurrences(of: "\r\n", with: "\n")
+            .split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
     }
 
     private static func fileURL(root: URL, entry: TreeEntry) -> URL {

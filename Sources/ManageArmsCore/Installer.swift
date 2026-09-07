@@ -71,12 +71,15 @@ public enum Installer {
             sha: staging.resolvedSHA
         ))
         do {
-            if isSubagent {
-                try SubagentManager.enable(candidate.name, env: env, registry: &registry)
-            } else {
-                try SkillManager.linkForClaude(candidate.name, env: env, registry: registry)
+            try ManagedLifecycle.link(candidate.name, kind: candidate.kind,
+                                      env: env, registry: registry)
+            let entry = registry.entry(named: candidate.name, kind: candidate.kind)!
+            registry = try Registry.update(env: env) { latest in
+                guard latest.entry(named: candidate.name, kind: candidate.kind) == nil else {
+                    throw Failure.alreadyInstalled(candidate.name)
+                }
+                latest.upsert(entry)
             }
-            try registry.save(env: env)
         } catch {
             let originalError = error
             registry = originalRegistry

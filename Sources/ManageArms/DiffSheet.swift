@@ -27,6 +27,10 @@ struct DiffSheet: View {
                     Pill(text: "−\(removed)", tint: .red)
                 }
                 diff
+                if preview.detailsOmitted {
+                    Text("大きな変更の本文は省略しています。ファイル単位の変更一覧はすべて表示しています。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             } else {
                 ContentUnavailableView("内容に差分はありません", systemImage: "equal.circle")
             }
@@ -41,7 +45,7 @@ struct DiffSheet: View {
     /// 記号（+ / −）だけだと、等幅でも折り返しの多い散文では追えない。
     private var diff: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
+            LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(preview.diff.enumerated()), id: \.offset) { _, line in
                     let plus = line.kind == .added
                     HStack(alignment: .top, spacing: 8) {
@@ -82,7 +86,7 @@ struct DiffSheet: View {
                 Button("更新する") { model.applyPreview() }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(!preview.hasChanges)
+                    .disabled(model.isMutating)
             }
             .padding(.horizontal, 20).padding(.vertical, 14)
         }

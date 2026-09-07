@@ -258,3 +258,25 @@ struct SkillRemoveTests {
         #expect(f.exists(dir))
     }
 }
+
+extension SkillManagerTests {
+    @Test("有効化と無効化は新しい固定設定や使用履歴を保存したまま行う")
+    func lifecyclePreservesNewerRegistry() throws {
+        var f = try Fixture()
+        defer { try? FileManager.default.removeItem(at: f.env.home) }
+        try f.install("demo")
+        try Registry.update(env: f.env) { latest in
+            var entry = latest.entry(named: "demo")!
+            entry.pinned = true
+            latest.upsert(entry)
+            latest.usage.lastUsed["other"] = Date(timeIntervalSince1970: 123)
+        }
+        try SkillManager.disable("demo", env: f.env, registry: &f.registry)
+        #expect(f.registry.entry(named: "demo")?.pinned == true)
+        #expect(f.registry.usage.lastUsed["other"] != nil)
+        #expect(f.registry.entry(named: "demo")?.disabled == true)
+        try SkillManager.enable("demo", env: f.env, registry: &f.registry)
+        #expect(f.registry.entry(named: "demo")?.pinned == true)
+        #expect(f.registry.entry(named: "demo")?.disabled == false)
+    }
+}

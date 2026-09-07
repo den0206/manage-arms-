@@ -359,3 +359,7 @@
 "更新に失敗し、元の状態も完全には復元できませんでした: %@" = "The update failed and the original state could not be fully restored: %@";
 "%@ の親ディレクトリに安全でないシンボリックリンクがあります" = "A parent directory of %@ contains an unsafe symbolic link";
 "更新に失敗し、元の状態も完全には復元できませんでした: %1$@。更新前の実体は %2$@ に残してあります" = "The update failed and the original state could not be fully restored: %1$@. The resource as it was before the update is kept at %2$@";
+
+"大きな変更の本文は省略しています。ファイル単位の変更一覧はすべて表示しています。" = "Text details for large changes are omitted. All file changes are listed.";
+
+"使用履歴の分析は途中まで完了しました。「使用状況を分析」をもう一度押すと続きから再開します。" = "Usage analysis is incomplete. Choose Analyze usage again to resume.";

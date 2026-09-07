@@ -17,7 +17,7 @@ The design document is [DESIGN.md](DESIGN.md) (Japanese).
 | **Add** | Review skills from GitHub; add MCP using JSON, an endpoint URL, or a command; add plugins by name and marketplace. Choose the destination agent |
 | **Enable / disable / delete** | Toggle app-managed shared skills. Remove existing user tools by location or agent: files go to Trash; MCP and plugins are unregistered through their manager |
 | **Bundled protection** | Known bundled skill paths, tools with protection metadata, and links into plugin storage are protected |
-| **Update** | Review the `SKILL.md` diff before applying. Pin a resource to stop updates when upstream changes direction |
+| **Update** | Review all changed files before applying, with bounded text details. Unchanged content only advances the recorded revision. Pin a resource to stop updates when upstream changes direction |
 | **Scope** | A tab for "all projects", one per project, and one for what ships with the agent — with a warning when the same thing is installed both ways, and bulk removal of the project copies |
 | **Usage** | Last-used dates from Claude Code, Codex and Cursor session logs. MCP processes checked every 3 seconds while a window is visible; this does not indicate an active tool call |
 | **Browser detection** | On by default. Opening a skill, plugin or subagent page while a browser is frontmost turns the menu bar icon green and offers to add it; leaving the page turns it back — no URL to copy, and no system notifications. The page is confirmed against `raw.githubusercontent.com` first, and the URL is never stored |
@@ -42,7 +42,7 @@ The project is a Swift Package — there is no `.xcodeproj` (open `Package.swift
 directly).
 
 ```bash
-swift test                  # unit tests (366 @Test declarations)
+swift test                  # unit tests (374 @Test declarations)
 swift build                 # compile check
 
 # The distributable form is a hand-assembled .app bundle.

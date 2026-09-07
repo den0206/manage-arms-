@@ -64,7 +64,7 @@ public enum UpdateChecker {
         for key in staleKeys(registry, now: env.now(), force: force) {
             do {
                 try await checkOne(key, &registry, env: env)
-                results[key] = nil
+                results[key] = .some(nil)
             } catch {
                 results[key] = error
             }

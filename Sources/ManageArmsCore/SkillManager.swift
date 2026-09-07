@@ -153,8 +153,12 @@ enum ManagedLifecycle {
             try link(name, kind: kind, env: env, registry: registry)
             var entry = registry.entry(named: name, kind: kind) ?? Registry.Entry(name: name, kind: kind)
             entry.disabled = false
-            registry.upsert(entry)
-            try registry.save(env: env)
+            let fallback = entry
+            registry = try Registry.update(env: env) { latest in
+                var current = latest.entry(named: name, kind: kind) ?? fallback
+                current.disabled = false
+                latest.upsert(current)
+            }
         } catch {
             let originalError = error
             registry = originalRegistry
@@ -217,8 +221,12 @@ enum ManagedLifecycle {
             for link in links { try fm.removeItem(at: link) }
             var entry = registry.entry(named: name, kind: kind) ?? Registry.Entry(name: name, kind: kind)
             entry.disabled = true
-            registry.upsert(entry)
-            try registry.save(env: env)
+            let fallback = entry
+            registry = try Registry.update(env: env) { latest in
+                var current = latest.entry(named: name, kind: kind) ?? fallback
+                current.disabled = true
+                latest.upsert(current)
+            }
         } catch {
             let originalError = error
             registry = originalRegistry
@@ -266,8 +274,9 @@ enum ManagedLifecycle {
                 try fm.trashItem(at: url, resultingItemURL: &result)
                 if let trash = result as URL? { moved.append((url, trash)) }
             }
-            registry.resources.removeAll { $0.name == name && $0.kind == kind.rawValue }
-            try registry.save(env: env)
+            registry = try Registry.update(env: env) { latest in
+                latest.resources.removeAll { $0.name == name && $0.kind == kind.rawValue }
+            }
         } catch {
             registry = originalRegistry
             do {

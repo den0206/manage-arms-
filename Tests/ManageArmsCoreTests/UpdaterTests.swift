@@ -175,3 +175,89 @@ struct UpdaterTests {
         }
     }
 }
+
+extension UpdaterTests {
+    @Test("退避に失敗しても元の実体と登録情報を削除しない")
+    func failedBackupPreservesOriginal() throws {
+        var f = try Fixture(newBody: "new body")
+        defer { try? FileManager.default.removeItem(at: f.env.home) }
+        var env = f.env
+        env.move = { _, _ in throw CocoaError(.fileWriteOutOfSpace) }
+        let preview = UpdatePreview(name: "demo", oldSha: "old", newSha: "new",
+                                    staging: f.staging, candidate: f.candidate, diff: [])
+        #expect(throws: (any Error).self) {
+            try Updater.apply(preview, env: env, registry: &f.registry)
+        }
+        #expect(try f.body().contains("description: old"))
+        #expect(Registry.load(env: env).entry(named: "demo")?.sha == "old")
+        #expect(FileManager.default.fileExists(atPath: f.staging.root.path))
+    }
+
+    @Test("退避後の保存失敗では元の実体を復元する")
+    func restoresAfterBackup() throws {
+        var f = try Fixture(newBody: "new body")
+        defer { try? FileManager.default.removeItem(at: f.env.home) }
+        let registryFile = f.env.registryFile
+        var env = f.env
+        env.move = { source, destination in
+            try FileManager.default.moveItem(at: source, to: destination)
+            if destination.lastPathComponent == "previous" {
+                try "broken".write(to: registryFile, atomically: true, encoding: .utf8)
+            }
+        }
+        let preview = UpdatePreview(name: "demo", oldSha: "old", newSha: "new",
+                                    staging: f.staging, candidate: f.candidate, diff: [])
+        #expect(throws: (any Error).self) {
+            try Updater.apply(preview, env: env, registry: &f.registry)
+        }
+        #expect(try f.body().contains("description: old"))
+    }
+
+    @Test("プレビュー作成中の検証失敗でも一時ディレクトリを片付ける")
+    func failedPreviewDiscardsStaging() throws {
+        let f = try Fixture(newBody: "new body")
+        defer { try? FileManager.default.removeItem(at: f.env.home) }
+        try FileManager.default.createSymbolicLink(
+            at: f.candidate.localURL.appending(path: "link"), withDestinationURL: f.env.home)
+        let entry = try #require(f.registry.entry(named: "demo"))
+        #expect(throws: (any Error).self) {
+            try Updater.makePreview(entry, staging: f.staging, resolvedSHA: "new", env: f.env)
+        }
+        #expect(!FileManager.default.fileExists(atPath: f.staging.root.path))
+        #expect(try f.body().contains("description: old"))
+    }
+
+    @Test("内容が同じ更新は実体を置き換えずSHAだけ進める")
+    func identicalUpdateOnlyRecordsRevision() throws {
+        var f = try Fixture(newBody: "---\nname: demo\ndescription: old\n---\n")
+        defer { try? FileManager.default.removeItem(at: f.env.home) }
+        var env = f.env
+        env.move = { _, _ in throw CocoaError(.fileWriteNoPermission) }
+        let preview = UpdatePreview(name: "demo", oldSha: "old", newSha: "new",
+                                    staging: f.staging, candidate: f.candidate, diff: [])
+        try Updater.apply(preview, env: env, registry: &f.registry)
+        #expect(Registry.load(env: env).entry(named: "demo")?.sha == "new")
+        #expect(try f.body().contains("description: old"))
+        #expect(!FileManager.default.fileExists(atPath: f.staging.root.path))
+    }
+
+    @Test("大量の差分は本文を制限しても全ファイルの変更を残す")
+    func boundsReviewDetails() throws {
+        let f = try Fixture(newBody: "new body")
+        defer { try? FileManager.default.removeItem(at: f.env.home) }
+        let old = f.env.skillStore.appending(path: "demo")
+        let new = f.candidate.localURL
+        for i in 0..<8 {
+            try (0..<900).map { "old-\(i)-\($0)" }.joined(separator: "\n")
+                .write(to: old.appending(path: "file-\(i)"), atomically: true, encoding: .utf8)
+            try (0..<900).map { "new-\(i)-\($0)" }.joined(separator: "\n")
+                .write(to: new.appending(path: "file-\(i)"), atomically: true, encoding: .utf8)
+        }
+        let before = try Updater.manifest(of: old), after = try Updater.manifest(of: new)
+        let summary = Updater.treeDiff(old: before, new: after)
+        let review = Updater.reviewDiff(oldRoot: old, newRoot: new, old: before, new: after)
+        #expect(review.omitted)
+        #expect(Array(review.lines.prefix(summary.count)) == summary)
+        #expect(review.lines.count <= summary.count + Updater.diffLineLimit)
+    }
+}

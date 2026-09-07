@@ -198,3 +198,27 @@ final class Locked<T>: @unchecked Sendable {
         set { lock.withLock { stored = newValue } }
     }
 }
+
+extension UpdateCheckerTests {
+    @Test("成功したキーを画面と同じ経路で保存し再読込できる", arguments: [200, 304])
+    func persistsSuccessfulCheck(_ status: Int) async throws {
+        let env = Self.env { _, _ in
+            .init(body: Data(#"{"sha":"new"}"#.utf8), status: status, headers: ["etag": "new-tag"])
+        }
+        defer { try? FileManager.default.removeItem(at: env.home) }
+        var registry = Registry()
+        registry.upsert(Self.entry("demo"))
+        registry.repos["o/r#main"] = .init(etag: "old-tag", latestSha: "old")
+        try registry.save(env: env)
+        let results = await UpdateChecker.check(&registry, env: env, force: true)
+        #expect(results.keys.contains("o/r#main"))
+        #expect(results.values.compactMap { $0 }.isEmpty)
+        try Registry.update(env: env) { latest in
+            for key in results.keys { latest.repos[key] = registry.repos[key] }
+        }
+        let loaded = try Registry.read(env: env)
+        #expect(loaded.repos["o/r#main"]?.latestSha == (status == 200 ? "new" : "old"))
+        #expect(loaded.repos["o/r#main"]?.checkedAt == env.now())
+        #expect(UpdateChecker.staleKeys(loaded, now: env.now(), force: false).isEmpty)
+    }
+}
