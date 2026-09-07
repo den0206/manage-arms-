@@ -29,12 +29,21 @@ public struct ResourceRow: Identifiable, Sendable {
     /// `@latest` 指定でピン留めできる MCP（7.2）。
     /// MCP に「更新」は存在しないので、操作列にはこれを出す。
     public let canPin: Bool
+    /// 実体のディスク使用量。**0 は「測れなかった」** — MCP はコマンドで起動するだけで
+    /// ローカルに実体を持たないので常に 0 になる。表示は「—」に落とす。
+    public var bytes: Int = 0
     public var id: String { "\(kind.rawValue):\(name)" + (ownerAgent.map { ":" + $0.rawValue } ?? "") }
 
     /// 表示順。種別ごとにまとめ、同じ種別なら名前順。
     public static func display(_ a: ResourceRow, _ b: ResourceRow) -> Bool {
         a.kind == b.kind ? a.name < b.name
             : (Kind.allCases.firstIndex(of: a.kind) ?? 0) < (Kind.allCases.firstIndex(of: b.kind) ?? 0)
+    }
+
+    /// 容量の表示。**0 は出さない** — MCP のようにローカル実体を持たないものと、
+    /// 測れなかったものを区別できないので、数字を出す方が嘘になる。
+    public var sizeText: String? {
+        bytes > 0 ? bytes.formatted(.byteCount(style: .file)) : nil
     }
 
     /// 使用実績を観測できる行か。ログを読める Agent のどれかから見えればよい（3.9）。
@@ -46,12 +55,12 @@ public struct ResourceRow: Identifiable, Sendable {
                 state: [Agent: State], origin: Origin, isDisabled: Bool,
                 roots: [String] = [], reach: Reach = .user,
                 update: UpdateStatus = .unmanaged, lastUsed: Date? = nil,
-                running: RunningMCP? = nil, canPin: Bool = false) {
+                running: RunningMCP? = nil, canPin: Bool = false, bytes: Int = 0) {
         self.name = name; self.kind = kind; self.summary = summary; self.detail = detail
         self.state = state; self.origin = origin; self.isDisabled = isDisabled
         self.roots = roots; self.reach = reach
         self.update = update; self.lastUsed = lastUsed
-        self.running = running; self.canPin = canPin
+        self.running = running; self.canPin = canPin; self.bytes = bytes
     }
 
     /// どこで効いているか（DESIGN.md 5.1）。
@@ -425,6 +434,43 @@ public struct Inventory: Sendable {
         return inventory
     }
 
+    /// 実体のディスク使用量。**symlink は辿らない** — このアプリは各エージェントから
+    /// 見えるように symlink を張るので（3.2）、素朴に足すと同じ実体を何度も数える。
+    /// 実体パスで重複を落としてから測る。測れないものは 0（「—」として出す）。
+    ///
+    /// 走査は `du` と同じで、実測 12 MB / 1,166 ファイルで 10 ms 未満
+    /// （最大の `~/.codex/plugins/cache` 31 MB / 314 ファイルを含めても同じ桁）。
+    /// 中身は読まずメタデータだけ見る。一覧の読み込みと同じ off-main の経路で回るので、
+    /// 300 ms の目標には効かない。
+    static func diskBytes(_ urls: [URL]) -> Int {
+        var seen = Set<String>()
+        return urls.reduce(into: 0) { total, url in
+            let real = url.resolvingSymlinksInPath().standardizedFileURL
+            guard seen.insert(real.path).inserted else { return }
+            total += size(at: real)
+        }
+    }
+
+    private static let sizeKeys: [URLResourceKey] = [.isRegularFileKey,
+                                                     .totalFileAllocatedSizeKey, .fileSizeKey]
+
+    /// 割り当て済みサイズを使う（`du` と同じ見え方）。取れなければ論理サイズに落とす。
+    private static func size(at url: URL) -> Int {
+        guard let values = try? url.resourceValues(forKeys: Set(sizeKeys)) else { return 0 }
+        func bytes(_ v: URLResourceValues) -> Int { v.totalFileAllocatedSize ?? v.fileSize ?? 0 }
+        if values.isRegularFile == true { return bytes(values) }
+        // 隠しファイルも数える（`.git` はディスクを実際に食っている）。
+        guard let walker = FileManager.default.enumerator(
+            at: url, includingPropertiesForKeys: sizeKeys,
+            options: [], errorHandler: { _, _ in true }) else { return 0 }
+        return walker.reduce(into: 0) { total, item in
+            guard let file = item as? URL,
+                  let values = try? file.resourceValues(forKeys: Set(sizeKeys)),
+                  values.isRegularFile == true else { return }
+            total += bytes(values)
+        }
+    }
+
     /// 最終使用日を引く（DESIGN.md 3.9）。
     /// Plugin だけ表記が食い違う — 一覧上の id は `ponytail@ponytail`、
     /// ログ上は `ponytail:ponytail-review` の前半なので `@` の手前で引き直す（spike #15）。
@@ -464,7 +510,8 @@ public struct Inventory: Sendable {
                     reach: .make(user: true, projects: projects.paths(name, kind: .skill)),
                     update: registry.entry(named: name, kind: .skill)
                         .map { UpdateChecker.status(of: $0, in: registry) } ?? .unmanaged,
-                    lastUsed: lastUsed(name, kind: .skill, used: registry.usage.lastUsed)
+                    lastUsed: lastUsed(name, kind: .skill, used: registry.usage.lastUsed),
+                    bytes: diskBytes(found.map(\.url))
                 )
             }
             .sorted { $0.name < $1.name }
@@ -517,7 +564,8 @@ public struct Inventory: Sendable {
                     roots: found.map(\.root),
                     reach: .make(user: true, projects: projects.paths(name, kind: .subagent)),
                     update: entry.map { UpdateChecker.status(of: $0, in: registry) } ?? .unmanaged,
-                    lastUsed: lastUsed(name, kind: .subagent, used: registry.usage.lastUsed)
+                    lastUsed: lastUsed(name, kind: .subagent, used: registry.usage.lastUsed),
+                    bytes: diskBytes(found.map(\.url))
                 )
             }
             .sorted { $0.name < $1.name }
@@ -566,7 +614,8 @@ public struct Inventory: Sendable {
                     origin: found.contains(where: \.isBundled) ? .bundled : .user,
                     isDisabled: !found.contains(where: \.enabled),
                     reach: .make(user: found.contains { $0.scope == "user" }, projects: found.compactMap(\.projectPath)),
-                    lastUsed: lastUsed(id, kind: .plugin, used: used))
+                    lastUsed: lastUsed(id, kind: .plugin, used: used),
+                    bytes: diskBytes(found.compactMap(\.installPath)))
                 row.ownerAgent = agent
                 return row
             }

@@ -22,9 +22,10 @@ struct PluginScannerTests {
     /// `installPolicy` は Codex の既定プラグインに付く（`INSTALLED_BY_DEFAULT`）。
     static let codexJSON = """
     {"installed":[{"pluginId":"plugin-management@openai-curated-remote",
-                   "name":"plugin-management","version":"0.1.0","enabled":true,
+                   "name":"plugin-management","marketplaceName":"openai-curated-remote",
+                   "version":"0.1.0","enabled":true,
                    "installPolicy":"INSTALLED_BY_DEFAULT","authPolicy":"ON_USE"},
-                  {"pluginId":"mine@my-marketplace",
+                  {"pluginId":"mine@my-marketplace","marketplaceName":"my-marketplace",
                    "name":"mine","version":"0.2.0","enabled":true}],
      "available":[{"pluginId":"gmail@openai-curated-remote"}]}
     """
@@ -145,5 +146,79 @@ struct PluginScannerTests {
         #expect(ponytail.detail.contains("2 プロジェクトに重複導入"))
         #expect(ponytail.state[.claude] == .explicit)
         #expect(ponytail.state[.gemini] == .unsupported)   // Gemini に Plugin は無い
+    }
+}
+
+/// DESIGN.md 3.4 — CLI が名乗った置き場を、走査する前にホワイトリストへ入れる。
+/// 実 CLI の形は確認済み: Claude は `installPath` を返し、Codex は返さず
+/// `marketplaceName` + `cache/<market>/<name>/<version>` に置く。
+@Suite("プラグインの置き場")
+struct PluginInstallPathTests {
+
+    static func home() throws -> URL {
+        let home = URL(filePath: NSTemporaryDirectory())
+            .appending(path: "manage-arms-path-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: home.appending(path: ".claude/plugins/cache"), withIntermediateDirectories: true)
+        return home
+    }
+
+    /// 偽ホームは `/var/folders/…`（実体は `/private/var/…`）なので、
+    /// 期待値も同じ解決を通す。ここが噛み合わないと検査と走査がずれる。
+    static func resolved(_ url: URL) -> URL { url.resolvingSymlinksInPath().standardizedFileURL }
+
+    @Test("Claude は CLI の installPath をそのまま使う")
+    func usesClaudeInstallPath() throws {
+        let home = try Self.home()
+        let body = home.appending(path: ".claude/plugins/cache/ponytail/ponytail/4.9.0")
+        let got = PluginScanner.installPath(
+            ["installPath": body.path(percentEncoded: false)],
+            agent: .claude, env: .test(home: home))
+        #expect(got == Self.resolved(body))
+    }
+
+    @Test("Codex は cache/<market>/<name>/<version> から組む")
+    func composesCodexPath() throws {
+        let home = try Self.home()
+        let got = PluginScanner.installPath(
+            ["marketplaceName": "ponytail", "name": "ponytail", "version": "4.9.0"],
+            agent: .codex, env: .test(home: home))
+        #expect(got == Self.resolved(
+            home.appending(path: ".codex/plugins/cache/ponytail/ponytail/4.9.0")))
+    }
+
+    @Test("版が分からなければ組み立てない")
+    func needsEveryPart() throws {
+        let home = try Self.home()
+        #expect(PluginScanner.installPath(["marketplaceName": "m", "name": "n"],
+                                          agent: .codex, env: .test(home: home)) == nil)
+    }
+
+    @Test("plugins の外を名乗ったら捨てる", arguments: ["/x", "/tmp/elsewhere"])
+    func rejectsOutside(_ path: String) throws {
+        let home = try Self.home()
+        #expect(PluginScanner.installPath(["installPath": path],
+                                          agent: .claude, env: .test(home: home)) == nil)
+    }
+
+    @Test("plugins を経由して外へ出る名乗りも捨てる")
+    func rejectsEscape() throws {
+        let home = try Self.home()
+        let escape = home.appending(path: ".claude/plugins/../../.ssh")
+        #expect(PluginScanner.installPath(["installPath": escape.path(percentEncoded: false)],
+                                          agent: .claude, env: .test(home: home)) == nil)
+    }
+
+    /// `WriteGuard.isInside` は `..` は畳むが symlink は追わない。
+    /// 解決前に突き合わせると「plugins の中を検査して、外を歩く」になる。
+    @Test("plugins の中の symlink が外を指していたら捨てる")
+    func rejectsSymlinkOutOfRoot() throws {
+        let home = try Self.home()
+        let outside = home.appending(path: "elsewhere")
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        let link = home.appending(path: ".claude/plugins/cache/evil")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: outside)
+        #expect(PluginScanner.installPath(["installPath": link.path(percentEncoded: false)],
+                                          agent: .claude, env: .test(home: home)) == nil)
     }
 }

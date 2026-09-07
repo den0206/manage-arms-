@@ -12,6 +12,9 @@ public struct InstalledPlugin: Equatable, Sendable {
     /// marketplace 側で自動更新が有効。アプリは手を出さない（7.5）。
     public let autoUpdate: Bool
     public var isBundled = false
+    /// 実体の置き場。**`~/.{claude,codex}/plugins` の中にあるものだけ**入る（3.4）。
+    /// 容量表示にしか使わない。
+    public var installPath: URL?
 }
 
 public enum PluginScanner {
@@ -62,8 +65,37 @@ public enum PluginScanner {
             plugin.isBundled = item["isBuiltIn"] as? Bool == true || item["managed"] as? Bool == true
                 || item["scope"] as? String == "managed"
                 || item["installPolicy"] as? String == "INSTALLED_BY_DEFAULT"
+            plugin.installPath = installPath(item, agent: agent, env: env)
             return plugin
         }
+    }
+
+    /// 実体の置き場（容量表示用）。**Claude は CLI が `installPath` を返す。**
+    /// Codex は返さないので `cache/<marketplace>/<name>/<version>` から組む — この形は
+    /// 両エージェントの実測で確認済み（推測ではない）。
+    ///
+    /// どちらも `~/.{claude,codex}/plugins` の外を指していたら捨てる。
+    /// CLI が名乗ったパスをそのまま歩くと、走査範囲がホワイトリストから外れる（3.4）。
+    ///
+    /// **検査したパスをそのまま返す。** `WriteGuard.isInside` は字句解決しかしないので
+    /// （`..` は畳むが symlink は追わない）、解決前に突き合わせると
+    /// 「plugins の中を検査して、外を歩く」になる — 実際に歩く `Inventory.diskBytes` は
+    /// 実体パスまで解決する。両辺を解決してから比べ、通った実体だけを渡す。
+    static func installPath(_ item: [String: Any], agent: Agent, env: Environment) -> URL? {
+        let root = env.home.appending(path: agent == .claude ? ".claude/plugins" : ".codex/plugins")
+            .resolvingSymlinksInPath().standardizedFileURL
+        let url: URL?
+        if let path = item["installPath"] as? String {
+            url = URL(filePath: path)
+        } else if let market = item["marketplaceName"] as? String,
+                  let name = item["name"] as? String, let version = item["version"] as? String {
+            url = root.appending(path: "cache/\(market)/\(name)/\(version)")
+        } else {
+            url = nil
+        }
+        guard let real = url?.resolvingSymlinksInPath().standardizedFileURL,
+              WriteGuard.isInside(real, root) else { return nil }
+        return real
     }
 
     /// 同一プラグインが複数プロジェクトに個別インストールされている状態を見つける。

@@ -120,6 +120,49 @@ struct InventoryLoadTests {
     }
 }
 
+/// DESIGN.md 9 章 — 容量表示。symlink で見せている実体を二重に数えない。
+@Suite("容量の集計")
+struct DiskBytesTests {
+
+    static func temp() throws -> URL {
+        let dir = URL(filePath: NSTemporaryDirectory())
+            .appending(path: "manage-arms-bytes-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    @Test("ディレクトリを再帰で足す。symlink 越しの同じ実体は 1 回だけ")
+    func sumsRealBodiesOnce() throws {
+        let dir = try Self.temp()
+        let body = dir.appending(path: "skill")
+        let fm = FileManager.default
+        try fm.createDirectory(at: body.appending(path: "nested"), withIntermediateDirectories: true)
+        try Data(repeating: 0, count: 5_000).write(to: body.appending(path: "SKILL.md"))
+        try Data(repeating: 0, count: 3_000).write(to: body.appending(path: "nested/more.md"))
+        let link = dir.appending(path: "linked")
+        try fm.createSymbolicLink(at: link, withDestinationURL: body)
+
+        let alone = Inventory.diskBytes([body])
+        #expect(alone >= 8_000)
+        // Claude / Cursor / Codex から見えるよう symlink を張った状態（3.2）。
+        #expect(Inventory.diskBytes([body, link, body]) == alone, "同じ実体を重ねて数えている")
+    }
+
+    @Test("存在しないものは 0")
+    func missingIsZero() throws {
+        #expect(Inventory.diskBytes([URL(filePath: "/nonexistent/x")]) == 0)
+    }
+
+    @Test("0 のときは容量を表示しない")
+    func hidesZero() {
+        let row = ResourceRow(name: "a", kind: .mcp, summary: nil, detail: "",
+                              state: [:], origin: .user, isDisabled: false)
+        #expect(row.sizeText == nil)
+        #expect(ResourceRow(name: "b", kind: .skill, summary: nil, detail: "", state: [:],
+                            origin: .user, isDisabled: false, bytes: 4_096).sizeText != nil)
+    }
+}
+
 @Suite("読み込めないスキルは有効にしない")
 struct UnloadableSkillTests {
 
