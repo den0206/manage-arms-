@@ -3,6 +3,7 @@ import Foundation
 /// アプリが永続化する唯一のファイル。DESIGN.md 4.1。
 /// `~/.agents/.skill-lock.json` は読み取り専用で参照するだけで、ここには書かない。
 public struct Registry: Codable, Equatable, Sendable {
+    private static let ioLock = NSLock()
     public var resources: [Entry] = []
     public var projects: [String] = []
     /// ETag と更新チェック結果は repo/branch 単位で持つ（7.3 の「リポジトリ単位で束ねる」）。
@@ -167,6 +168,10 @@ public struct Registry: Codable, Equatable, Sendable {
     /// `load` と違い**壊れていたら投げる**。`load` は既定値で握り潰すので、
     /// そのまま `save` すると利用者の全リソースの出所情報を空で上書きしてしまう。
     public static func read(env: Environment) throws -> Registry {
+        try ioLock.withLock { try readUnlocked(env: env) }
+    }
+
+    private static func readUnlocked(env: Environment) throws -> Registry {
         guard FileManager.default.fileExists(atPath: env.registryFile.path) else { return Registry() }
         return try decoder.decode(Registry.self, from: Data(contentsOf: env.registryFile))
     }
@@ -188,10 +193,28 @@ public struct Registry: Codable, Equatable, Sendable {
     /// アトミックに書く。書き込み中のクラッシュで壊れると
     /// 全リソースの出所情報が飛ぶ（9 章）。
     public func save(env: Environment) throws {
-        try Self.assertReadable(env: env)      // 壊れたファイルを空で上書きしない
-        try FileManager.default.createDirectory(
-            at: env.appSupport, withIntermediateDirectories: true)
-        try Self.encoder.encode(self).write(to: env.registryFile, options: .atomic)
+        try Self.ioLock.withLock {
+            _ = try Self.readUnlocked(env: env)
+            try Self.writeUnlocked(self, env: env)
+        }
+    }
+
+    /// アプリ内の read-modify-write を 1 つの排他区間にまとめる。
+    @discardableResult
+    public static func update(env: Environment,
+                              _ change: (inout Registry) throws -> Void) throws -> Registry {
+        try ioLock.withLock {
+            var registry = try readUnlocked(env: env)
+            try change(&registry)
+            try writeUnlocked(registry, env: env)
+            return registry
+        }
+    }
+
+    private static func writeUnlocked(_ registry: Registry, env: Environment) throws {
+        try FileManager.default.createDirectory(at: env.appSupport,
+                                                withIntermediateDirectories: true)
+        try encoder.encode(registry).write(to: env.registryFile, options: .atomic)
     }
 
     static let encoder: JSONEncoder = {

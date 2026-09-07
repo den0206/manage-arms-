@@ -45,6 +45,20 @@ public struct Environment: Sendable {
 }
 
 extension Environment {
+    /// 手動指定された CLI は検出だけでなく、すべての実操作で同じ実体を使う。
+    public func command(_ command: [String], for agent: Agent) -> [String] {
+        guard !command.isEmpty,
+              let manual = Registry.load(env: self).setting(agent).path,
+              FileManager.default.isExecutableFile(atPath: manual) else { return command }
+        var resolved = command
+        resolved[0] = manual
+        return resolved
+    }
+
+    public func runCLI(_ command: [String], for agent: Agent) throws -> String {
+        try run(self.command(command, for: agent))
+    }
+
     /// スキル実体の置き場。Cursor と Codex がここを直読みする（DESIGN.md 3.2）。
     public var skillStore: URL { home.appending(path: ".agents/skills") }
     /// 無効化したスキルの退避先（3.2 / 9 章）。実体は消さない。
@@ -83,15 +97,7 @@ extension Environment {
         httpGet: { url, headers in
             var request = URLRequest(url: url)
             for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }
-            // ephemeral: ディスクキャッシュを持たない（9 章）。ETag は registry で自前管理する。
-            let session = URLSession(configuration: .ephemeral)
-            defer { session.finishTasksAndInvalidate() }
-            let (data, response) = try await session.data(for: request)
-            let http = response as? HTTPURLResponse
-            let headers = (http?.allHeaderFields as? [String: String]) ?? [:]
-            return .init(body: data, status: http?.statusCode ?? 0,
-                         headers: Dictionary(uniqueKeysWithValues:
-                            headers.map { ($0.key.lowercased(), $0.value) }))
+            return try await BoundedHTTPClient.get(request, limit: 2 * 1024 * 1024)
         },
         httpHead: { url in
             var request = URLRequest(url: url)
@@ -121,5 +127,74 @@ extension Environment {
             httpGet: httpGet,
             httpHead: httpHead
         )
+    }
+}
+
+private final class BoundedHTTPClient: NSObject, URLSessionDataDelegate,
+                                       @unchecked Sendable {
+    struct TooLarge: Error {}
+    let limit: Int
+    private let lock = NSLock()
+    private var data = Data()
+    private var response: HTTPURLResponse?
+    private var continuation: CheckedContinuation<Environment.HTTPResult, any Error>?
+
+    init(limit: Int) { self.limit = limit }
+
+    static func get(_ request: URLRequest, limit: Int) async throws -> Environment.HTTPResult {
+        let client = BoundedHTTPClient(limit: limit)
+        let session = URLSession(configuration: .ephemeral, delegate: client, delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
+        return try await client.run(request, session: session)
+    }
+
+    func run(_ request: URLRequest, session: URLSession) async throws -> Environment.HTTPResult {
+        let task = session.dataTask(with: request)
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                lock.withLock { self.continuation = continuation }
+                if Task.isCancelled { task.cancel() } else { task.resume() }
+            }
+        } onCancel: { task.cancel() }
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask,
+                    didReceive response: URLResponse,
+                    completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        guard let http = response as? HTTPURLResponse,
+              response.expectedContentLength <= 0 || response.expectedContentLength <= Int64(limit)
+        else { completionHandler(.cancel); finish(.failure(TooLarge())); return }
+        lock.withLock { self.response = http }
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask,
+                    didReceive chunk: Data) {
+        let exceeded = lock.withLock { () -> Bool in
+            guard data.count + chunk.count <= limit else { return true }
+            data.append(chunk)
+            return false
+        }
+        if exceeded { dataTask.cancel(); finish(.failure(TooLarge())) }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    didCompleteWithError error: (any Error)?) {
+        if let error { finish(.failure(error)); return }
+        let result = lock.withLock { () -> Environment.HTTPResult in
+            let fields = (response?.allHeaderFields as? [String: String]) ?? [:]
+            return .init(body: data, status: response?.statusCode ?? 0,
+                         headers: Dictionary(uniqueKeysWithValues:
+                            fields.map { ($0.key.lowercased(), $0.value) }))
+        }
+        finish(.success(result))
+    }
+
+    private func finish(_ result: Result<Environment.HTTPResult, any Error>) {
+        let continuation = lock.withLock { () -> CheckedContinuation<Environment.HTTPResult, any Error>? in
+            defer { self.continuation = nil }
+            return self.continuation
+        }
+        continuation?.resume(with: result)
     }
 }

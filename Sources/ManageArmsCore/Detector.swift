@@ -141,19 +141,28 @@ public enum CLIScan {
 
         private let lock = NSLock()
         private var snapshots: [Key: Snapshot] = [:]
+        private var generation: UInt64 = 0
 
         func value(_ key: Key) -> Snapshot? { lock.withLock { snapshots[key] } }
 
-        func set(_ snapshot: Snapshot) {
+        func token() -> UInt64 { lock.withLock { generation } }
+
+        func set(_ snapshot: Snapshot, token: UInt64) {
             lock.withLock {
+                guard token == generation else { return }
                 snapshots[snapshot.key] = snapshot
                 guard snapshots.count > Self.capacity else { return }
                 let oldest = snapshots.min { $0.value.at < $1.value.at }?.key
-                oldest.map { snapshots.removeValue(forKey: $0) }
+                if let oldest { snapshots.removeValue(forKey: oldest) }
             }
         }
 
-        func clear() { lock.withLock { snapshots.removeAll() } }
+        func clear() {
+            lock.withLock {
+                snapshots.removeAll()
+                generation &+= 1
+            }
+        }
     }
 
     private static let store = Store()
@@ -167,8 +176,9 @@ public enum CLIScan {
            env.now().timeIntervalSince(cached.at) < interval {
             return cached
         }
+        let token = store.token()
         let fresh = scan(env: env, registry: registry, key: key)
-        store.set(fresh)
+        store.set(fresh, token: token)
         return fresh
     }
 

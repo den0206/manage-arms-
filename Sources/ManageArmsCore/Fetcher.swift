@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 /// 取得した中身の解釈結果。**自動では入れない。**
 /// README からのコマンド抽出は必ず外すため、確認画面を挟む（DESIGN.md 6 章）。
@@ -11,15 +12,53 @@ public struct Candidate: Equatable, Sendable {
 }
 
 /// 一時展開の所有権。install するか discard するまで生きている。
-public struct Staging: Sendable {
+public final class Staging: @unchecked Sendable {
     public let root: URL
     public let source: GitHubSource
     public let candidates: [Candidate]
+    public let resolvedSHA: String?
+
+    private let lock = NSLock()
+    private var applying = false
+    private var discarded = false
+
+    public init(root: URL, source: GitHubSource, candidates: [Candidate],
+                resolvedSHA: String? = nil) {
+        self.root = root
+        self.source = source
+        self.candidates = candidates
+        self.resolvedSHA = resolvedSHA
+    }
+
+    func claimForApply() -> Bool {
+        lock.withLock {
+            guard !applying, !discarded else { return false }
+            applying = true
+            return true
+        }
+    }
+
+    func releaseAfterFailure() { lock.withLock { applying = false } }
+
+    func finishApply() {
+        let shouldRemove = lock.withLock {
+            applying = false
+            guard !discarded else { return false }
+            discarded = true
+            return true
+        }
+        if shouldRemove { try? FileManager.default.removeItem(at: root) }
+    }
 
     /// 一時ディレクトリは `temporaryDirectory` 配下なので OS も回収するが、
     /// アプリが自前の掃除機能を持たなくて済むよう明示的に消す（9 章）。
     public func discard() {
-        try? FileManager.default.removeItem(at: root)
+        let shouldRemove = lock.withLock {
+            guard !applying, !discarded else { return false }
+            discarded = true
+            return true
+        }
+        if shouldRemove { try? FileManager.default.removeItem(at: root) }
     }
 }
 
@@ -54,7 +93,8 @@ public enum Fetcher {
     /// zip を落として展開し、中身から種別を判定する。`git clone` は使わない（3.3）。
     public static func stage(
         _ source: GitHubSource,
-        defaultBranch: String = "main"
+        defaultBranch: String = "main",
+        resolvedSHA: String? = nil
     ) async throws -> Staging {
         let root = URL(filePath: NSTemporaryDirectory())
             .appending(path: "manage-arms-fetch-\(UUID().uuidString)")
@@ -62,8 +102,15 @@ public enum Fetcher {
 
         do {
             let zip = root.appending(path: "archive.zip")
-            try await download(source.archiveURL(defaultBranch: defaultBranch),
+            try await download(source.archiveURL(defaultBranch: defaultBranch,
+                                                 revision: resolvedSHA),
                                to: zip, repo: source.repo)
+            let available = try? root.resourceValues(
+                forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+                .volumeAvailableCapacityForImportantUsage
+            guard available == nil || available! >= Int64(extractedSizeLimit * 2) else {
+                throw Failure.extractFailed(String(localized: "アーカイブを安全に展開する空き容量がありません"))
+            }
 
             let unpacked = root.appending(path: "unpacked")
             try extract(zip, to: unpacked)
@@ -78,12 +125,76 @@ public enum Fetcher {
 
             // ディレクトリ名由来の候補も含めて、最後にもう一度名前を検査する。
             // ここを通った名前だけが `Installer` でパスに使われる（9 章の作成方向）。
+            try validateExtractedTree(unpacked)
             let candidates = identify(base).filter { WriteGuard.isValidName($0.name) }
             guard !candidates.isEmpty else { throw Failure.nothingRecognized }
-            return Staging(root: root, source: source, candidates: candidates)
+            return Staging(root: root, source: source, candidates: candidates,
+                           resolvedSHA: resolvedSHA)
         } catch {
             try? FileManager.default.removeItem(at: root)
             throw error
+        }
+    }
+
+    static let extractedSizeLimit = 200 * 1024 * 1024
+    static let singleFileLimit = 20 * 1024 * 1024
+    static let entryLimit = 10_000
+    static let extractTimeLimit: TimeInterval = 30
+
+    static func validateExtractedTree(_ root: URL) throws {
+        let keys: [URLResourceKey] = [.isRegularFileKey, .isDirectoryKey,
+                                      .isSymbolicLinkKey, .fileSizeKey]
+        guard let walker = FileManager.default.enumerator(
+            at: root, includingPropertiesForKeys: keys,
+            options: [], errorHandler: { _, _ in false }) else { return }
+        var entries = 0
+        var total = 0
+        for case let url as URL in walker {
+            entries += 1
+            guard entries <= entryLimit else {
+                throw Failure.extractFailed(String(localized: "展開したファイル数が上限を超えました"))
+            }
+            let values = try url.resourceValues(forKeys: Set(keys))
+            guard values.isSymbolicLink != true else {
+                throw Failure.extractFailed(String(localized: "アーカイブにシンボリックリンクが含まれています"))
+            }
+            guard values.isDirectory == true || values.isRegularFile == true else {
+                throw Failure.extractFailed(String(localized: "アーカイブに対応していない種類のファイルが含まれています"))
+            }
+            if values.isRegularFile == true {
+                let size = values.fileSize ?? 0
+                guard size <= singleFileLimit else {
+                    throw Failure.extractFailed(String(localized: "展開したファイルが大きすぎます"))
+                }
+                total += size
+                guard total <= extractedSizeLimit else {
+                    throw Failure.extractFailed(String(localized: "展開後の合計サイズが上限を超えました"))
+                }
+            }
+        }
+    }
+
+    static func validate(_ candidate: Candidate, in staging: Staging) throws {
+        let stagedRoot = staging.root.resolvingSymlinksInPath().standardizedFileURL
+        let local = candidate.localURL.resolvingSymlinksInPath().standardizedFileURL
+        guard local.path == stagedRoot.path || WriteGuard.isInside(local, stagedRoot),
+              !WriteGuard.isSymlink(candidate.localURL) else {
+            throw Failure.extractFailed(String(localized: "取得物が一時領域の外を参照しています"))
+        }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: candidate.localURL.path,
+                                             isDirectory: &isDirectory) else {
+            throw Failure.extractFailed(String(localized: "取得物が見つかりません"))
+        }
+        if isDirectory.boolValue {
+            try validateExtractedTree(candidate.localURL)
+        } else {
+            let values = try candidate.localURL.resourceValues(
+                forKeys: [.isRegularFileKey, .fileSizeKey])
+            guard values.isRegularFile == true,
+                  (values.fileSize ?? 0) <= singleFileLimit else {
+                throw Failure.extractFailed(String(localized: "取得物のファイルが大きすぎるか、対応していない形式です"))
+            }
         }
     }
 
@@ -124,9 +235,14 @@ public enum Fetcher {
         }
 
         func run(session: URLSession, url: URL) async throws {
-            try await withCheckedThrowingContinuation { cont in
-                lock.withLock { continuation = cont }
-                session.downloadTask(with: url).resume()
+            let task = session.downloadTask(with: url)
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { cont in
+                    lock.withLock { continuation = cont }
+                    if Task.isCancelled { task.cancel() } else { task.resume() }
+                }
+            } onCancel: {
+                task.cancel()
             }
         }
 
@@ -191,17 +307,34 @@ public enum Fetcher {
         process.executableURL = URL(filePath: "/usr/bin/ditto")
         process.arguments = ["-xk", zip.path(percentEncoded: false),
                              destination.path(percentEncoded: false)]
-        let err = Pipe()
-        process.standardError = err
+        process.standardError = FileHandle.nullDevice
         // **読まないパイプを渡さない。** バッファが埋まると子プロセスが書き込みで止まる。
         // `InstallLocationGuard.run` と同じく捨てる（`ditto -xk` は標準出力を使わない）。
         process.standardOutput = FileHandle.nullDevice
         try process.run()
-        let message = err.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            throw Failure.extractFailed(String(decoding: message, as: UTF8.self))
+        let deadline = Date().addingTimeInterval(extractTimeLimit)
+        var validationFailure: (any Error)?
+        while process.isRunning {
+            if Date() >= deadline {
+                validationFailure = Failure.extractFailed(
+                    String(localized: "アーカイブの展開が制限時間を超えました"))
+                process.terminate()
+                break
+            }
+            do { try validateExtractedTree(destination) }
+            catch { validationFailure = error; process.terminate(); break }
+            Thread.sleep(forTimeInterval: 0.25)
         }
+        if validationFailure != nil, process.isRunning {
+            Thread.sleep(forTimeInterval: 0.2)
+            if process.isRunning { Darwin.kill(process.processIdentifier, SIGKILL) }
+        }
+        process.waitUntilExit()
+        if let validationFailure { throw validationFailure }
+        guard process.terminationStatus == 0 else {
+            throw Failure.extractFailed(String(localized: "展開コマンドが失敗しました"))
+        }
+        try validateExtractedTree(destination)
     }
 
     /// zipball は `<repo>-<branch>/` を 1 段かぶせる。それを剥がす。

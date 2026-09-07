@@ -222,7 +222,10 @@ struct PermissionTests {
             at: dir, includingPropertiesForKeys: nil)
         #expect(backups.count == 1)
         // バックアップは編集「前」の中身
-        let body = try String(contentsOf: backups[0], encoding: .utf8)
+        let envelope = try #require(
+            try JSONSerialization.jsonObject(with: Data(contentsOf: backups[0])) as? [String: String])
+        let content = try #require(envelope["content"])
+        let body = String(decoding: Data(base64Encoded: content) ?? Data(), as: UTF8.self)
         #expect(body.contains("\"X\""))
         #expect(body.contains("\"Y\""))
         // バックアップはアプリの保存領域に置く。プロジェクトを汚さない。
@@ -314,6 +317,29 @@ struct PermissionBackupTests {
         #expect(backupNames(s.env).count == PermissionWriter.generations)
     }
 
+    @Test("同じ時刻の連続保存でも上書きしない")
+    func sameSecondDoesNotCollide() throws {
+        let s = try session()
+        defer { try? FileManager.default.removeItem(at: s.root) }
+        try PermissionWriter.remove([s.entry], env: s.env)
+        try PermissionWriter.remove([s.entry], env: s.env)
+        #expect(backupNames(s.env).count == 2)
+    }
+
+    @Test("バックアップは所有者だけが読める")
+    func ownerOnlyPermissions() throws {
+        let s = try session()
+        defer { try? FileManager.default.removeItem(at: s.root) }
+        try PermissionWriter.remove([s.entry], env: s.env)
+        let directory = s.env.appSupport.appending(path: PermissionWriter.backupDirectory)
+        let name = try #require(backupNames(s.env).first)
+        let dirMode = try FileManager.default.attributesOfItem(atPath: directory.path)[.posixPermissions] as? NSNumber
+        let fileMode = try FileManager.default.attributesOfItem(
+            atPath: directory.appending(path: name).path)[.posixPermissions] as? NSNumber
+        #expect(dirMode?.intValue == 0o700)
+        #expect(fileMode?.intValue == 0o600)
+    }
+
     /// **残すのは新しい方。** 目的は「直前の編集に戻せること」なので、
     /// 古い方から捨てないと意味が無い。
     @Test("残るのは新しい世代")
@@ -321,11 +347,10 @@ struct PermissionBackupTests {
         let s = try session()
         defer { try? FileManager.default.removeItem(at: s.root) }
         try s.edit(times: PermissionWriter.generations + 2)
-        // 先頭が ISO8601 なので辞書順 = 古い順。時計は 1 回 60 秒進む。
         let names = backupNames(s.env)
         #expect(names.count == PermissionWriter.generations)
-        #expect(names.last?.hasPrefix("1970-01-01T00-07-00Z") == true, "最後の編集が消えている")
-        #expect(names.first?.hasPrefix("1970-01-01T00-03-00Z") == true, "古い方から捨てていない")
+        #expect(names.contains { $0.contains("1970-01-01T00-07-00Z") }, "最後の編集が消えている")
+        #expect(names.contains { $0.contains("1970-01-01T00-03-00Z") }, "古い方から捨てていない")
     }
 
     /// **帰属を判定できないものは消さない。** 0.1.0 が書いた旧形式の名前は

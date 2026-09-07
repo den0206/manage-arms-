@@ -1,5 +1,6 @@
 import Foundation
 import Synchronization
+import Darwin
 
 /// GUI アプリの `PATH` はターミナルと違う。DESIGN.md 3.7 —
 /// launchd 起動時は `/usr/bin:/bin:/usr/sbin:/sbin` のみで、
@@ -41,13 +42,16 @@ public enum ShellPath {
 
 /// `Process` の薄いラッパ。出力はパイプを読み切って即破棄する（DESIGN.md 3.5）。
 public enum Exec {
+    public static let outputLimit = 2 * 1024 * 1024
+    public static let timeout: TimeInterval = 180
     public struct Failure: Error, CustomStringConvertible {
         public let command: [String]
         public let code: Int32
         public let stderr: String
         public var description: String {
             // 補間の中に文字列リテラルを置かない（検査スクリプトが文言を抽出できなくなる）。
-            let head = command.prefix(3).joined(separator: " ")
+            let safe = command.first.map { [$0] + MCPServer.redacted(Array(command.dropFirst())) } ?? []
+            let head = safe.prefix(3).joined(separator: " ")
             return String(localized: "`\(head)` が終了コード \(Int(code)) で失敗: \(stderr)")
         }
     }
@@ -69,29 +73,70 @@ public enum Exec {
         process.standardError = err
         process.standardInput = FileHandle.nullDevice
         try process.run()
-        let errors = Mutex(Data())
-        let completed = DispatchGroup()
-        completed.enter()
-        DispatchQueue.global().async {
-            let data = err.fileHandleForReading.readDataToEndOfFile()
-            errors.withLock { $0 = data }
-            completed.leave()
+        _ = Darwin.setpgid(process.processIdentifier, process.processIdentifier)
+        let output = Mutex(Data()), errors = Mutex(Data())
+        out.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            guard !chunk.isEmpty else { handle.readabilityHandler = nil; return }
+            output.withLock { data in
+                if data.count < outputLimit {
+                    data.append(chunk.prefix(outputLimit - data.count))
+                }
+            }
         }
-        let deadline = DispatchWorkItem { if process.isRunning { process.terminate() } }
-        DispatchQueue.global().asyncAfter(deadline: .now() + 180, execute: deadline)
+        err.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            guard !chunk.isEmpty else { handle.readabilityHandler = nil; return }
+            errors.withLock { data in
+                if data.count < outputLimit {
+                    data.append(chunk.prefix(outputLimit - data.count))
+                }
+            }
+        }
+        let deadline = DispatchWorkItem {
+            guard process.isRunning else { return }
+            Darwin.kill(-process.processIdentifier, SIGTERM)
+            DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+                if process.isRunning { Darwin.kill(-process.processIdentifier, SIGKILL) }
+            }
+        }
+        DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: deadline)
         defer { deadline.cancel() }
-        let outData = out.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
-        completed.wait()
+        out.fileHandleForReading.readabilityHandler = nil
+        err.fileHandleForReading.readabilityHandler = nil
+        try? out.fileHandleForReading.close()
+        try? err.fileHandleForReading.close()
         var stderr = String(decoding: errors.withLock { $0 }, as: UTF8.self)
-        for index in command.indices.dropFirst() where ["-e", "--env", "-H", "--header"].contains(command[index - 1]) {
-            stderr = stderr.replacingOccurrences(of: command[index], with: "[redacted]")
+        for secret in secrets(in: command) where !secret.isEmpty {
+            stderr = stderr.replacingOccurrences(of: secret, with: "[redacted]")
         }
+        stderr = stderr.replacing(#/(?i)Bearer\s+[^\s"']+/#, with: "Bearer [redacted]")
         guard process.terminationStatus == 0 else {
             throw Failure(command: command, code: process.terminationStatus,
                           stderr: stderr)
         }
         _ = first
-        return String(decoding: outData, as: UTF8.self)
+        return String(decoding: output.withLock { $0 }, as: UTF8.self)
+    }
+
+    static func secrets(in command: [String]) -> Set<String> {
+        let flags = Set(["-e", "--env", "-H", "--header", "--token", "--api-key",
+                         "--apikey", "--secret", "--password", "--authorization"])
+        var result: Set<String> = []
+        for index in command.indices.dropFirst() where flags.contains(command[index - 1].lowercased()) {
+            let value = command[index]
+            result.insert(value)
+            if let separator = value.firstIndex(where: { $0 == "=" || $0 == ":" }) {
+                result.insert(String(value[value.index(after: separator)...]).trimmingCharacters(in: .whitespaces))
+            }
+        }
+        for argument in command {
+            let lower = argument.lowercased()
+            for flag in flags where lower.hasPrefix(flag + "=") {
+                result.insert(String(argument.dropFirst(flag.count + 1)))
+            }
+        }
+        return result
     }
 }

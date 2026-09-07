@@ -83,6 +83,18 @@ struct FetcherTests {
         #expect(try Fetcher.singleTopLevel(of: dir) == dir)
     }
 
+    @Test("展開物の symlink を拒否する")
+    func rejectsExtractedSymlink() throws {
+        let root = try Self.temp()
+        let target = root.appending(path: "target")
+        try Data().write(to: target)
+        try FileManager.default.createSymbolicLink(at: root.appending(path: "link"),
+                                                   withDestinationURL: target)
+        #expect(throws: Fetcher.Failure.self) {
+            try Fetcher.validateExtractedTree(root)
+        }
+    }
+
     // MARK: - 種別判定（README のテキストからは推測しない）
 
     @Test("SKILL.md があれば skill。frontmatter の name を採る")

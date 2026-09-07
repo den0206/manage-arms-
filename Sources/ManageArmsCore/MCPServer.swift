@@ -34,8 +34,32 @@ public struct MCPServer: Equatable, Sendable {
     /// 1 行の要約。UI の説明欄に出す。
     public var summary: String {
         switch transport {
-        case .stdio(let c, let a, _): ([c] + a).joined(separator: " ")
-        case .http(let u, _):         u
+        case .stdio(let command, let arguments, _):
+            return ([command] + Self.redacted(arguments)).joined(separator: " ")
+        case .http(let address, _):
+            guard var components = URLComponents(string: address) else { return "[redacted URL]" }
+            components.user = nil
+            components.password = nil
+            components.query = components.query == nil ? nil : "[redacted]"
+            components.fragment = nil
+            return components.string ?? "[redacted URL]"
+        }
+    }
+
+    static func redacted(_ arguments: [String]) -> [String] {
+        let flags = Set(["--token", "--api-key", "--apikey", "--secret", "--password",
+                         "--authorization", "-H", "--header"])
+        var hideNext = false
+        return arguments.map { argument in
+            defer { hideNext = flags.contains(argument.lowercased()) }
+            if hideNext { return "[redacted]" }
+            let lower = argument.lowercased()
+            if flags.contains(lower) { return argument }
+            if flags.contains(where: { lower.hasPrefix($0 + "=") }) {
+                return String(argument.prefix(while: { $0 != "=" })) + "=[redacted]"
+            }
+            if lower.hasPrefix("authorization:") { return "Authorization: [redacted]" }
+            return argument
         }
     }
 

@@ -33,7 +33,7 @@ public enum MCPScanner {
             guard let servers = dictionary["mcpServers"] else { return [] }
             return try decode(servers)
         case .cli(let argv):
-            let output = try env.run(argv)
+            let output = try env.runCLI(argv, for: agent)
             let object = try JSONSerialization.jsonObject(with: Data(output.utf8))
             if let array = object as? [[String: Any]] {
                 return try array.map { item in
@@ -157,7 +157,7 @@ public enum MCPManager {
             throw Failure.alreadyExists(server.name)
         }
         guard let argv = MCPCommand.add(server, to: agent) else { throw Failure.unsupported(agent) }
-        _ = try env.run(argv)
+        _ = try env.runCLI(argv, for: agent)
     }
 
     public static func remove(_ name: String, from agent: Agent, env: Environment) throws {
@@ -170,7 +170,7 @@ public enum MCPManager {
         guard let argv = MCPCommand.remove(name, from: agent) else {
             throw Failure.unsupported(agent)
         }
-        _ = try env.run(argv)
+        _ = try env.runCLI(argv, for: agent)
         // CLI の終了コードを信用せず、消えたことを読んで確かめる（Plugin と同じ理由）。
         // **読めなかったときは「消えていない」と決めつけない。** ここで誤って投げると、
         // remove の直後に add する `MCPPin.pin` が復元前に中断し、
@@ -206,7 +206,8 @@ public enum MCPManager {
               let server = MCPServer.parse(name: name, definition), !server.isProtected else {
             throw MCPScanner.ReadFailure("MCPサーバーが見つからないか保護されています")
         }
-        let argv = ["claude", "mcp", "remove", name, "-s", scope]
+        let argv = env.command(["claude", "mcp", "remove", name, "-s", scope],
+                               for: .claude)
         _ = try env.run(["sh", "-c", "cd " + ResourceRow.quote(project) + " && " + argv.map(ResourceRow.quote).joined(separator: " ")])
         // `byProject` は project と local を 1 つの表に畳むので、同名が両方にあると
         // 消した側の有無を nil では判定できない。**消したスコープが残っているか**で見る。
@@ -243,12 +244,16 @@ public enum MCPManager {
                            _ mutate: (inout [String: Any]) throws -> Void) throws {
         let url = env.home.appending(path: ".cursor/mcp.json")
         var root: [String: Any] = [:]
+        var original: Data?
+        var originalMode: Any?
         if FileManager.default.fileExists(atPath: url.path) {
             // **コメント入りのファイルは書き換えない。** 読む側はコメントを飛ばして
             // 解釈できるが、`JSONSerialization` で書き戻すとコメントは復元されない。
             // 実測の `~/.cursor/mcp.json` にはコメントアウトされた Figma 設定があり、
             // ここを黙って上書きすると利用者が意図的に残した設定が消える（3.1 / 9 章）。
             let data = try Data(contentsOf: url)
+            original = data
+            originalMode = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions]
             let raw = try? JSONSerialization.jsonObject(with: data)
             if raw == nil, let text = String(data: data, encoding: .utf8),
                (try? JSONSerialization.jsonObject(with: Data(MCPScanner.stripComments(text).utf8))) != nil {
@@ -267,11 +272,23 @@ public enum MCPManager {
         try mutate(&servers)
         root["mcpServers"] = servers
 
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
-                                                withIntermediateDirectories: true)
+        let parent = url.deletingLastPathComponent()
+        let parentExisted = FileManager.default.fileExists(atPath: parent.path)
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        if !parentExisted {
+            try FileManager.default.setAttributes([.posixPermissions: 0o700],
+                                                  ofItemAtPath: parent.path)
+        }
+        try WriteGuard.assertSafeCreation(url, inside: env.home.appending(path: ".cursor"),
+                                          anchor: env.home)
+        if let original, try Data(contentsOf: url) != original {
+            throw MCPScanner.ReadFailure("Cursorの設定が別のプロセスで変更されたため、編集を中止しました")
+        }
         let data = try JSONSerialization.data(
             withJSONObject: root, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
         try data.write(to: url, options: .atomic)
+        let mode = originalMode ?? 0o600
+        try FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: url.path)
     }
 
     static func encode(_ server: MCPServer) -> [String: Any] {

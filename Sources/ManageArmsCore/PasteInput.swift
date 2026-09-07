@@ -17,8 +17,9 @@ public struct GitHubSource: Equatable, Sendable {
     }
 
     /// zipball の URL。`git clone` は使わない（3.3）。
-    public func archiveURL(defaultBranch: String = "main") -> URL {
-        URL(string: "https://github.com/\(repo)/archive/refs/heads/\(branch ?? defaultBranch).zip")!
+    public func archiveURL(defaultBranch: String = "main", revision: String? = nil) -> URL {
+        let reference = revision ?? "refs/heads/\(branch ?? defaultBranch)"
+        return URL(string: "https://github.com/\(repo)/archive/\(reference).zip")!
     }
 }
 

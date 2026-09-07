@@ -47,11 +47,12 @@ public enum PermissionWriter {
     static func assertWritable(_ file: URL, under roots: [URL]) throws {
         try assertWritable(file)
         let base = file.standardized.deletingLastPathComponent().deletingLastPathComponent()
-        guard roots.contains(where: {
+        guard let root = roots.first(where: {
             $0.standardizedFileURL.path == base.standardizedFileURL.path
         }) else {
             throw Denial.notInClaudeDir(file.standardized.path(percentEncoded: false))
         }
+        try WriteGuard.assertSafeCreation(file, inside: root, anchor: root)
     }
 
     /// 指定したエントリを消す。ファイル単位にまとめて 1 回ずつ書く。
@@ -76,6 +77,7 @@ public enum PermissionWriter {
     static func edit(_ file: URL, env: Environment,
                      _ mutate: (inout [String: Any]) -> Void) throws {
         let data = try Data(contentsOf: file)
+        let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
         guard var root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw Denial.notASettingsFile(file.path(percentEncoded: false))
         }
@@ -86,9 +88,15 @@ public enum PermissionWriter {
         // 編集前の中身を残す。他人の設定ファイルを書き換える唯一の場所なので、
         // 戻せる状態にしてから書く（9 章）。
         try backup(data, of: file, env: env)
+        guard try Data(contentsOf: file) == data else {
+            throw MCPScanner.ReadFailure("設定が別のプロセスで変更されたため、権限の編集を中止しました")
+        }
         let encoded = try JSONSerialization.data(
             withJSONObject: root, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
         try encoded.write(to: file, options: .atomic)
+        if let mode = attributes[.posixPermissions] {
+            try FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: file.path)
+        }
     }
 
     static let backupDirectory = "permission-backups"
@@ -100,28 +108,42 @@ public enum PermissionWriter {
     /// 編集のたびに 1 ファイル増え続け、消す導線も無かった。
     /// 目的は「直前の編集に戻せること」なので、数世代あれば足りる。
     static let generations = 5
+    static let totalBytesLimit = 5 * 1024 * 1024
 
     /// 区切りは `__`。**slug には `-` が入る**（パスの `/` を潰したもの）ので、
     /// `-` で区切ると同じ設定ファイルの世代をまとめられない。
     static let stampSeparator = "__"
+    static let backupPrefix = "v2__"
 
     /// バックアップはアプリの保存領域に置く。**他人のディレクトリを汚さない。**
     /// `<proj>/.claude/settings.local.json.bak` を作ると git status に出てしまう。
     static func backup(_ data: Data, of file: URL, env: Environment) throws {
         let dir = env.appSupport.appending(path: backupDirectory)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
         let stamp = ISO8601DateFormatter().string(from: env.now())
             .replacingOccurrences(of: ":", with: "-")
-        let slug = Self.slug(of: file)
-        try data.write(to: dir.appending(path: "\(stamp)\(stampSeparator)\(slug)"),
-                       options: .atomic)
-        try prune(slug: slug, in: dir, env: env)
+        let sourceID = Self.sourceID(of: file)
+        let name = "\(backupPrefix)\(sourceID)\(stampSeparator)\(stamp)\(stampSeparator)\(UUID().uuidString).json"
+        let destination = dir.appending(path: name)
+        let envelope: [String: Any] = [
+            "sourcePath": file.standardized.path(percentEncoded: false),
+            "content": data.base64EncodedString(),
+        ]
+        let encoded = try JSONSerialization.data(withJSONObject: envelope,
+                                                  options: [.prettyPrinted, .sortedKeys])
+        try encoded.write(to: destination, options: .withoutOverwriting)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600],
+                                              ofItemAtPath: destination.path)
+        try prune(sourceID: sourceID, in: dir, env: env)
     }
 
-    static func slug(of file: URL) -> String {
-        file.standardized.path(percentEncoded: false)
-            .replacingOccurrences(of: "/", with: "-")
-            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+    static func sourceID(of file: URL) -> String {
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for byte in file.standardized.path(percentEncoded: false).utf8 {
+            hash = (hash ^ UInt64(byte)) &* 1_099_511_628_211
+        }
+        return String(hash, radix: 16)
     }
 
     /// 同じ設定ファイルの古い世代を落とす。**消すのは自分が作ったものだけ** —
@@ -129,17 +151,33 @@ public enum PermissionWriter {
     ///
     /// 区切りを持たない名前は 0.1.0 が書いた旧形式なので**触らない**。
     /// 帰属を判定できないものを消すのは、このアプリが一番やってはいけないこと。
-    static func prune(slug: String, in dir: URL, env: Environment) throws {
+    static func prune(sourceID: String, in dir: URL, env: Environment) throws {
         let fm = FileManager.default
-        let suffix = stampSeparator + slug
-        let mine = ((try? fm.contentsOfDirectory(atPath: dir.path(percentEncoded: false))) ?? [])
-            .filter { $0.hasSuffix(suffix) }
-            .sorted()                                  // 先頭が ISO8601 なので辞書順 = 古い順
-        guard mine.count > generations else { return }
+        let names = (try? fm.contentsOfDirectory(atPath: dir.path(percentEncoded: false))) ?? []
+        let sourcePrefix = backupPrefix + sourceID + stampSeparator
+        let mine = names.filter { $0.hasPrefix(sourcePrefix) }.sorted()
         for name in mine.dropLast(generations) {
             let url = dir.appending(path: name)
             try WriteGuard.assertAppBackup(url, env: env)
             try fm.removeItem(at: url)
+        }
+        var owned = ((try? fm.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey])) ?? [])
+            .filter { $0.lastPathComponent.hasPrefix(backupPrefix) }
+            .sorted {
+                let left = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                let right = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                return left < right
+            }
+        var total = owned.reduce(0) {
+            $0 + ((try? $1.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0)
+        }
+        while total > totalBytesLimit, let oldest = owned.first {
+            let size = (try? oldest.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+            try WriteGuard.assertAppBackup(oldest, env: env)
+            try fm.removeItem(at: oldest)
+            owned.removeFirst()
+            total -= size
         }
     }
 }

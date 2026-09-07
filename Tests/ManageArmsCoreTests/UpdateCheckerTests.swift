@@ -72,6 +72,14 @@ struct UpdateCheckerTests {
         #expect(UpdateChecker.status(of: e, in: registry) == .upToDate)
     }
 
+    @Test("sha 不明は最新版とみなさない")
+    func unknownInstalledSHA() {
+        var registry = Registry()
+        let entry = Self.entry("a", sha: nil)
+        registry.repos["o/r#main"] = .init(latestSha: "new")
+        #expect(UpdateChecker.status(of: entry, in: registry) == .available(sha: "new"))
+    }
+
     @Test("未チェックは unknown")
     func unknown() {
         let e = Self.entry("a")
