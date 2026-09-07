@@ -8,7 +8,7 @@ AI コーディングエージェント（Claude Code / Cursor / Codex / Gemini 
 - **配布**: DMG の直配布（App Sandbox 非対応のため App Store 不可）。公開先は
   [den0206/manage-arms-releases](https://github.com/den0206/manage-arms-releases)。13 章
 - **状態**: **v1〜v4 実装済み**（Skills / Subagents / Plugins / 使用実績 / MCP / 権限）、
-  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト定義 366 件
+  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト定義 376 件
   （`@Test` の数。`arguments:` 付きは実行時にさらに分かれる）
 - **実装**: SPM パッケージ。`swift test` / `CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh`
   （`.xcodeproj` は不要。実 CLI・実ネットワークを使う確認は `MANUAL=1 swift test`）
@@ -368,7 +368,7 @@ PATH=/usr/bin:/bin:/usr/sbin:/sbin
 | 操作 | 保存する値 | 効果 |
 |---|---|---|
 | スイッチをオフ | `enabled: false` | `Detection.disabled`。サイドバーから外し、そのエージェントの MCP / Plugin を**走査しない** |
-| 「CLI のパスを指定…」 | `path` | `Detector.detect(override:)` に渡る。`PATH` 解決に失敗する環境の逃げ道 |
+| 「CLI のパスを指定…」 | `path` | 検出だけでなく、一覧取得・追加・削除を含むすべての CLI 実行に使う。`PATH` 解決に失敗する環境の逃げ道 |
 
 - **既定は「有効」。** エントリが無いエージェントも有効なので、
   対応エージェントを増やしたときは何も書かなくても自動で並ぶ
@@ -382,6 +382,8 @@ PATH=/usr/bin:/bin:/usr/sbin:/sbin
 - **手動指定は毎回実在を確かめ、消えていたら `PATH` 解決に戻す。** 保存した時点では
   実行できても、アンインストールや Homebrew の移動で消える。検証しないと
   「検出済み（緑）」のまま全操作が失敗する、最も直しにくい状態になる。
+- **検出と実行で解決経路を分けない。** `Environment.command(_:for:)` が registry の
+  手動パスを再検証し、MCP / Plugin の読み取り・追加・削除にも同じ絶対パスを渡す。
 - **検出済みを「有効」と呼ばない。** スイッチと、スキルの有効/無効が既にその語を使っている。
   1 行に `[有効] (ON)` が並ぶと、どちらが何を指すのか読めない。
 
@@ -891,7 +893,15 @@ ui-ux-pro-max を更新    abc1234 → def5678（3 コミット）
                           [ 更新する ] [ このバージョンで固定 ]
 ```
 
-適用手順は **一時ディレクトリに展開 → 検証 → 差し替え → 失敗ならロールバック**。
+更新確認時に branch を commit SHA へ解決し、**その SHA のアーカイブだけ**を取得する。
+差分は `SKILL.md` だけでなく候補ディレクトリ全体を manifest 化し、追加・削除・変更・
+バイナリ変更を表示する。小さい UTF-8 ファイルだけ行差分を作り、大きいファイルは
+サイズとストリーミング fingerprint で比較して本文をメモリへ載せない。
+
+適用手順は **一時ディレクトリに展開 → 全体検証 → 差分表示 → manifest 再検証 →
+差し替え → registry 保存**。プレビューは適用開始時に所有権を取得し、適用中の破棄を
+拒否する。差し替えと registry 保存のどちらかが失敗したら、実体と registry の両方を
+ロールバックし、復元にも失敗した場合は成功扱いにせず明示する。
 Cursor / Codex は `~/.agents/skills/` を直読みし Claude は symlink 越しに読むため、
 **実体を差し替えるだけで 3 エージェントすべてに同時反映される**（3.2）。
 
@@ -1280,8 +1290,10 @@ Cursor の MCP に `claude mcp remove chrome-devtools` を出すことになり�
 
 **設定ファイル 1 つあたり 5 世代まで**（`PermissionWriter.generations`）。
 編集のたびに増やし続けると、ストレージの規律（9 章）を自分で破ることになる。
-ファイル名は `<ISO8601>__<slug>`。区切りが `__` なのは slug がパス由来で `-` を
-含むためで、`-` で区切ると同じ設定ファイルの世代をまとめられない。
+ファイル名は `v2__<元パスのfingerprint>__<ISO8601>__<UUID>.json` とし、同一秒の
+編集でも衝突させない。本文を envelope に包み、元パスと元データを記録して、パスを
+可逆に対応付ける。ディレクトリは `0700`、ファイルは `0600` とし、全体も 5 MiB で
+打ち止める。
 0.1.0 が書いた旧形式（区切り無し）は**帰属を判定できないので刈らない**。
 
 ---
@@ -1295,6 +1307,7 @@ Cursor の MCP に `claude mcp remove chrome-devtools` を出すことになり�
   registry.json          数 KB
   agents/<name>.md       Subagent 実体（共有ルートの慣習が無いためここに置く）
   disabled-skills/       無効化した Skill の退避先（3.2）
+  permission-backups/    設定ファイルごと 5 世代、全体 5 MiB まで
 ```
 
 **Skill の実体はここではなく `~/.agents/skills/` に置く（3.2 で確定）。**
@@ -1310,7 +1323,16 @@ OS が回収する。アプリが自前の掃除機能を持たなくて済む�
   HTTP キャッシュは 7.3 の ETag を registry で自前管理しており、二重に持つ理由が無い
 - **`registry.json` はアトミックに書く** — 唯一の永続ファイルなので、
   書き込み中のクラッシュで壊れると全リソースの出所情報が飛ぶ。
-  `Data.write(to:options:.atomic)`（一時ファイル + rename）。1 行で済む
+  `Data.write(to:options:.atomic)`（一時ファイル + rename）。読み書きはプロセス内ロックで
+  直列化し、長い非同期処理の完了時は `Registry.update` で最新内容へ担当フィールドだけを
+  merge する
+
+### 外部入力の上限
+
+- ダウンロードは 50 MiB、一般 API 応答は 2 MiB、コマンドの stdout / stderr は各 2 MiB
+- 展開は 200 MiB 合計・20 MiB/ファイル・10,000項目・30秒で停止し、symlink と特殊ファイルを拒否する
+- JSONL は 64 KiB 単位で読み、1行 1 MiB・10,000ファイル・30秒を上限にする
+- 作成先は trusted anchor から親までの既存要素を検査し、途中の symlink を拒否する
 
 ### frontmatter だけ読む
 
