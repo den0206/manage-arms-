@@ -21,7 +21,6 @@ The design document is [DESIGN.md](DESIGN.md) (Japanese).
 | **Scope** | A tab for "all projects", one per project, and one for what ships with the agent — with a warning when the same thing is installed both ways, and bulk removal of the project copies |
 | **Usage** | Last-used dates from Claude Code, Codex and Cursor session logs. MCP processes checked every 3 seconds while a window is visible; this does not indicate an active tool call |
 | **Browser detection** | On by default. Opening a skill, plugin or subagent page while a browser is frontmost turns the menu bar icon green and offers to add it; leaving the page turns it back — no URL to copy, and no system notifications. The page is confirmed against `raw.githubusercontent.com` first, and the URL is never stored |
-| **Permission cleanup** | Remove machine-specific and cross-project duplicate entries from `permissions.allow` |
 | **Appearance** | Switch between light, dark and following the system in Settings (system by default) |
 
 ## Requirements
@@ -43,7 +42,7 @@ The project is a Swift Package — there is no `.xcodeproj` (open `Package.swift
 directly).
 
 ```bash
-swift test                  # unit tests (390 @Test declarations)
+swift test                  # unit tests (366 @Test declarations)
 swift build                 # compile check
 
 # The distributable form is a hand-assembled .app bundle.
@@ -76,10 +75,10 @@ rebuilding during development never damages the `registry.json` of an installed 
 
 ```
 Sources/
-├── ManageArmsCore/     scanning, install, update, usage, permissions — the tested layer.
+├── ManageArmsCore/     scanning, install, update, usage — the tested layer.
 │                       External dependencies are injected through Environment
 │                       (a struct of closures, not a protocol)
-└── ManageArms/         SwiftUI shell (Home / one screen per agent / Permissions)
+└── ManageArms/         SwiftUI shell (Home / one screen per agent / Settings)
 Localization/           ja / en. Keys are the Japanese strings themselves
 Resources/              Info.plist / entitlements / app icon
 Scripts/                .app assembly, DMG, CHANGELOG cutting, invariant checks
@@ -96,10 +95,9 @@ docs/signing.md         Developer ID signing and notarization setup (Japanese)
   files out of a scan)
 - **What may be deleted or moved is limited**, not what may not be. Any path that bypasses
   `WriteGuard` fails CI
-- Configuration is written back in only three places. Adding and removing MCP servers and
+- Configuration is written back in only two places. Adding and removing MCP servers and
   plugins is delegated to each agent's own CLI — `~/.claude.json` is 98 KB of interleaved
   state, and writing it back would race a running Claude and destroy all of it
-- Permission removal rewrites only the `permissions` key and backs up the previous contents
 - **No storage of its own beyond one file.** No cache directory; `URLSession` runs
   `.ephemeral`; temporary work happens in the system temporary directory
 - **Browser detection is narrow, and you can turn it off.** It asks for permission to

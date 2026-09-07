@@ -8,7 +8,6 @@ import ManageArmsCore
 enum Screen: Hashable {
     case home
     case agent(Agent)
-    case permissions
     case settings
 }
 
@@ -111,7 +110,6 @@ struct ContentView: View {
                 }
             }
             Section("メンテナンス") {
-                Label("権限", systemImage: "lock").tag(Screen.permissions)
                 Label("設定", systemImage: "gearshape").tag(Screen.settings)
             }
         }
@@ -151,8 +149,6 @@ struct ContentView: View {
             HomeView(model: model, add: add, showAdd: $showAdd, screen: $screen)
         case .agent(let agent):
             AgentPage(agent: agent, model: model, showAdd: $showAdd)
-        case .permissions:
-            PermissionList(model: model)
         case .settings:
             SettingsView(model: model)
         }

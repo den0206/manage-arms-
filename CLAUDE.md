@@ -35,13 +35,12 @@ CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh                            # .ap
 **「破れると実ユーザーのデータが壊れる」もの**だけ。網羅性より、
 赤くなったときに必ず本物のバグである状態を優先する。
 
-1. **設定ファイルの書き込みは 3 か所だけ** — `PermissionWriter`（`permissions` キーのみ）/
-   `Registry`（自分の `registry.json`）/ `MCPScanner`（`~/.cursor/mcp.json`）。
+1. **設定ファイルの書き込みは 2 か所だけ** — `Registry`（自分の `registry.json`）/
+   `MCPScanner`（`~/.cursor/mcp.json`）。
    ここが増えると「書き込みは各 CLI に委譲する」という中核の判断（DESIGN 3.1）が崩れ、
    実行中の Claude と競合してユーザーの全状態を壊しうる。
 2. **削除・移動・symlink 作成は `WriteGuard` を通る経路だけ** — Skill/Subagent の
    共通 lifecycle を持つ `SkillManager` と `Updater` は必ず `WriteGuard.assertMutable` を呼ぶ。
-   `PermissionWriter` はバックアップの世代刈りだけで `WriteGuard.assertAppBackup` を呼ぶ。
    `Fetcher` / `Installer` は一時ディレクトリのみ、`InstallLocationGuard` は
    直前に自分が `/Applications` へ作ったバンドルのみ。
    既存ユーザーToolの削除は `WriteGuard.assertUserArtifact` で既知ルート直下を検証する。
@@ -59,7 +58,7 @@ CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh                            # .ap
 5. **常駐中に抱えない・キャッシュしない**（DESIGN 3.5 / 15）。メニューバー常駐は既定 ON
    だが、ウィンドウを閉じたら一覧はメモリから捨てる（`AppModel.releaseForBackground`）。
    設定はアクティブ化時に再走査し、ウィンドウ表示中だけ起動状態を3秒ごとに取得する。
-   永続ファイルは `registry.json` 1 つだけ（`permission-backups/` は 5 世代で頭打ち）。
+   永続ファイルは `registry.json` 1 つだけ。
    **唯一の例外が `CLIScan`** — DESIGN 3.5 が求める CLI 呼び出しの間引きで、
    CLI に訊かないと分からないことだけを 3 分持ち、閉じたら捨てる。
 

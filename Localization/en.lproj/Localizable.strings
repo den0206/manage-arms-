@@ -3,14 +3,12 @@
 
 
 /* Navigation & shared */
-"権限" = "Permissions";
 "エージェント" = "Agents";
 "ホーム" = "Home";
 "そのほか" = "Other";
 "OK" = "OK";
 "閉じる" = "Close";
 "追加" = "Add";
-"すべて" = "All";
 "—" = "—";
 "操作できませんでした" = "The operation failed";
 "再読み込み" = "Reload";
@@ -131,21 +129,7 @@
 "ピン留め" = "Pin";
 "いま npm にある最新版に固定し、起動ごとに変わらないようにします" = "Pins to the latest version currently on npm so it stops changing on every launch";
 
-/* Permissions screen */
-"使い捨て" = "Disposable";
-"重複" = "Duplicated";
-"権限の設定が見つかりません" = "No permission settings found";
-"該当なし" = "No matches";
-"マシン固有のパスを含むエントリはありません" = "No entries contain machine-specific paths";
-"条件に合うエントリはありません" = "No entries match the filter";
-"表示中をすべて選択" = "Select All Shown";
-"選択解除" = "Deselect";
-"選択した %lld 件を削除" = "Delete %lld selected";
-"マシン固有" = "Machine-specific";
-"%lld プロジェクトに重複" = "duplicated across %lld projects";
-"%lld 件中 %lld 件を表示" = "Showing %2$lld of %1$lld";
 "削除中…" = "Deleting…";
-"削除前の内容は Application Support にバックアップされます" = "The previous contents are backed up to Application Support before deletion";
 
 /* Add sheet */
 "スキル・サブエージェントを追加" = "Add a skill or subagent";
@@ -343,8 +327,6 @@
 "%@ が見つかりません。リポジトリ名かブランチ名を確認してください" = "%@ was not found. Check the repository and branch name.";
 "GitHub API が HTTP %lld を返しました" = "The GitHub API returned HTTP %lld";
 "GitHub API の応答を解釈できませんでした" = "Could not parse the GitHub API response";
-"%@ は権限設定ファイルではありません" = "%@ is not a permission settings file";
-"%@ は .claude ディレクトリの中にありません" = "%@ is not inside a .claude directory";
 "`%@` が終了コード %lld で失敗: %@" = "`%1$@` failed with exit code %2$lld: %3$@";
 
 /* Row details built in Core */
@@ -371,7 +353,6 @@
 "取得物が見つかりません" = "The fetched item could not be found";
 "取得物のファイルが大きすぎるか、対応していない形式です" = "The fetched file is too large or uses an unsupported format";
 "Cursorの設定が別のプロセスで変更されたため、編集を中止しました" = "Cursor settings changed in another process, so the edit was cancelled";
-"設定が別のプロセスで変更されたため、権限の編集を中止しました" = "The settings changed in another process, so the permission edit was cancelled";
 "操作に失敗し、元の状態も完全には復元できませんでした: %@" = "The operation failed and the original state could not be fully restored: %@";
 "更新用の一時データは既に使用または破棄されています" = "The staged update is already in use or has been discarded";
 "確認後に更新内容が変化したため適用を中止しました" = "The update changed after review, so it was not applied";

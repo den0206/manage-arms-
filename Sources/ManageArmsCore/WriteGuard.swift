@@ -116,7 +116,7 @@ public enum WriteGuard {
     ///
     /// **symlink そのものは拒まない。** `~/.claude` や `~/.agents` を dotfiles
     /// リポジトリへ張るのは、このアプリの利用者にとって普通の構成で、
-    /// 一律に弾くと有効化・更新・権限編集が全部できなくなる。
+    /// 一律に弾くと有効化も更新もできなくなる。
     /// 拒むのは**信頼できる根（home / プロジェクト）の外へ出る**リンクだけ。
     public static func assertSafeCreation(_ url: URL, inside root: URL,
                                           anchor: URL? = nil) throws {
@@ -196,32 +196,6 @@ public enum WriteGuard {
         if relative == leaf { return true }
         guard kind == .skill, relative.hasSuffix("/" + leaf) else { return false }
         return ProjectScan.isWalkablePrefix(String(relative.dropLast(leaf.count + 1)))
-    }
-
-    /// アプリ自身が作ったバックアップだけを消してよい（9 章）。
-    ///
-    /// `PermissionWriter` は世代を上限まで刈るために削除を要る唯一の場所で、
-    /// `check-invariants.sh` の削除許可リストに載る 3 つ目のファイルになる。
-    /// **許可リストに載せるだけでは中身が空でも通ってしまう**ので、
-    /// `SkillManager` / `Updater` が `assertMutable` を必ず呼ぶのと同じ形で、
-    /// ここを通すことを検査スクリプト側でも要求する。
-    ///
-    /// 許すのは自分の保存領域直下の**通常ファイル**だけ。ディレクトリと symlink は
-    /// 辿った先を消しうるので拒否する。
-    public static func assertAppBackup(_ url: URL, env: Environment) throws {
-        let root = env.appSupport.appending(path: PermissionWriter.backupDirectory)
-        guard isInside(url, root) else {
-            throw Denial.outsideManagedRoots(url.standardized.path(percentEncoded: false))
-        }
-        guard !isSymlink(url) else {
-            throw Denial.symlinkOutsideStore(url.standardized.path(percentEncoded: false))
-        }
-        var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(
-                atPath: url.path(percentEncoded: false), isDirectory: &isDir),
-              !isDir.boolValue else {
-            throw Denial.deniedPath(url.standardized.path(percentEncoded: false))
-        }
     }
 
     static func assertNotBundled(_ url: URL, env: Environment) throws {

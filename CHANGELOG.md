@@ -19,6 +19,16 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
   through several symlinks is counted once; MCP servers show nothing because they have
   no local body.
 
+### Removed
+
+- The Permissions screen and its cleanup of `permissions.allow` are gone. It only ever read
+  Claude Code's own settings, and measured on a real machine every disposable entry it could
+  offer to remove lived in a git-ignored `settings.local.json` — nothing reached anyone else.
+  ManageArms no longer writes to any settings file outside `~/.cursor/mcp.json`. Use Claude
+  Code's `/permissions` instead. Backups written by earlier versions are left untouched at
+  `~/Library/Application Support/ManageArms/permission-backups/` — nothing reads or prunes
+  them any more, so delete the folder in Finder if you no longer want it.
+
 ### Fixed
 
 - Installing or updating a resource from a repository whose *other* files include a

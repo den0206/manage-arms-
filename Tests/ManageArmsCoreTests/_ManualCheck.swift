@@ -294,31 +294,6 @@ struct ManualCheck {
         #expect(reread.first?.floatingPackage == nil)
     }
 
-    /// 実機の権限を横断で読む。**読み取りのみ。削除は絶対に呼ばない。**
-    @Test("実環境の権限の散らかり")
-    func realPermissions() {
-        let env = Environment.live
-        let entries = PermissionScanner.scan(env: env)
-        let projects = Set(entries.compactMap(\.project))
-        print("  \(entries.count) 件 / \(projects.count) プロジェクト")
-
-        let disposable = entries.filter(\.isMachineSpecific)
-        print("  マシン固有（使い捨て候補）: \(disposable.count) 件")
-        for e in disposable.prefix(5) { print("    [\(e.scopeName)] \(e.value.prefix(88))") }
-
-        let dupes = PermissionScanner.duplicates(entries)
-        print("  重複: \(dupes.count) 種類 / \(dupes.values.map(\.count).reduce(0,+)) 件")
-        for (value, group) in dupes.sorted(by: { $0.value.count > $1.value.count }).prefix(5) {
-            print("    \(group.count)× \(value.prefix(70))")
-        }
-
-        // 書き込みガードが実ファイルを通すことの確認（書き込みはしない）
-        for entry in entries.prefix(20) {
-            #expect(throws: Never.self) { try PermissionWriter.assertWritable(entry.file) }
-        }
-        #expect(!entries.isEmpty)
-    }
-
     /// 実機の Subagent を読む。読み取りのみ。
     @Test("実環境の Subagent")
     func realSubagents() {

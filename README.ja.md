@@ -20,7 +20,6 @@ AI コーディングエージェント（Claude Code / Cursor / Codex / Gemini 
 | **スコープ** | 「ユーザー全体」「プロジェクトごと」「エージェント同梱」をタブで切り替える。重複は両方に警告し、プロジェクト側だけ一括削除できる |
 | **使用実績** | Claude Code・Codex・Cursor のセッションログから最終使用日を集計。表示中は3秒ごとにMCPプロセスを確認。実際のTool呼び出し中とは区別 |
 | **ブラウザ検知** | 既定 ON。ブラウザで Skill・Plugin・Subagent のページを開くと、メニューバーアイコンを緑にして追加を提案する（ページから離れれば元に戻る）（URL を貼らずに済み、システム通知は使わない）。出す前に `raw.githubusercontent.com` で実在を確かめ、URL は保存しない |
-| **権限の掃除** | `permissions.allow` のマシン固有パス・プロジェクト間の重複を横断で削除する |
 | **外観** | 設定でライト・ダーク・システム追従を切り替える（既定はシステム追従） |
 
 ## 必要環境
@@ -40,7 +39,7 @@ DMG から直接起動した場合は、起動時にアプリケーションフ�
 Swift Package として構成されている（`.xcodeproj` は無い。Xcode で `Package.swift` を直接開ける）。
 
 ```bash
-swift test                  # 単体テスト（@Test 定義 390 件）
+swift test                  # 単体テスト（@Test 定義 366 件）
 swift build                 # コンパイル確認
 
 # 配布形態は「手組みの .app バンドル」。build-app.sh が組み立て + 署名まで行う。
@@ -71,9 +70,9 @@ GUI 起動時の `PATH` は Finder 経由だと `/usr/bin:/bin:/usr/sbin:/sbin` 
 
 ```
 Sources/
-├── ManageArmsCore/     走査・追加・更新・集計・権限。テスト対象
+├── ManageArmsCore/     走査・追加・更新・集計。テスト対象
 │                       外部依存は Environment（構造体 + クロージャ）で注入する
-└── ManageArms/         SwiftUI シェル（ホーム / エージェントごとの一覧 / 権限）
+└── ManageArms/         SwiftUI シェル（ホーム / エージェントごとの一覧 / 設定）
 Localization/           ja / en。キーは日本語文字列そのもの
 Resources/              Info.plist / entitlements / アイコン
 Scripts/                .app 組み立て・DMG・CHANGELOG 切り出し・不変条件の検査
@@ -87,9 +86,8 @@ docs/signing.md         Developer ID 署名と公証のセットアップ
 - **走査対象はホワイトリスト**。列挙にないパスは存在しても読まない
   （`~/.claude/projects` の 129 MB や `logs_*.sqlite` を踏まないため）
 - **削除・移動してよい対象を限定**する。`WriteGuard` を通らない経路は CI が止める
-- 設定ファイルの書き戻しは 3 か所のみ。MCP と Plugin の追加・削除は各 CLI に委譲する
+- 設定ファイルの書き戻しは 2 か所のみ。MCP と Plugin の追加・削除は各 CLI に委譲する
   （`~/.claude.json` は 98 KB あり、直接書き戻すと実行中の Claude と競合して全状態を壊す）
-- 権限の削除は `permissions` キーだけを書き換え、削除前の内容をバックアップする
 - **自分の永続ファイルは 1 つだけ。** キャッシュディレクトリを持たず、`URLSession` は
   `.ephemeral`、一時展開は OS の一時領域で完結させる
 - **ブラウザ検知は範囲が最小で、OFF にできる。** 最初にブラウザが前面へ来た時点で

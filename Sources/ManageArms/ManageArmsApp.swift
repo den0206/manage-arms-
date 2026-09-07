@@ -91,10 +91,6 @@ final class AppModel {
     var isCleaning = false
     /// 一括削除シートの中身。nil で閉じる。
     var cleanup: [CleanupItem]?
-    var isEditingPermissions = false
-    /// 権限は一覧とは別に読む。プロジェクトのパスが動的で `Source` に載らないため（8 章）。
-    private(set) var permissions: [PermissionEntry] = []
-    private(set) var duplicateCounts: [String: Int] = [:]
     var preview: UpdatePreview?
     /// ブラウザ検知（DESIGN.md 6 章）。ウィンドウが開いている間だけ動く。
     let watcher = BrowserWatcher()
@@ -162,8 +158,6 @@ final class AppModel {
         previewTask = nil
         previewGeneration = UUID()
         inventory = .empty
-        permissions = []
-        duplicateCounts = [:]
         cleanup = nil
         discardPreview()
         CLIScan.clear()          // CLI の結果も持ち越さない（3.5 の例外を閉じる）
@@ -193,18 +187,6 @@ final class AppModel {
             inventory = loaded
             hasUpdates = UpdateChecker.hasAvailable(loaded.registry)
             refreshActivity()
-            permissions = await Task.detached {
-                PermissionScanner.scan(projects: loaded.projectScan.projects, env: .live)
-            }.value
-            guard isVisible, generation == visibleGeneration else {
-                inventory = .empty
-                permissions = []
-                duplicateCounts = [:]
-                isLoading = false
-                return
-            }
-            duplicateCounts = PermissionScanner.duplicates(permissions)
-                .mapValues(\.count)
             isLoading = false
             if pendingReload {
                 pendingReload = false
@@ -232,22 +214,6 @@ final class AppModel {
             if let failure { errorMessage = failure }   // 握り潰さず UI に出す
             isMutating = false
             reloadIfVisible(forceCLI: true)
-        }
-    }
-
-    /// 選択したエントリを消す（DESIGN.md 8 章）。
-    /// 書き換えるのは `permissions` キーだけで、消す前の中身はバックアップされる（9 章）。
-    func removePermissions(_ entries: [PermissionEntry]) {
-        guard !entries.isEmpty, !isEditingPermissions else { return }
-        isEditingPermissions = true
-        Task {
-            let failure = await Task.detached { () -> String? in
-                do { try PermissionWriter.remove(entries, env: .live); return nil }
-                catch { return "\(error)" }
-            }.value
-            if let failure { errorMessage = failure }
-            isEditingPermissions = false
-            reloadIfVisible()
         }
     }
 

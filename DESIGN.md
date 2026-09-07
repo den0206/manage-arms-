@@ -7,8 +7,8 @@ AI コーディングエージェント（Claude Code / Cursor / Codex / Gemini 
 - **プラットフォーム**: macOS 26 以降 / SwiftUI
 - **配布**: DMG の直配布（App Sandbox 非対応のため App Store 不可）。公開先は
   [den0206/manage-arms-releases](https://github.com/den0206/manage-arms-releases)。13 章
-- **状態**: **v1〜v4 実装済み**（Skills / Subagents / Plugins / 使用実績 / MCP / 権限）、
-  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト定義 390 件
+- **状態**: **v1〜v5 実装済み**（Skills / Subagents / Plugins / 使用実績 / MCP。v4 の権限は撤去）、
+  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト定義 366 件
   （`@Test` の数。`arguments:` 付きは実行時にさらに分かれる）
 - **実装**: SPM パッケージ。`swift test` / `CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh`
   （`.xcodeproj` は不要。実 CLI・実ネットワークを使う確認は `MANUAL=1 swift test`）
@@ -77,7 +77,6 @@ AI コーディングエージェント（Claude Code / Cursor / Codex / Gemini 
 | Plugin 追加/削除（Codex） | `codex plugin add\|remove`（`update` が無いため remove + add） |
 | Skill / Subagent 有効化 | 実体を配置 + `FileManager.createSymbolicLink`（3.2） |
 | Skill / Subagent 無効化 | 実体を退避ディレクトリへ移動 + symlink 削除（実体は消さない。3.2） |
-| 権限の削除 | `settings.json` / `settings.local.json` の `permissions` キーのみ書き換え（8 章）。**9 章のホワイトリストの唯一の例外**。バックアップ + アトミック |
 | 一覧読み取り | 列挙されたファイルの直読み + `<cli> mcp list --json` |
 
 **Cursor の `mcp.json` は JSONC** — `//` コメントを受け付ける（実測: コメントアウトされた
@@ -250,7 +249,7 @@ enum Source {
   差し替える** — `.preferredColorScheme` はウィンドウの中しか変わらず、
   メニューバーのメニュー・シート・パネルが取り残される
 - **常駐中に抱えるのは設定と検知の状態だけ。** ウィンドウを閉じた時点で
-  `inventory` / `permissions` / 重複集計を捨てる（`AppModel.releaseForBackground`）。
+  `inventory` を捨てる（`AppModel.releaseForBackground`）。
   一覧は開いたときにどうせ読み直す（キャッシュしない）ので、
   持ち続ける理由が無い。**常駐だけの状態では走査を一度もしない** —
   起動直後の走査もウィンドウが出てから
@@ -957,7 +956,6 @@ chrome-devtools          MCP      @latest（常に最新）    [ピン留め]
    Cursor         2
    Codex          1
    Gemini CLI     未検出
-🔒 権限                 permissions.allow の横断掃除
 ```
 
 - **エージェントにアイコンを付けない（確定）。** 名前が既に一意なので、
@@ -991,10 +989,7 @@ chrome-devtools          MCP      @latest（常に最新）    [ピン留め]
 
 - **種別のアイコン**（`KindIcon`）— 色付きの角丸タイルを 1 行ごとに並べると、
   一覧が模様になって、名前より先にアイコンが目に入る
-- **`permissions` の `allow`** — 大多数なので、色を付けるのは少数派の `deny` / `ask` だけ。
-  全行が緑だと、意味が正反対の 2 件が緑の中に埋もれる
-- **絞り込みが既に言っていること** — 「使い捨て」表示で全行に「マシン固有」の橙を出さない。
-  一覧が橙に染まると、印として機能しなくなる
+- **絞り込みが既に言っていること** — 一覧が橙に染まると、印として機能しなくなる
 
 **動きは `Motion` 経由でしか書かない。** `Motion.pop` / `gentle` / `count` は
 `Animation?` を返し、**「動きを減らす」（`accessibilityDisplayShouldReduceMotion`）が
@@ -1276,58 +1271,6 @@ Cursor の MCP に `claude mcp remove chrome-devtools` を出すことになり�
 - 通るのは `WriteGuard` の経路だけ。registry.json に無いものは削除できない（9 章）
 - 確認ダイアログを必ず挟み、「ゴミ箱へ移動します」と明記する
 
-### 権限画面
-
-各プロジェクトの `settings.local.json` に `permissions.allow` が蓄積している。
-実測（11 プロジェクト）:
-
-```
-371 件の allow
-  ├ マシン固有（使い捨て候補） 22 件
-  │   Bash(git -C /Users/…/secondary-simulator log --oneline -15)
-  └ 複数プロジェクトに重複     31 種類 / 75 件
-      7× WebSearch    7× WebFetch(domain:github.com)
-```
-
-3 つのフィルタで絞り、チェックして一括削除する。
-
-| フィルタ | 中身 |
-|---|---|
-| **使い捨て** | `env.home` の絶対パスを含む = 他のマシンでも他のプロジェクトでも使えない |
-| **重複** | 複数プロジェクトに同じエントリ。5.2 の散らかり検出と同じ問題 |
-| すべて | 371 件 |
-
-**判定は `/Users/` のハードコードではなく `env.home` 基準。**
-そうしないとテストが実ユーザーのパスに依存する（3.8）。
-
-#### 9 章のホワイトリストの唯一の例外
-
-`WriteGuard` は**削除・移動**を守るもので、ここは「ファイルの中の 1 キーを
-書き換える」別の操作。`PermissionWriter` に専用のガードを置き、
-次を全部満たす時だけ通す:
-
-1. ファイル名が `settings.json` / `settings.local.json` に**完全一致**する
-2. 場所が `.claude` ディレクトリの**直下**である（`..` で抜けられない）
-3. 操作が `permissions.<bucket>` の配列からの**削除**である
-
-**`permissions` 以外のキーには一切触らない。** 実測で `enabledPlugins` /
-`hooks` / `extraKnownMarketplaces` が同居しており、消すと別の設定が壊れる。
-
-削除前の中身は `~/Library/Application Support/ManageArms/permission-backups/`
-に残す。**プロジェクト側に `.bak` を作らない** — git status に出てしまう。
-
-**設定ファイル 1 つあたり 5 世代まで**（`PermissionWriter.generations`）。
-編集のたびに増やし続けると、ストレージの規律（9 章）を自分で破ることになる。
-ファイル名は `v2__<元パスのfingerprint>__<ISO8601>__<末尾2要素>__<UUID>.json` とし、
-同一秒の編集でも衝突させない。**本文は編集前のバイト列そのまま**にする — 復元導線は
-アプリに無く、Finder でコピーして戻すのが唯一の手段なので、base64 の envelope に
-包むとバックアップの目的そのものが失われる。どの設定ファイルの控えかは
-fingerprint（機械用）と末尾 2 要素（人間用）が名前で担う。
-ディレクトリは `0700`、ファイルは `0600` とし、全体も 5 MiB で打ち止める。
-0.2.x の `<ISO8601>__<slug>` も自分が書いたと分かるので**同じ上限で刈る**
-（新形式だけを見ていると旧形式が永久に残り、自分でディスクを汚す）。
-0.1.0 が書いた旧形式（区切り無し）は**帰属を判定できないので刈らない**。
-
 ---
 
 ## 9. アプリ自身のリソース規律
@@ -1339,7 +1282,6 @@ fingerprint（機械用）と末尾 2 要素（人間用）が名前で担う。
   registry.json          数 KB
   agents/<name>.md       Subagent 実体（共有ルートの慣習が無いためここに置く）
   disabled-skills/       無効化した Skill の退避先（3.2）
-  permission-backups/    設定ファイルごと 5 世代、全体 5 MiB まで
 ```
 
 **Skill の実体はここではなく `~/.agents/skills/` に置く（3.2 で確定）。**
@@ -1366,7 +1308,7 @@ OS が回収する。アプリが自前の掃除機能を持たなくて済む�
 - JSONL は 64 KiB 単位で読み、1行 1 MiB・10,000ファイル・30秒を上限にする
 - 作成先は trusted anchor から親までの既存要素を検査し、**信頼できる根の外へ出る**
   symlink を拒否する。`~/.claude` を dotfiles リポジトリへ張るのは普通の構成なので、
-  symlink そのものは拒まない（拒むと有効化・更新・権限編集が全部できなくなる）
+  symlink そのものは拒まない（拒むと有効化も更新もできなくなる）
 
 ### frontmatter だけ読む
 
@@ -1404,13 +1346,11 @@ SwiftUI / AppKit の共有ページを含むため 150 MB 前後になり、ア�
 **「触ってよい対象の限定」**で行う。3.4 の走査範囲と同じ発想で、
 新しいリソース種別を足しても安全側に倒れる。
 
-**アプリが削除・移動してよいのは次の 3 つだけ:**
+**アプリが削除・移動してよいのは次の 2 つだけ:**
 
 1. **自分が張った symlink** — リンク先が `~/.agents/skills/` 配下であることを
    `resolvingSymlinksInPath` で検証したもののみ
 2. **`registry.json` に載っている実体** — `~/.agents/skills/<name>/`
-3. **自分が書いた権限バックアップ** — `permission-backups/` 直下の通常ファイルのみ
-   （`WriteGuard.assertAppBackup`。世代刈りのためだけに要る）
 
 **削除・移動だけでは足りない。作成もガードを通す。**
 `assertMutable` は既にあるものを壊す操作しか見ていないため、
@@ -1654,20 +1594,23 @@ npm: chrome-devtools-mcp@latest → @1.8.0 に固定
 ピン留めは `remove` → `add` で登録し直す（`claude mcp` に差し替えが無いため）。
 **`add` が失敗したら元の定義で入れ直す** — 中途半端に消えている方が害が大きい。
 
-### v4 — 権限（実装済み）
+### v4 — 権限（撤去済み）
 
-Hooks / Commands / Rules は対象外に決まった（1 章）ため、v4 は権限画面のみ。
-実測で 371 件 / 11 プロジェクト、うち使い捨て 22 件・重複 75 件を検出（8 章）。
+`permissions.allow` の横断掃除を実装したが、**削除した**。理由:
 
-実装で判明し、設計に反映した事実:
+- 読むのは `~/.claude` 配下だけで、Cursor / Codex / Gemini を扱わない。
+  「4 エージェント横断」というこのアプリの中核から外れた単機能だった
+- 実測で掃除の実利がほぼ無い。386 件のうち使い捨ては 23 件で、**その全部が
+  `settings.local.json`（gitignore される各マシンローカル）に閉じている**。
+  git で共有される `settings.json` 側の使い捨ては 0 件で、他の人には届かない
+- 設計時（371 件 / 22 件）から件数が動いておらず、実際には使われていなかった
+- 代償が大きい。**設定ファイルを書く 3 か所目**（`PermissionWriter`）と、
+  `permission-backups/` という**唯一の永続ファイル規律（4.1）の例外**、
+  専用ガード `WriteGuard.assertAppBackup`、走査のたびの全プロジェクト読みを
+  この 1 機能のためだけに抱えていた
 
-| 発見 | 反映先 |
-|---|---|
-| プロジェクトのパスは**動的**で `Source` の静的列挙に載らない | `UsageScanner` と同じく専用の入り口にする。プロジェクト一覧は `~/.claude.json` の `projects` キーから取る（`~/.claude/projects/` の 140 MB は読まない） |
-| `settings.json` は `WriteGuard.deniedNames` に入っている | `WriteGuard` は削除・移動用。書き換えは別操作なので `PermissionWriter` に専用ガードを置いた |
-| `permissions` の隣に `enabledPlugins` / `hooks` / `extraKnownMarketplaces` が同居 | ルート辞書を読んで `permissions` だけ差し替える（`MCPManager.editCursor` と同じ形） |
-| テストの偽ホームで、`~/.claude.json` の `projects`（絶対パス）を home 確定前に組み立てて全滅した | フィクスチャを `(URL) -> [String: String]` のクロージャ形にした |
-| macOS の `/var` → `/private/var` symlink で `isInside` が偽陰性になる | 実 home は symlink ではないので実害なし。`isInside` は fail-closed なので拒否側に倒れる。テスト側で解決 |
+撤去して不変条件が 2 つ単純になった（書き込みは 2 か所、削除・移動の許可は 2 つ）。
+掃除が要るなら Claude Code の `/permissions` で足りる。
 
 ### v5 — 画面の作り直しと削除（実装済み）
 
