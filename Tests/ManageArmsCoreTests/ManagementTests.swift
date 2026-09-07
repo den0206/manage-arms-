@@ -25,6 +25,37 @@ struct ManagementTests {
         #expect(registry.entry(named: "review", kind: .subagent)?.repo == "b/agent")
     }
 
+    @Test("CLI の手動パスを一覧操作にも使う")
+    func manualCLIUsedForOperations() throws {
+        let envBase = try fixture()
+        defer { try? FileManager.default.removeItem(at: envBase.home) }
+        let executable = envBase.home.appending(path: "bin/custom-codex")
+        try FileManager.default.createDirectory(at: executable.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        try Data().write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700],
+                                              ofItemAtPath: executable.path)
+        var registry = Registry()
+        registry.update(.codex) { $0.path = executable.path }
+        try registry.save(env: envBase)
+        let calls = Recorder()
+        var env = envBase
+        env.run = { command in calls.record(command); return "[]" }
+        _ = try MCPScanner.read(.codex, env: env)
+        #expect(calls.all.first?.first == executable.path)
+    }
+
+    @Test("同じ実体のプロジェクト表記を重複走査しない")
+    func canonicalProjectIdentity() throws {
+        let env = try fixture()
+        defer { try? FileManager.default.removeItem(at: env.home) }
+        let project = env.home.appending(path: "project")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        var registry = Registry()
+        registry.projects = [project.path, project.path + "/", project.path + "/child/.."]
+        #expect(ProjectScan.projectPaths(in: env, registry: registry).count == 1)
+    }
+
     @Test("壊れたCursor設定を追加操作で上書きしない", arguments: ["{", "[]", #"{"mcpServers":[]}"#])
     func preservesBrokenConfig(_ original: String) throws {
         let env = try fixture([".cursor/mcp.json": original])
@@ -160,6 +191,7 @@ struct ManagementTests {
         var registry = Registry()
         registry.upsert(.init(name: "review", kind: .skill))
         registry.upsert(.init(name: "review", kind: .subagent, sha: "old", disabled: true))
+        try registry.save(env: env)
         let root = env.home.appending(path: "staging")
         let candidate = Candidate(kind: .subagent, name: "review", description: nil, localURL: root.appending(path: "review.md"))
         let staging = Staging(root: root, source: .init(repo: "example/repo"), candidates: [candidate])

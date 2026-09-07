@@ -17,6 +17,8 @@ public enum WriteGuard {
         case notInRegistry(String)
         /// 取得物が名乗った名前がパス要素として使えない（`..` / `/` を含む等）。
         case invalidName(String)
+        /// 書き込み先までの既存ディレクトリに symlink が含まれる。
+        case unsafeParent(String)
 
         public var description: String {
             switch self {
@@ -30,6 +32,8 @@ public enum WriteGuard {
                 String(localized: "\(n) は他のツールが管理しています。manage-arms からは変更できません")
             case .invalidName(let n):
                 String(localized: "\(n) は名前として使えません（取得元の指定を確認してください）")
+            case .unsafeParent(let p):
+                String(localized: "\(p) の親ディレクトリに安全でないシンボリックリンクがあります")
             }
         }
     }
@@ -93,9 +97,10 @@ public enum WriteGuard {
             return
         }
 
-        guard env.managedRoots.contains(where: { isInside(url, $0) }) else {
+        guard let managedRoot = env.managedRoots.first(where: { isInside(url, $0) }) else {
             throw Denial.outsideManagedRoots(path)
         }
+        try assertSafeCreation(url, inside: managedRoot, anchor: env.home)
         // Subagent は `<name>.md` なので拡張子を落とす。
         let name = url.pathExtension == "md"
             ? String(url.lastPathComponent.dropLast(3))
@@ -106,6 +111,31 @@ public enum WriteGuard {
         }
     }
 
+    /// 作成・移動先の途中にある symlink を拒否する。文字列上の配下判定だけでは、
+    /// `~/.agents/skills -> /outside` のような付け替えで管理外へ到達するため。
+    public static func assertSafeCreation(_ url: URL, inside root: URL,
+                                          anchor: URL? = nil) throws {
+        let trusted = (anchor ?? root).standardizedFileURL
+        let target = url.standardizedFileURL
+        let boundary = root.standardizedFileURL
+        guard target.path == boundary.path || isInside(target, boundary),
+              boundary.path == trusted.path || isInside(boundary, trusted) else {
+            throw Denial.outsideManagedRoots(target.path)
+        }
+
+        let trustedParts = trusted.pathComponents
+        let targetParts = target.deletingLastPathComponent().pathComponents
+        guard targetParts.starts(with: trustedParts) else {
+            throw Denial.outsideManagedRoots(target.path)
+        }
+        var current = trusted
+        for component in targetParts.dropFirst(trustedParts.count) {
+            current.append(path: component)
+            guard FileManager.default.fileExists(atPath: current.path) else { continue }
+            if isSymlink(current) { throw Denial.unsafeParent(current.path) }
+        }
+    }
+
     /// Installed artifacts may be removed regardless of who installed them.
     /// Only a direct child of a known resource directory is eligible; never follow a link to delete its target.
     public static func assertUserArtifact(_ url: URL, kind: Kind, project: String? = nil,
@@ -113,7 +143,8 @@ public enum WriteGuard {
         guard kind == .skill || kind == .subagent else { throw Denial.deniedPath(url.path) }
         try assertNotBundled(url, env: env)
         if let project {
-            guard ProjectScan.projectPaths(in: env).contains(project) else {
+            let known = Set(ProjectScan.projectPaths(in: env).compactMap(ProjectScan.identity))
+            guard let identity = ProjectScan.identity(project), known.contains(identity) else {
                 throw Denial.outsideManagedRoots(url.path)
             }
         }

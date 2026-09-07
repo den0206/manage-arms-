@@ -21,7 +21,7 @@ struct DiffSheet: View {
 
             if preview.hasChanges {
                 HStack(spacing: 6) {
-                    Text("SKILL.md").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Text("更新対象の全ファイル").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     Spacer()
                     Pill(text: "+\(added)", tint: .green)
                     Pill(text: "−\(removed)", tint: .red)
@@ -34,6 +34,7 @@ struct DiffSheet: View {
         .padding(20)
         .safeAreaInset(edge: .bottom, spacing: 0) { footer }
         .frame(width: 660, height: 500)
+        .interactiveDismissDisabled(model.isMutating)
     }
 
     /// 差分は**行の色ではなく、行そのものの地色**で分ける。
@@ -71,13 +72,14 @@ struct DiffSheet: View {
             Divider()
             HStack {
                 Button("このバージョンで固定") {
-                    model.discardPreview()
-                    dismiss()
+                    model.pinPreview()
                 }
+                .disabled(model.isMutating)
                 .help("上流が方針転換した時に更新を止めます")
                 Spacer()
                 Button("閉じる") { model.discardPreview(); dismiss() }
-                Button("更新する") { model.applyPreview(); dismiss() }
+                    .disabled(model.isMutating)
+                Button("更新する") { model.applyPreview() }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
                     .disabled(!preview.hasChanges)

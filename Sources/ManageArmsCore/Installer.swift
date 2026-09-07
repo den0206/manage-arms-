@@ -32,9 +32,11 @@ public enum Installer {
         // ここを素通しにすると取得先の名乗り 1 つで管理ルートの外へ書ける（9 章）。
         // `Fetcher` でも弾いているが、`deniedNames` と同じ理由で二重にする。
         try WriteGuard.assertValidName(candidate.name)
+        try Fetcher.validate(candidate, in: staging)
         let isSubagent = candidate.kind == .subagent
 
         let fm = FileManager.default
+        let originalRegistry = registry
         let destination = isSubagent
             ? env.agentStore.appending(path: "\(candidate.name).md")
             : env.skillStore.appending(path: candidate.name)
@@ -42,16 +44,31 @@ public enum Installer {
             throw Failure.alreadyInstalled(candidate.name)
         }
 
-        try fm.createDirectory(at: destination.deletingLastPathComponent(),
-                               withIntermediateDirectories: true)
-        try fm.copyItem(at: candidate.localURL, to: destination)
+        let managedRoot = isSubagent ? env.agentStore : env.skillStore
+        try WriteGuard.assertSafeCreation(destination, inside: managedRoot, anchor: env.home)
+        do {
+            try fm.createDirectory(at: destination.deletingLastPathComponent(),
+                                   withIntermediateDirectories: true)
+            try fm.copyItem(at: candidate.localURL, to: destination)
+        } catch {
+            let originalError = error
+            if fm.fileExists(atPath: destination.path(percentEncoded: false)) {
+                do {
+                    try fm.removeItem(at: destination)
+                } catch let rollbackError {
+                    throw SkillManager.Failure.rollbackFailed("\(originalError); \(rollbackError)")
+                }
+            }
+            throw originalError
+        }
 
         registry.upsert(Registry.Entry(
             name: candidate.name,
             kind: candidate.kind,
             repo: staging.source.repo,
             branch: staging.source.branch,
-            subdir: staging.source.subdir
+            subdir: staging.source.subdir,
+            sha: staging.resolvedSHA
         ))
         do {
             if isSubagent {
@@ -61,9 +78,23 @@ public enum Installer {
             }
             try registry.save(env: env)
         } catch {
-            // 途中で失敗したら置いた実体を戻す。半端な状態を残さない。
-            try? fm.removeItem(at: destination)
-            throw error
+            let originalError = error
+            registry = originalRegistry
+            let links = isSubagent
+                ? [env.home.appending(path: ".claude/agents/\(candidate.name).md"),
+                   env.home.appending(path: ".cursor/agents/\(candidate.name).md")]
+                : [env.claudeSkills.appending(path: candidate.name)]
+            do {
+                for link in links where WriteGuard.isSymlink(link) {
+                    if WriteGuard.symlinkTarget(link)?.standardizedFileURL == destination.standardizedFileURL {
+                        try fm.removeItem(at: link)
+                    }
+                }
+                try fm.removeItem(at: destination)
+            } catch let rollbackError {
+                throw SkillManager.Failure.rollbackFailed("\(originalError); \(rollbackError)")
+            }
+            throw originalError
         }
     }
 }

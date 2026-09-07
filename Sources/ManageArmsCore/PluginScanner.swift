@@ -42,7 +42,7 @@ public enum PluginScanner {
 
     public static func read(_ agent: Agent, env: Environment) throws -> [InstalledPlugin] {
         guard agent == .claude || agent == .codex else { return [] }
-        let output = try env.run([agent.cliName!, "plugin", "list", "--json"])
+        let output = try env.runCLI([agent.cliName!, "plugin", "list", "--json"], for: agent)
         let object = try JSONSerialization.jsonObject(with: Data(output.utf8))
         let list = agent == .claude ? object as? [[String: Any]] : (object as? [String: Any])?["installed"] as? [[String: Any]]
         guard let list else { throw MCPScanner.ReadFailure("Pluginの一覧をCLIから読み取れません") }
@@ -87,11 +87,11 @@ public enum PluginManager {
                   url.scheme == "https", url.host != nil else {
                 throw MCPScanner.ReadFailure("配布元はHTTPSのURLで入力してください")
             }
-            _ = try env.run([cli, "plugin", "marketplace", "add", source])
+            _ = try env.runCLI([cli, "plugin", "marketplace", "add", source], for: agent)
         }
-        _ = try env.run(agent == .claude
+        _ = try env.runCLI(agent == .claude
             ? [cli, "plugin", "install", selector, "-s", "user"]
-            : [cli, "plugin", "add", selector])
+            : [cli, "plugin", "add", selector], for: agent)
         guard try PluginScanner.read(agent, env: env).contains(where: { $0.id == selector || $0.id.split(separator: "@").first.map(String.init) == selector }) else {
             throw MCPScanner.ReadFailure("CLIは成功しましたが、Pluginが見つかりません。一覧を更新してエージェント側を確認してください。")
         }
@@ -106,7 +106,7 @@ public enum PluginManager {
         let found = try PluginScanner.read(agent, env: env).filter(target(name, project: project))
         guard found.count == 1, let plugin = found.first, !plugin.isBundled,
               !name.hasPrefix("-") else { throw MCPScanner.ReadFailure("削除対象のPluginが見つからないか、複数該当するか、保護されています") }
-        var argv = [agent.cliName!, "plugin", "remove", name]
+        var argv = env.command([agent.cliName!, "plugin", "remove", name], for: agent)
         if agent == .claude {
             // `project` は `<proj>/.claude/settings.json` = git で共有されるファイル。
             // 消えたことに気づくのは別のマシンや他のメンバー（DESIGN.md 5.2 / 9 章）。

@@ -124,6 +124,22 @@ struct WriteGuardTests {
         }
     }
 
+    @Test("管理ルートの親 symlink 経由の作成を拒否する")
+    func parentSymlinkRejected() throws {
+        let root = URL(filePath: NSTemporaryDirectory()).appending(path: UUID().uuidString)
+        let outside = root.appending(path: "outside")
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        let home = root.appending(path: "home")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: home.appending(path: ".agents"),
+                                                   withDestinationURL: outside)
+        let env = Environment.test(home: home)
+        #expect(throws: WriteGuard.Denial.self) {
+            try WriteGuard.assertSafeCreation(env.skillStore.appending(path: "demo"),
+                                              inside: env.skillStore, anchor: env.home)
+        }
+    }
+
     /// `ProjectScan.skillRoots` を歩き直さずに同じ集合を引けること。
     /// **歩く実装に戻すと UI が行数ぶん止まる**（実測 0.16 秒 × 350 行）。
     @Test("プロジェクト配下の許可ルートは走査せずに判定できる", arguments: [

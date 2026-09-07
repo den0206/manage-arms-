@@ -51,20 +51,29 @@ final class AddModel {
         isBusy = true
         Task {
             do {
-                let result = try await Fetcher.stage(source)
+                let revision = try await UpdateChecker.resolve(source, env: .live)
+                let result = try await Fetcher.stage(source, resolvedSHA: revision)
                 if token == generation { staged = result } else { result.discard() }
             } catch { if token == generation { self.error = "\(error)" } }
             isBusy = false
         }
     }
 
-    func install(_ candidate: Candidate, onDone: () -> Void) {
-        guard let staged else { return }
-        do {
-            var registry = try Registry.read(env: .live)
-            try Installer.install(candidate, from: staged, env: .live, registry: &registry)
-            onDone()
-        } catch { self.error = "\(error)" }
+    func install(_ candidate: Candidate, onDone: @escaping () -> Void) {
+        guard let staged, !isBusy else { return }
+        isBusy = true
+        Task {
+            let failure = await Task.detached { () -> String? in
+                do {
+                    var registry = try Registry.read(env: .live)
+                    try Installer.install(candidate, from: staged, env: .live,
+                                          registry: &registry)
+                    return nil
+                } catch { return "\(error)" }
+            }.value
+            isBusy = false
+            if let failure { error = failure } else { onDone() }
+        }
     }
 
     func installConnection(onDone: @escaping () -> Void) {

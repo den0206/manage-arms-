@@ -28,7 +28,7 @@ public enum UpdateChecker {
         guard let state = registry.repos[key], let latest = state.latestSha else {
             return entry.pinned ? .pinned(behind: false) : .unknown
         }
-        let behind = entry.sha != nil && entry.sha != latest
+        let behind = entry.sha != latest
         if entry.pinned { return .pinned(behind: behind) }
         return behind ? .available(sha: latest) : .upToDate
     }
@@ -96,6 +96,21 @@ public enum UpdateChecker {
               let sha = object["sha"] as? String, !sha.isEmpty
         else { throw Failure.malformedResponse }
         return sha
+    }
+
+    public static func resolve(_ source: GitHubSource, env: Environment,
+                               defaultBranch: String = "main") async throws -> String {
+        let branch = source.branch ?? defaultBranch
+        guard let encoded = branch.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let url = URL(string: "https://api.github.com/repos/\(source.repo)/commits/\(encoded)")
+        else { throw Failure.malformedResponse }
+        let result = try await env.httpGet(url, ["Accept": "application/vnd.github+json"])
+        guard result.status == 200 else {
+            if result.status == 403 || result.status == 429 { throw Failure.rateLimited }
+            if result.status == 404 { throw Failure.notFound("\(source.repo)#\(branch)") }
+            throw Failure.http(result.status)
+        }
+        return try parseSha(result.body)
     }
 
     public enum Failure: Error, Equatable, CustomStringConvertible {

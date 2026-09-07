@@ -21,6 +21,38 @@ struct UpdaterTests {
         #expect(Updater.diff(old: ["a", "b"], new: ["a", "b"]).isEmpty)
     }
 
+    @Test("SKILL.md が同じでも scripts の変更を拾う")
+    func detectsWholeTreeChanges() throws {
+        let root = URL(filePath: NSTemporaryDirectory()).appending(path: UUID().uuidString)
+        let old = root.appending(path: "old"), new = root.appending(path: "new")
+        for directory in [old, new] {
+            try FileManager.default.createDirectory(at: directory.appending(path: "scripts"),
+                                                    withIntermediateDirectories: true)
+            try "same".write(to: directory.appending(path: "SKILL.md"),
+                             atomically: true, encoding: .utf8)
+        }
+        try "old".write(to: old.appending(path: "scripts/run.sh"), atomically: true,
+                        encoding: .utf8)
+        try "new".write(to: new.appending(path: "scripts/run.sh"), atomically: true,
+                        encoding: .utf8)
+        let diff = try Updater.treeDiff(old: Updater.manifest(of: old),
+                                        new: Updater.manifest(of: new))
+        #expect(diff.contains { $0.text.contains("scripts/run.sh") })
+    }
+
+    @Test("適用中の staging は画面から破棄できない")
+    func stagingOwnership() throws {
+        let root = URL(filePath: NSTemporaryDirectory()).appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let staging = Staging(root: root, source: .init(repo: "o/r"), candidates: [])
+        #expect(staging.claimForApply())
+        staging.discard()
+        #expect(FileManager.default.fileExists(atPath: root.path))
+        staging.releaseAfterFailure()
+        staging.discard()
+        #expect(!FileManager.default.fileExists(atPath: root.path))
+    }
+
     @Test("CRLF は差分に出ない")
     func crlfNormalized() throws {
         let dir = URL(filePath: NSTemporaryDirectory()).appending(path: UUID().uuidString)
@@ -59,6 +91,7 @@ struct UpdaterTests {
             registry.upsert(Registry.Entry(name: "demo", kind: .skill, repo: "o/r",
                                            branch: "main", sha: "old"))
             registry.repos["o/r#main"] = .init(latestSha: "new")
+            try registry.save(env: env)
 
             // 取得済みの新しい中身
             let root = home.appending(path: "staging")

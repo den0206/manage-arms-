@@ -9,12 +9,15 @@ public enum SkillManager {
     public enum Failure: Error, Equatable, CustomStringConvertible {
         case notFound(String)
         case alreadyExists(String)
+        case rollbackFailed(String)
         public var description: String {
             switch self {
             case .notFound(let n):
                 String(localized: "\(n) が見つかりません")
             case .alreadyExists(let p):
                 String(localized: "\(p) に既に別のものがあります。上書きしません")
+            case .rollbackFailed(let message):
+                String(localized: "操作に失敗し、元の状態も完全には復元できませんでした: \(message)")
             }
         }
     }
@@ -83,17 +86,43 @@ enum ManagedLifecycle {
                      registry: Registry) throws {
         let fm = FileManager.default
         try WriteGuard.assertValidName(name)
+        try Registry.assertReadable(env: env)
         let layout = layout(name, kind: kind, env: env)
-        for link in layout.links {
-            if WriteGuard.isSymlink(link) {
-                try WriteGuard.assertMutable(link, env: env, registry: registry)
-                try fm.removeItem(at: link)
-            } else if fm.fileExists(atPath: link.path(percentEncoded: false)) {
-                throw SkillManager.Failure.alreadyExists(link.path(percentEncoded: false))
+        var previous: [URL: URL] = [:]
+        for link in layout.links where WriteGuard.isSymlink(link) {
+            try WriteGuard.assertMutable(link, env: env, registry: registry)
+            if let target = WriteGuard.symlinkTarget(link) { previous[link] = target }
+        }
+        for link in layout.links where !WriteGuard.isSymlink(link)
+            && fm.fileExists(atPath: link.path(percentEncoded: false)) {
+            throw SkillManager.Failure.alreadyExists(link.path(percentEncoded: false))
+        }
+        var changed: [URL] = []
+        do {
+            for link in layout.links {
+                try WriteGuard.assertSafeCreation(link, inside: link.deletingLastPathComponent(),
+                                                  anchor: env.home)
+                if WriteGuard.isSymlink(link) {
+                    try fm.removeItem(at: link)
+                }
+                try fm.createDirectory(at: link.deletingLastPathComponent(),
+                                       withIntermediateDirectories: true)
+                try fm.createSymbolicLink(at: link, withDestinationURL: layout.store)
+                changed.append(link)
             }
-            try fm.createDirectory(at: link.deletingLastPathComponent(),
-                                   withIntermediateDirectories: true)
-            try fm.createSymbolicLink(at: link, withDestinationURL: layout.store)
+        } catch {
+            let originalError = error
+            do {
+                for link in changed where WriteGuard.isSymlink(link) { try fm.removeItem(at: link) }
+                for (link, target) in previous {
+                    if !WriteGuard.isSymlink(link), !fm.fileExists(atPath: link.path) {
+                        try fm.createSymbolicLink(at: link, withDestinationURL: target)
+                    }
+                }
+            } catch let rollbackError {
+                throw SkillManager.Failure.rollbackFailed("\(originalError); \(rollbackError)")
+            }
+            throw originalError
         }
     }
 
@@ -101,21 +130,53 @@ enum ManagedLifecycle {
                        registry: inout Registry) throws {
         let fm = FileManager.default
         try WriteGuard.assertValidName(name)
+        try Registry.assertReadable(env: env)
         let layout = layout(name, kind: kind, env: env)
+        let originalRegistry = registry
+        let wasParked = !fm.fileExists(atPath: layout.store.path)
+        let previousLinks = Dictionary(uniqueKeysWithValues: layout.links.compactMap { link in
+            WriteGuard.symlinkTarget(link).map { (link, $0) }
+        })
         if !fm.fileExists(atPath: layout.store.path(percentEncoded: false)) {
             guard fm.fileExists(atPath: layout.parked.path(percentEncoded: false)) else {
                 throw SkillManager.Failure.notFound(name)
             }
             try WriteGuard.assertMutable(layout.parked, env: env, registry: registry)
+            try WriteGuard.assertSafeCreation(layout.store,
+                                              inside: layout.store.deletingLastPathComponent(),
+                                              anchor: env.home)
             try fm.createDirectory(at: layout.store.deletingLastPathComponent(),
                                    withIntermediateDirectories: true)
             try fm.moveItem(at: layout.parked, to: layout.store)
         }
-        try link(name, kind: kind, env: env, registry: registry)
-        var entry = registry.entry(named: name, kind: kind) ?? Registry.Entry(name: name, kind: kind)
-        entry.disabled = false
-        registry.upsert(entry)
-        try registry.save(env: env)
+        do {
+            try link(name, kind: kind, env: env, registry: registry)
+            var entry = registry.entry(named: name, kind: kind) ?? Registry.Entry(name: name, kind: kind)
+            entry.disabled = false
+            registry.upsert(entry)
+            try registry.save(env: env)
+        } catch {
+            let originalError = error
+            registry = originalRegistry
+            do {
+                for link in layout.links where WriteGuard.isSymlink(link) {
+                    if WriteGuard.symlinkTarget(link)?.standardizedFileURL == layout.store.standardizedFileURL {
+                        try fm.removeItem(at: link)
+                    }
+                }
+                for (link, target) in previousLinks
+                    where !WriteGuard.isSymlink(link) && !fm.fileExists(atPath: link.path) {
+                    try fm.createSymbolicLink(at: link, withDestinationURL: target)
+                }
+                if wasParked, fm.fileExists(atPath: layout.store.path),
+                   !fm.fileExists(atPath: layout.parked.path) {
+                    try fm.moveItem(at: layout.store, to: layout.parked)
+                }
+            } catch let rollbackError {
+                throw SkillManager.Failure.rollbackFailed("\(originalError); \(rollbackError)")
+            }
+            throw originalError
+        }
     }
 
     /// **前提の検査を全部先に済ませてから壊す。**
@@ -130,7 +191,9 @@ enum ManagedLifecycle {
                         registry: inout Registry) throws {
         let fm = FileManager.default
         try WriteGuard.assertValidName(name)
+        try Registry.assertReadable(env: env)
         let layout = layout(name, kind: kind, env: env)
+        let originalRegistry = registry
 
         guard fm.fileExists(atPath: layout.store.path(percentEncoded: false)) else {
             throw SkillManager.Failure.notFound(name)
@@ -144,14 +207,37 @@ enum ManagedLifecycle {
             try WriteGuard.assertMutable(link, env: env, registry: registry)
         }
 
-        try fm.createDirectory(at: layout.parked.deletingLastPathComponent(),
-                               withIntermediateDirectories: true)
-        try fm.moveItem(at: layout.store, to: layout.parked)
-        for link in links { try fm.removeItem(at: link) }
-        var entry = registry.entry(named: name, kind: kind) ?? Registry.Entry(name: name, kind: kind)
-        entry.disabled = true
-        registry.upsert(entry)
-        try registry.save(env: env)
+        do {
+            try WriteGuard.assertSafeCreation(layout.parked,
+                                              inside: layout.parked.deletingLastPathComponent(),
+                                              anchor: env.home)
+            try fm.createDirectory(at: layout.parked.deletingLastPathComponent(),
+                                   withIntermediateDirectories: true)
+            try fm.moveItem(at: layout.store, to: layout.parked)
+            for link in links { try fm.removeItem(at: link) }
+            var entry = registry.entry(named: name, kind: kind) ?? Registry.Entry(name: name, kind: kind)
+            entry.disabled = true
+            registry.upsert(entry)
+            try registry.save(env: env)
+        } catch {
+            let originalError = error
+            registry = originalRegistry
+            do {
+                if fm.fileExists(atPath: layout.parked.path),
+                   !fm.fileExists(atPath: layout.store.path) {
+                    try fm.moveItem(at: layout.parked, to: layout.store)
+                }
+                for link in links
+                    where !WriteGuard.isSymlink(link) && !fm.fileExists(atPath: link.path) {
+                    try fm.createDirectory(at: link.deletingLastPathComponent(),
+                                           withIntermediateDirectories: true)
+                    try fm.createSymbolicLink(at: link, withDestinationURL: layout.store)
+                }
+            } catch let rollbackError {
+                throw SkillManager.Failure.rollbackFailed("\(originalError); \(rollbackError)")
+            }
+            throw originalError
+        }
     }
 
     @discardableResult
@@ -159,7 +245,9 @@ enum ManagedLifecycle {
                        registry: inout Registry) throws -> URL? {
         let fm = FileManager.default
         try WriteGuard.assertValidName(name)
+        try Registry.assertReadable(env: env)
         let layout = layout(name, kind: kind, env: env)
+        let originalRegistry = registry
 
         // `disable` と同じ理由で、検査を全部先に済ませてから壊す。
         let links = layout.links.filter(WriteGuard.isSymlink)
@@ -170,15 +258,33 @@ enum ManagedLifecycle {
             try WriteGuard.assertMutable(url, env: env, registry: registry)
         }
 
-        for link in links { try fm.removeItem(at: link) }
-        var trashed: URL?
-        for url in bodies {
-            var result: NSURL?
-            try fm.trashItem(at: url, resultingItemURL: &result)
-            trashed = result as URL?
+        var moved: [(original: URL, trash: URL)] = []
+        do {
+            for link in links { try fm.removeItem(at: link) }
+            for url in bodies {
+                var result: NSURL?
+                try fm.trashItem(at: url, resultingItemURL: &result)
+                if let trash = result as URL? { moved.append((url, trash)) }
+            }
+            registry.resources.removeAll { $0.name == name && $0.kind == kind.rawValue }
+            try registry.save(env: env)
+        } catch {
+            registry = originalRegistry
+            do {
+                for item in moved.reversed() where fm.fileExists(atPath: item.trash.path) {
+                    try fm.moveItem(at: item.trash, to: item.original)
+                }
+                for link in links
+                    where !WriteGuard.isSymlink(link) && !fm.fileExists(atPath: link.path) {
+                    try fm.createDirectory(at: link.deletingLastPathComponent(),
+                                           withIntermediateDirectories: true)
+                    try fm.createSymbolicLink(at: link, withDestinationURL: layout.store)
+                }
+            } catch let rollbackError {
+                throw SkillManager.Failure.rollbackFailed("\(error); \(rollbackError)")
+            }
+            throw error
         }
-        registry.resources.removeAll { $0.name == name && $0.kind == kind.rawValue }
-        try registry.save(env: env)
-        return trashed
+        return moved.last?.trash
     }
 }

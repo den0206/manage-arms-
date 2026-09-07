@@ -9,6 +9,9 @@ import Foundation
 /// リアルタイム検知ではない。Skills / Plugins には実行実体が無く「使用中」は
 /// 1 ターンで消える瞬間的イベントにしかならないため、点灯ではなく最終使用日を出す。
 public enum UsageScanner {
+    static let lineLimit = 1024 * 1024
+    static let scannedFileLimit = 10_000
+    static let scanTimeLimit: TimeInterval = 30
 
     struct LogSource {
         let id: String
@@ -51,7 +54,12 @@ public enum UsageScanner {
         let keys: [URLResourceKey] = [.contentModificationDateKey, .isRegularFileKey]
         guard let walker = FileManager.default.enumerator(
             at: source.root, includingPropertiesForKeys: keys) else { return }
+        let deadline = Date().addingTimeInterval(scanTimeLimit)
+        var scannedFiles = 0
         for case let url as URL in walker where url.pathExtension == "jsonl" {
+            guard Date() < deadline, scannedFiles < scannedFileLimit,
+                  found.count < historyLimit else { break }
+            scannedFiles += 1
             let modified = try? url.resourceValues(
                 forKeys: [.contentModificationDateKey]).contentModificationDate
             if let since, let modified, modified <= since { continue }
@@ -98,20 +106,44 @@ public enum UsageScanner {
         return Dictionary(uniqueKeysWithValues: kept.map { ($0.key, $0.value) })
     }
 
-    /// 1 ファイル読む。`mappedIfSafe` で最大 10 MB のログでも RSS に載せない（9 章）。
+    /// 固定バッファで逐次読む。巨大な 1 行は解析せず捨てる。
     static func merge(file url: URL, fallbackDate: Date?, into found: inout [String: Date]) {
-        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return }
-        for line in data.split(separator: UInt8(ascii: "\n")) {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return }
+        defer { try? handle.close() }
+        var pending = Data()
+        var discardingLongLine = false
+        while let chunk = try? handle.read(upToCount: 64 * 1024), !chunk.isEmpty {
+            pending.append(chunk)
+            while let newline = pending.firstIndex(of: UInt8(ascii: "\n")) {
+                let line = pending[..<newline]
+                pending.removeSubrange(...newline)
+                if !discardingLongLine { merge(line: Data(line), fallbackDate: fallbackDate, into: &found) }
+                discardingLongLine = false
+                if found.count >= historyLimit { return }
+            }
+            if pending.count > lineLimit {
+                pending.removeAll(keepingCapacity: true)
+                discardingLongLine = true
+            }
+        }
+        if !discardingLongLine, !pending.isEmpty {
+            merge(line: pending, fallbackDate: fallbackDate, into: &found)
+        }
+    }
+
+    private static func merge(line: Data, fallbackDate: Date?,
+                              into found: inout [String: Date]) {
+            guard line.count <= lineLimit else { return }
             // 候補行だけ JSON にかける。大半の行は tool_use を含まない。
             guard line.range(of: skillMarker) != nil || line.range(of: codexSkillMarker) != nil
                     || line.range(of: skillPathMarker) != nil
                     || line.range(of: mcpMarker) != nil
-            else { continue }
-            guard let (date, names) = parse(Data(line), fallbackDate: fallbackDate) else { continue }
+            else { return }
+            guard let (date, names) = parse(Data(line), fallbackDate: fallbackDate) else { return }
             for name in names where found[name] == nil || found[name]! < date {
+                guard found[name] != nil || found.count < historyLimit else { continue }
                 found[name] = date
             }
-        }
     }
 
     static let skillMarker = Data("\"Skill\"".utf8)

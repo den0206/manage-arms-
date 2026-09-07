@@ -80,6 +80,10 @@ final class AppModel {
     /// 走査中に来た再読み込みの依頼。終わってから 1 回だけ流す。
     private var pendingReload = false
     private var pendingReloadForcesCLI = false
+    private var visibleGeneration = UUID()
+    private var previewGeneration = UUID()
+    private var isVisible = false
+    private var previewTask: Task<Void, Never>?
     var isCleaning = false
     /// 一括削除シートの中身。nil で閉じる。
     var cleanup: [CleanupItem]?
@@ -137,9 +141,7 @@ final class AppModel {
 
     private func save(_ change: (inout Registry) -> Void) {
         do {
-            var registry = try Registry.read(env: .live)
-            change(&registry)
-            try registry.save(env: .live)
+            try Registry.update(env: .live, change)
         } catch { errorMessage = "\(error)" }
     }
 
@@ -147,6 +149,11 @@ final class AppModel {
     /// 常駐中に抱え続けてよいのは設定と検知の状態だけで、
     /// 一覧は次に開いたときにどうせ読み直す（キャッシュしない）。
     func releaseForBackground() {
+        isVisible = false
+        visibleGeneration = UUID()
+        previewTask?.cancel()
+        previewTask = nil
+        previewGeneration = UUID()
         inventory = .empty
         permissions = []
         duplicateCounts = [:]
@@ -162,19 +169,32 @@ final class AppModel {
     /// **走っている最中の依頼は捨てない** — 捨てると、操作直後の `reload` が
     /// 進行中の走査と重なったときに一覧が古いまま残る。
     func reload(forceCLI: Bool = false) {
+        isVisible = true
         guard !isLoading else {
             pendingReload = true
             pendingReloadForcesCLI = pendingReloadForcesCLI || forceCLI
             return
         }
         isLoading = true
+        let generation = visibleGeneration
         Task {
             let loaded = await Self.loadOffMain(forceCLI: forceCLI)
+            guard isVisible, generation == visibleGeneration else {
+                isLoading = false
+                return
+            }
             inventory = loaded
             refreshActivity()
             permissions = await Task.detached {
                 PermissionScanner.scan(projects: loaded.projectScan.projects, env: .live)
             }.value
+            guard isVisible, generation == visibleGeneration else {
+                inventory = .empty
+                permissions = []
+                duplicateCounts = [:]
+                isLoading = false
+                return
+            }
             duplicateCounts = PermissionScanner.duplicates(permissions)
                 .mapValues(\.count)
             isLoading = false
@@ -185,6 +205,11 @@ final class AppModel {
                 reload(forceCLI: force)
             }
         }
+    }
+
+    private func reloadIfVisible(forceCLI: Bool = false) {
+        guard isVisible else { return }
+        reload(forceCLI: forceCLI)
     }
 
     /// **ファイルを触る操作の共通形。** 実体の移動・コピーはディレクトリ丸ごとになるので、
@@ -198,7 +223,7 @@ final class AppModel {
             }.value
             if let failure { errorMessage = failure }   // 握り潰さず UI に出す
             isMutating = false
-            reload(forceCLI: true)
+            reloadIfVisible(forceCLI: true)
         }
     }
 
@@ -214,7 +239,7 @@ final class AppModel {
             }.value
             if let failure { errorMessage = failure }
             isEditingPermissions = false
-            reload()
+            reloadIfVisible()
         }
     }
 
@@ -239,7 +264,7 @@ final class AppModel {
             if !failures.isEmpty { errorMessage = failures.joined(separator: "\n") }
             isCleaning = false
             cleanup = nil
-            reload(forceCLI: true)
+            reloadIfVisible(forceCLI: true)
         }
     }
 
@@ -261,25 +286,41 @@ final class AppModel {
                 return
             }
             let errors = await UpdateChecker.check(&registry, env: .live, force: force)
-            do { try registry.save(env: .live) } catch { errorMessage = "\(error)" }
+            do {
+                try Registry.update(env: .live) { latest in
+                    for key in errors.keys {
+                        if let state = registry.repos[key] { latest.repos[key] = state }
+                    }
+                }
+            } catch { errorMessage = "\(error)" }
             if let failure = errors.values.compactMap({ $0 }).first {
                 errorMessage = "\(failure)"
             }
             isChecking = false
-            reload()
+            reloadIfVisible()
         }
     }
 
     /// 取得して差分を作るところまで。適用は確認後（7.4）。
     func showDiff(for row: ResourceRow) {
         guard let entry = inventory.registry.entry(named: row.name, kind: row.kind) else { return }
-        Task {
+        previewTask?.cancel()
+        let token = UUID()
+        previewGeneration = token
+        previewTask = Task {
             do {
-                preview = try await Updater.preview(entry, env: .live,
-                                                    registry: inventory.registry)
+                let result = try await Updater.preview(entry, env: .live,
+                                                       registry: inventory.registry)
+                guard !Task.isCancelled, token == previewGeneration, isVisible else {
+                    result.discard()
+                    return
+                }
+                preview?.discard()
+                preview = result
             } catch {
-                errorMessage = "\(error)"
+                if !Task.isCancelled { errorMessage = "\(error)" }
             }
+            previewTask = nil
         }
     }
 
@@ -298,13 +339,35 @@ final class AppModel {
             }.value
             if let failure { errorMessage = failure } else { self.preview = nil }
             isMutating = false
-            reload(forceCLI: true)
+            reloadIfVisible(forceCLI: true)
         }
     }
 
     func discardPreview() {
+        guard !isMutating else { return }
         preview?.discard()
         preview = nil
+    }
+
+    func pinPreview() {
+        guard let preview, !isMutating else { return }
+        isMutating = true
+        Task {
+            do {
+                try Registry.update(env: .live) { registry in
+                    guard var entry = registry.entry(named: preview.name,
+                                                     kind: preview.candidate.kind) else {
+                        throw Updater.Failure.notManaged(preview.name)
+                    }
+                    entry.pinned = true
+                    registry.upsert(entry)
+                }
+                preview.discard()
+                self.preview = nil
+            } catch { errorMessage = "\(error)" }
+            isMutating = false
+            reloadIfVisible()
+        }
     }
 
     /// 明示的な「使用状況を分析」（DESIGN.md 3.9）。
@@ -316,12 +379,14 @@ final class AppModel {
         isAnalyzing = true
         Task {
             let loaded = Registry.load(env: .live)
-            let registry = await Task.detached {
+            let analyzed = await Task.detached {
                 UsageScanner.refreshed(loaded, env: .live)
             }.value
-            do { try registry.save(env: .live) } catch { errorMessage = "\(error)" }
+            do {
+                try Registry.update(env: .live) { $0.usage = analyzed.usage }
+            } catch { errorMessage = "\(error)" }
             isAnalyzing = false
-            reload()
+            reloadIfVisible()
         }
     }
 
@@ -337,7 +402,7 @@ final class AppModel {
                 guard let server = try MCPScanner.read(agent, env: .live).first(where: { $0.name == row.name }),
                       !server.isProtected else { throw MCPScanner.ReadFailure("MCPサーバーが見つからないか保護されています") }
                 try await MCPPin.pin(server, in: [agent], env: .live)
-                reload(forceCLI: true)
+                reloadIfVisible(forceCLI: true)
             } catch {
                 errorMessage = "\(error)"
             }
@@ -349,11 +414,11 @@ final class AppModel {
         let (name, kind) = (row.name, row.kind)
         // 行の情報ではなく registry を読み直す（`pin` と同じ理由）。
         mutate {
-            var registry = try Registry.read(env: .live)
-            guard var entry = registry.entry(named: name, kind: kind) else { return }
-            entry.pinned.toggle()
-            registry.upsert(entry)
-            try registry.save(env: .live)
+            try Registry.update(env: .live) { registry in
+                guard var entry = registry.entry(named: name, kind: kind) else { return }
+                entry.pinned.toggle()
+                registry.upsert(entry)
+            }
         }
     }
 
@@ -393,9 +458,7 @@ final class AppModel {
 
     private func updateAgent(_ agent: Agent, _ change: (inout Registry.AgentSetting) -> Void) {
         do {
-            var registry = try Registry.read(env: .live)
-            registry.update(agent, change)
-            try registry.save(env: .live)
+            try Registry.update(env: .live) { $0.update(agent, change) }
             reload(forceCLI: true)      // 検出のやり直しを間隔で待たせない
         } catch { errorMessage = "\(error)" }
     }
@@ -403,10 +466,11 @@ final class AppModel {
     /// 走査から除く／戻す。保存順は誰も読まない（表示順は `ProjectScan` 側で整える）。
     func setProject(_ path: String, excluded: Bool) {
         do {
-            var reg = try Registry.read(env: .live)
-            reg.excludedProjects.removeAll { $0 == path }
-            if excluded { reg.excludedProjects.append(path) }
-            try reg.save(env: .live)
+            guard let key = ProjectScan.identity(path) else { return }
+            try Registry.update(env: .live) { registry in
+                registry.excludedProjects.removeAll { ProjectScan.identity($0) == key }
+                if excluded { registry.excludedProjects.append(key) }
+            }
             reload()
         } catch { errorMessage = "\(error)" }
     }
@@ -447,7 +511,7 @@ final class AppModel {
             }.value
             if let failure { errorMessage = failure }
             isMutating = false
-            reload(forceCLI: true)
+            reloadIfVisible(forceCLI: true)
         }
     }
 

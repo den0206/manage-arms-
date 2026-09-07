@@ -45,6 +45,19 @@ struct MCPParseTests {
         #expect(server?.command == nil)
     }
 
+    @Test("要約から秘密の引数と URL query を隠す")
+    func redactsSummary() {
+        let stdio = MCPServer(name: "x", transport: .stdio(
+            command: "tool", args: ["--token", "secret", "--api-key=value"], env: [:]))
+        #expect(!stdio.summary.contains("secret"))
+        #expect(!stdio.summary.contains("value"))
+        let http = MCPServer(name: "x", transport: .http(
+            url: "https://user:pass@example.com/mcp?token=secret", headers: [:]))
+        #expect(!http.summary.contains("user"))
+        #expect(!http.summary.contains("pass"))
+        #expect(!http.summary.contains("secret"))
+    }
+
     @Test("command も url も無ければ解釈しない")
     func rejectsGarbage() {
         #expect(MCPServer.parse(name: "x", ["foo": "bar"]) == nil)

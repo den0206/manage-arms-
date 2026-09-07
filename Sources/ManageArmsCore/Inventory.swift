@@ -201,9 +201,9 @@ public struct ResourceRow: Identifiable, Sendable {
             let allowed = kind == .skill ? agent.skillRoots : agent.subagentRoots
             candidates = roots.filter(allowed.contains).map { env.home.appending(path: $0) }
         }
-        return candidates.map { $0.appending(path: leaf + suffix) }.filter {
-            (try? WriteGuard.assertUserArtifact($0, kind: kind, project: project, env: env)) != nil
-        }
+        // 表示中の Inventory だけから候補を作る。削除直前には最新の Registry と
+        // 実体パスを `Inventory.removeExisting` が再検査する。
+        return candidates.map { $0.appending(path: leaf + suffix) }
     }
 
     /// 置いてあるのにどのエージェントからも読めない（リンク切れ / SKILL.md なし）。
@@ -637,6 +637,14 @@ public struct ProjectScan: Sendable {
         partitioned(in: env, registry: registry).used
     }
 
+    public static func identity(_ path: String) -> String? {
+        guard path.hasPrefix("/") else { return nil }
+        let resolved = URL(filePath: path).standardizedFileURL.resolvingSymlinksInPath()
+            .standardizedFileURL.path(percentEncoded: false)
+        return resolved.count > 1 && resolved.hasSuffix("/")
+            ? String(resolved.dropLast()) : resolved
+    }
+
 
     /// 走査するものと、走査しないものに分ける。
     ///
@@ -655,13 +663,18 @@ public struct ProjectScan: Sendable {
            let projects = object["projects"] as? [String: Any] {
             paths.formUnion(projects.keys)
         }
-        let home = env.home.standardized.path(percentEncoded: false)
-        let userExcluded = Set(registry.excludedProjects)
+        let home = identity(env.home.path(percentEncoded: false)) ?? env.home.path
+        let userExcluded = Set(registry.excludedProjects.compactMap(identity))
         var split = (used: [String](), autoIgnored: [String](), userIgnored: [String]())
+        var seen: Set<String> = []
         for path in paths.sorted() {
-            if !isProject(path, home: home) { split.autoIgnored.append(path) }
-            else if userExcluded.contains(path) { split.userIgnored.append(path) }
-            else { split.used.append(path) }
+            guard let key = identity(path), seen.insert(key).inserted else {
+                split.autoIgnored.append(path)
+                continue
+            }
+            if !isProject(key, home: home) { split.autoIgnored.append(path) }
+            else if userExcluded.contains(key) { split.userIgnored.append(key) }
+            else { split.used.append(key) }
         }
         return split
     }
@@ -672,8 +685,8 @@ public struct ProjectScan: Sendable {
     /// ホーム配下を深さ 3 まで歩き、他の全プロジェクトの `.claude/skills` を
     /// 1 つの偽プロジェクトに吸い込む（理由と実測は DESIGN.md 5.1）。
     static func isProject(_ path: String, home: String) -> Bool {
-        let trimmed = path.hasSuffix("/") && path.count > 1 ? String(path.dropLast()) : path
-        return !trimmed.isEmpty && trimmed != "/" && trimmed != home
+        guard let candidate = identity(path), let home = identity(home) else { return false }
+        return candidate != "/" && candidate != home
     }
 
     /// プロジェクト直下から 3 段までの `.claude/skills` だけを読む。

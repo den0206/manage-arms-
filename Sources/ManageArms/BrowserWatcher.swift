@@ -50,7 +50,7 @@ final class BrowserWatcher {
     /// 事前コンパイルして使い回す。3 秒ごとにコンパイルし直さない。
     private var scripts: [Browser: NSAppleScript] = [:]
     /// 起動中だけの記憶（永続ファイルを増やさない）。
-    private var seen: Set<String> = []
+    private var seen: [String: Date] = [:]
     private var lastURL = ""
 
     /// URL が変わっている間（＝閲覧中）の間隔。
@@ -61,6 +61,8 @@ final class BrowserWatcher {
     static let idleInterval: TimeInterval = 15
     /// この回数だけ URL が変わらなければ `idleInterval` に落とす（3 秒 × 10 = 30 秒）。
     static let idleAfter = 10
+    static let seenLimit = 256
+    static let seenTTL: TimeInterval = 60 * 60
     private var idleTicks = 0
 
     // MARK: - 開始・停止
@@ -125,7 +127,7 @@ final class BrowserWatcher {
         // 出していたページから離れたら引っ込める。**ブラウザが前面でない間は消さない** —
         // URL が読めないだけで、メニューを触っている最中かもしれない。
         if let shown = pending, shown.url != url {
-            seen.remove(shown.url)   // 自分で消したわけではないので、戻ってきたらまた出す
+            seen.removeValue(forKey: shown.url)   // 自分で消したわけではないので、戻ってきたらまた出す
             pending = nil
         }
 
@@ -139,13 +141,23 @@ final class BrowserWatcher {
         lastURL = url
 
         // ここから先へ渡すのは github.com / skills.sh の URL だけ。それ以外は即捨てる。
+        let cutoff = Date().addingTimeInterval(-Self.seenTTL)
+        seen = seen.filter { $0.value >= cutoff }
         guard let lead = ToolURL.lead(url),
-              ToolURL.shouldNotify(lead, registry: Registry.load(env: .live), seen: seen)
+              ToolURL.shouldNotify(lead, registry: Registry.load(env: .live),
+                                   seen: Set(seen.keys))
         else { return }
 
-        seen.insert(lead.url)      // 確認の往復中に同じ URL でもう一度走らせない
+        seen[lead.url] = Date()      // 確認の往復中に同じ URL でもう一度走らせない
+        if seen.count > Self.seenLimit,
+           let oldest = seen.min(by: { $0.value < $1.value })?.key {
+            seen.removeValue(forKey: oldest)
+        }
         Task { [weak self] in
-            guard await Self.exists(lead) else { return }
+            guard await Self.exists(lead) else {
+                self?.seen.removeValue(forKey: lead.url)
+                return
+            }
             // **往復の間にページを離れていたら出さない。** 実在確認は数百 ms かかるので、
             // その間にスクロールで次の記事へ行かれると、見ていないページの帯が出る。
             guard let self, self.lastURL == url else { return }
