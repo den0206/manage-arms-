@@ -14,19 +14,26 @@ struct FetcherTests {
     }
 
     /// `python3 -c` で任意のエントリを持つ zip を作る。
-    static func makeZip(at url: URL, entries: [String: String]) throws {
+    /// `links` は symlink エントリ（値がリンク先）。GitHub の zipball も同じ形で入る。
+    static func makeZip(at url: URL, entries: [String: String],
+                        links: [String: String] = [:]) throws {
         let script = """
-        import zipfile, sys, json
-        entries = json.loads(sys.argv[2])
+        import zipfile, sys, json, stat
         with zipfile.ZipFile(sys.argv[1], 'w') as z:
-            for name, body in entries.items():
+            for name, body in json.loads(sys.argv[2]).items():
                 z.writestr(name, body)
+            for name, target in json.loads(sys.argv[3]).items():
+                info = zipfile.ZipInfo(name)
+                info.external_attr = (stat.S_IFLNK | 0o777) << 16
+                z.writestr(info, target)
         """
+        func json(_ value: [String: String]) throws -> String {
+            String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
+        }
         let p = Process()
         p.executableURL = URL(filePath: "/usr/bin/env")
         p.arguments = ["python3", "-c", script, url.path(percentEncoded: false),
-                       String(decoding: try JSONSerialization.data(withJSONObject: entries),
-                              as: UTF8.self)]
+                       try json(entries), try json(links)]
         try p.run()
         p.waitUntilExit()
     }
@@ -83,6 +90,39 @@ struct FetcherTests {
         #expect(try Fetcher.singleTopLevel(of: dir) == dir)
     }
 
+    /// `stage()` はアーカイブ全体を strict 検査しない。取り出さない場所
+    /// （ルートの `AGENTS.md` → `CLAUDE.md` 等）が symlink でも導入は通る。
+    /// symlink 自体は候補にならず、実体として入るものは `validate` が改めて弾く。
+    @Test("取り出さない場所の symlink で展開と種別判定を落とさない")
+    func extractsAlongsideSymlink() throws {
+        let dir = try Self.temp()
+        let zip = dir.appending(path: "link.zip")
+        try Self.makeZip(at: zip,
+                         entries: ["repo-main/CLAUDE.md": "# guide\n",
+                                   "repo-main/skills/x/SKILL.md": "---\nname: x\n---\n"],
+                         links: ["repo-main/AGENTS.md": "CLAUDE.md"])
+        let out = dir.appending(path: "out")
+        #expect(throws: Never.self) { try Fetcher.extract(zip, to: out) }
+
+        let base = try Fetcher.singleTopLevel(of: out)
+        // 前提: ditto が symlink を symlink のまま展開している
+        #expect(WriteGuard.isSymlink(base.appending(path: "AGENTS.md")))
+        #expect(Fetcher.identify(base).map(\.name) == ["x"])
+    }
+
+    @Test("symlink の SKILL.md は読まない")
+    func ignoresSymlinkedSkillFile() throws {
+        let dir = try Self.temp()
+        let outside = dir.appending(path: "secret.md")
+        try "---\nname: leaked\ndescription: secret\n---\n".write(
+            to: outside, atomically: true, encoding: .utf8)
+        let base = dir.appending(path: "pkg")
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: base.appending(path: "SKILL.md"),
+                                                   withDestinationURL: outside)
+        #expect(Fetcher.identify(base).isEmpty)
+    }
+
     @Test("展開物の symlink を拒否する")
     func rejectsExtractedSymlink() throws {
         let root = try Self.temp()
@@ -92,6 +132,10 @@ struct FetcherTests {
                                                    withDestinationURL: target)
         #expect(throws: Fetcher.Failure.self) {
             try Fetcher.validateExtractedTree(root)
+        }
+        // アーカイブ全体の走査では上限だけを見る（取り出さない symlink で失敗させない）
+        #expect(throws: Never.self) {
+            try Fetcher.validateExtractedTree(root, strict: false)
         }
     }
 

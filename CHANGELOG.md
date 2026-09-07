@@ -10,6 +10,13 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 
 ## [Unreleased]
 
+### Fixed
+
+- Installing or updating a resource from a repository whose *other* files include a
+  symbolic link (for example a root `AGENTS.md` symlinked to `CLAUDE.md`) no longer fails
+  with "the archive contains a symbolic link". Symlinks are still rejected inside the
+  files that actually get installed.
+
 ### Security
 
 - Updates now pin the fetched commit, compare every installed file, reject unsafe links and

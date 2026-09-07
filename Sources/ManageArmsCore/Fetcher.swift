@@ -126,7 +126,6 @@ public enum Fetcher {
 
             // ディレクトリ名由来の候補も含めて、最後にもう一度名前を検査する。
             // ここを通った名前だけが `Installer` でパスに使われる（9 章の作成方向）。
-            try validateExtractedTree(unpacked)
             let candidates = identify(base).filter { WriteGuard.isValidName($0.name) }
             guard !candidates.isEmpty else { throw Failure.nothingRecognized }
             return Staging(root: root, source: source, candidates: candidates,
@@ -142,7 +141,10 @@ public enum Fetcher {
     static let entryLimit = 10_000
     static let extractTimeLimit: TimeInterval = 30
 
-    static func validateExtractedTree(_ root: URL) throws {
+    /// `strict` はこれから利用者のディレクトリへ入る木にだけ使う。アーカイブ全体の
+    /// 走査では上限だけを見る — 取り出さない場所（リポジトリ直下の `AGENTS.md` が
+    /// symlink 等）まで拒むと、subdir を指した取得まで巻き添えで失敗する。
+    static func validateExtractedTree(_ root: URL, strict: Bool = true) throws {
         let keys: [URLResourceKey] = [.isRegularFileKey, .isDirectoryKey,
                                       .isSymbolicLinkKey, .fileSizeKey]
         guard let walker = FileManager.default.enumerator(
@@ -156,11 +158,13 @@ public enum Fetcher {
                 throw Failure.extractFailed(String(localized: "展開したファイル数が上限を超えました"))
             }
             let values = try url.resourceValues(forKeys: Set(keys))
-            guard values.isSymbolicLink != true else {
-                throw Failure.extractFailed(String(localized: "アーカイブにシンボリックリンクが含まれています"))
-            }
-            guard values.isDirectory == true || values.isRegularFile == true else {
-                throw Failure.extractFailed(String(localized: "アーカイブに対応していない種類のファイルが含まれています"))
+            let unsupported = values.isSymbolicLink == true
+                || !(values.isDirectory == true || values.isRegularFile == true)
+            if unsupported {
+                guard strict else { continue }   // 列挙は symlink を降りない
+                throw Failure.extractFailed(values.isSymbolicLink == true
+                    ? String(localized: "アーカイブにシンボリックリンクが含まれています")
+                    : String(localized: "アーカイブに対応していない種類のファイルが含まれています"))
             }
             if values.isRegularFile == true {
                 let size = values.fileSize ?? 0
@@ -334,7 +338,7 @@ public enum Fetcher {
                 process.terminate()
                 break
             }
-            do { try validateExtractedTree(destination) }
+            do { try validateExtractedTree(destination, strict: false) }
             catch { validationFailure = error; process.terminate(); break }
             // 1 秒間隔。この検査は展開ツリーを毎回歩くので、細かく回すと
             // 上限いっぱい（10,000 項目 × 30 秒）で数十万回の stat になる。
@@ -353,7 +357,7 @@ public enum Fetcher {
             throw Failure.extractFailed(reason.isEmpty
                 ? String(localized: "展開コマンドが失敗しました") : reason)
         }
-        try validateExtractedTree(destination)
+        try validateExtractedTree(destination, strict: false)
     }
 
     /// zipball は `<repo>-<branch>/` を 1 段かぶせる。それを剥がす。
@@ -367,10 +371,18 @@ public enum Fetcher {
     // MARK: - 種別判定
 
     /// 取得した中身を見て決める。README のテキストからは推測しない（6 章）。
+    ///
+    /// **symlink は追わない。** `stage()` はアーカイブ全体を strict 検査しなくなった
+    /// （取り出さない場所の symlink で導入ごと落とさないため）ので、frontmatter を
+    /// 読む前にここで弾く。追うと取得先の細工 1 つで任意のローカルファイルの中身が
+    /// 確認画面に出る。実体として入るものは `validate` が改めて strict 検査する。
     static func identify(_ base: URL) -> [Candidate] {
+        guard !WriteGuard.isSymlink(base) else { return [] }
         let fm = FileManager.default
         func exists(_ path: String) -> Bool {
-            fm.fileExists(atPath: base.appending(path: path).path(percentEncoded: false))
+            let url = base.appending(path: path)
+            return fm.fileExists(atPath: url.path(percentEncoded: false))
+                && !WriteGuard.isSymlink(url)
         }
 
         // marketplace を兼ねたリポジトリは plugin.json と skills/ の両方を持つ。
@@ -398,7 +410,8 @@ public enum Fetcher {
             .filter { $0.hasSuffix(".md") && !$0.hasPrefix(".") }.sorted() ?? []
         let subagents = markdown.compactMap { file -> Candidate? in
             let url = base.appending(path: file)
-            guard case .parsed(let matter) = FrontmatterParser.read(url), matter.tools != nil
+            guard !WriteGuard.isSymlink(url),
+                  case .parsed(let matter) = FrontmatterParser.read(url), matter.tools != nil
             else { return nil }
             return Candidate(kind: .subagent, name: String(file.dropLast(3)),
                              description: matter.description, localURL: url)
@@ -421,8 +434,10 @@ public enum Fetcher {
         return children.flatMap { child -> [Candidate] in
             var isDir: ObjCBool = false
             let url = base.appending(path: child)
+            // `fileExists(isDirectory:)` は symlink を追うので、単独では
+            // リンクされた実ユーザーのディレクトリまで降りてしまう。
             guard fm.fileExists(atPath: url.path(percentEncoded: false), isDirectory: &isDir),
-                  isDir.boolValue
+                  isDir.boolValue, !WriteGuard.isSymlink(url)
             else { return [] }
             if fm.fileExists(atPath: url.appending(path: "SKILL.md")
                                         .path(percentEncoded: false)) {
