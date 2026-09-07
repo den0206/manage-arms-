@@ -8,6 +8,18 @@ import Foundation
 /// 代わりに、いま動いているバージョンに固定できるようにする。
 public enum MCPPin {
 
+    /// GUI からの入口。CLI による読み直しもメインアクターの外で行う。
+    public static func pin(named name: String, in agent: Agent, env: Environment) async throws {
+        let server = try await Task.detached {
+            guard let server = try MCPScanner.read(agent, env: env).first(where: { $0.name == name }),
+                  !server.isProtected else {
+                throw MCPScanner.ReadFailure("MCPサーバーが見つからないか保護されています")
+            }
+            return server
+        }.value
+        try await pin(server, in: [agent], env: env)
+    }
+
     public enum Failure: Error, Equatable, CustomStringConvertible {
         case notFloating(String)
         case notNPM(String)
@@ -79,6 +91,13 @@ public enum MCPPin {
         guard agents.count == 1, let agent = agents.first else {
             throw MCPScanner.ReadFailure("MCPの固定はエージェントを1つ選んでください")
         }
+        try await Task.detached {
+            try replace(server, with: updated, in: agent, env: env)
+        }.value
+    }
+
+    private static func replace(_ server: MCPServer, with updated: MCPServer,
+                                in agent: Agent, env: Environment) throws {
         if agent == .cursor {
             try MCPManager.editCursor(env: env) { servers in
                 guard var definition = servers[server.name] as? [String: Any],

@@ -373,9 +373,7 @@ final class AppModel {
             defer { isPinning = false }
             // 行の情報ではなく設定を読み直す。押すまでの間に変わっているかもしれない。
             do {
-                guard let server = try MCPScanner.read(agent, env: .live).first(where: { $0.name == row.name }),
-                      !server.isProtected else { throw MCPScanner.ReadFailure("MCPサーバーが見つからないか保護されています") }
-                try await MCPPin.pin(server, in: [agent], env: .live)
+                try await MCPPin.pin(named: row.name, in: agent, env: .live)
                 reloadIfVisible(forceCLI: true)
             } catch {
                 errorMessage = "\(error)"

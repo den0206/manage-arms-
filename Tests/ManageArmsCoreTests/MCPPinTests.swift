@@ -154,3 +154,27 @@ final class Recorder: @unchecked Sendable {
     func record(_ argv: [String]) { lock.withLock { calls.append(argv) } }
     var all: [[String]] { lock.withLock { calls } }
 }
+
+extension MCPPinTests {
+    @Test("画面からの固定で一覧読み取りと変更CLIをメインスレッドで実行しない")
+    @MainActor
+    func pinReadsOffMain() async throws {
+        let home = URL(filePath: NSTemporaryDirectory()).appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let mode = Locked(0)
+        let onMain = Locked(false)
+        let env = Environment.test(home: home, run: { argv in
+            if Thread.isMainThread { onMain.value = true }
+            if argv.contains("remove") { mode.value = 1; return "" }
+            if argv.contains("add") { mode.value = 2; return "" }
+            if mode.value == 1 { return "[]" }
+            let version = mode.value == 0 ? "latest" : "1.0.0"
+            return "[{\"name\":\"demo\",\"command\":\"npx\",\"args\":[\"demo-mcp@\(version)\"]}]"
+        }, httpGet: { _, _ in
+            .init(body: Data(#"{"version":"1.0.0"}"#.utf8), status: 200, headers: [:])
+        })
+        try await MCPPin.pin(named: "demo", in: .codex, env: env)
+        #expect(mode.value == 2)
+        #expect(!onMain.value)
+    }
+}

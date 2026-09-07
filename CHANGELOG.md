@@ -12,6 +12,8 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 
 ### Fixed
 
+- Run MCP pinning reads and registration commands off the main thread.
+
 - Preserve original resources when update backups fail, and keep concurrent registry changes during installation and lifecycle operations.
 - Persist successful update checks, acknowledge unchanged resources without replacing files, and clean up failed update previews.
 - Bound text diff work across files and lazily render large change lists.
