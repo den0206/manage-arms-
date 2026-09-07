@@ -17,6 +17,14 @@ public struct Environment: Sendable {
     /// HTTP HEAD。**本文を落とさずに実在だけ確かめる**（ブラウザ検知の確度上げ）。
     /// 見ているだけのページに対して数十 KB を落とさないための分離。
     public var httpHead: @Sendable (URL) async throws -> Int
+    /// 解決済みの手動 CLI パス（3.7）。`nil` は「まだ読んでいない = registry から読む」。
+    ///
+    /// **走査の入口で 1 回だけ読んで持ち回る。** ここが nil のままだと
+    /// `command(_:for:)` が CLI を起こすたびに registry.json を読み直すことになり、
+    /// `CLIScan` の 1 回の走査で 6〜8 回になる。
+    /// 単発の操作（追加・削除・ピン留め）は nil のままでよい — 押した時点の
+    /// 最新の設定を読む方が正しい。
+    public var cliOverrides: [Agent: String]?
 
     public struct HTTPResult: Sendable {
         public let body: Data
@@ -45,11 +53,24 @@ public struct Environment: Sendable {
 }
 
 extension Environment {
+    /// 走査の入口で 1 回だけ registry を読み、以降の CLI 呼び出しに持ち回る。
+    /// **エントリが無いエージェント = 手動指定なし**として扱う（読み直さない）。
+    public func resolvingCLIOverrides(_ overrides: [Agent: String]) -> Environment {
+        var resolved = self
+        resolved.cliOverrides = overrides
+        return resolved
+    }
+
     /// 手動指定された CLI は検出だけでなく、すべての実操作で同じ実体を使う。
     public func command(_ command: [String], for agent: Agent) -> [String] {
-        guard !command.isEmpty,
-              let manual = Registry.load(env: self).setting(agent).path,
-              FileManager.default.isExecutableFile(atPath: manual) else { return command }
+        guard !command.isEmpty else { return command }
+        // `cliOverrides` が入っていればそれが答え。入っていない**エージェント**は
+        // 手動指定なしであって、「まだ読んでいない」ではない。
+        let manual = cliOverrides.map { $0[agent] }
+            ?? Registry.load(env: self).setting(agent).path
+        guard let manual, FileManager.default.isExecutableFile(atPath: manual) else {
+            return command
+        }
         var resolved = command
         resolved[0] = manual
         return resolved

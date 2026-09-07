@@ -357,3 +357,77 @@ struct CLIScanTests {
         }
     }
 }
+
+/// DESIGN.md 3.7 — `PATH` で CLI を見つけられない環境の逃げ道。
+/// 手動指定は検出だけでなく**すべての実操作**で同じ実体を指す必要がある。
+@Suite("手動指定した CLI の持ち回り")
+struct CLIOverrideTests {
+
+    /// `/bin/sh` を「手動指定された CLI」の代役にする。実在して実行可能なら何でもよく、
+    /// `command(_:for:)` は `isExecutableFile` しか見ない。
+    static let executable = "/bin/sh"
+
+    func home(withManualPath path: String? = nil) throws -> URL {
+        let url = URL(filePath: NSTemporaryDirectory())
+            .appending(path: "manage-arms-override-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        if let path {
+            var registry = Registry()
+            registry.update(.claude) { $0.path = path }
+            try registry.save(env: Environment.test(home: url))
+        }
+        return url
+    }
+
+    @Test("解決済みのパスで先頭を差し替える")
+    func usesResolved() throws {
+        let root = try home()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let env = Environment.test(home: root)
+            .resolvingCLIOverrides([.claude: Self.executable])
+        #expect(env.command(["claude", "mcp", "list"], for: .claude)
+                == [Self.executable, "mcp", "list"])
+    }
+
+    /// **エントリが無い = 手動指定なし。** ここで registry へ読みに戻ると、
+    /// 持ち回らせた意味が無くなる（1 回の走査で 6〜8 回読み直す）。
+    @Test("解決済みにエントリが無ければ registry を読み直さない")
+    func emptyOverrideDoesNotFallBack() throws {
+        let root = try home(withManualPath: Self.executable)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let env = Environment.test(home: root).resolvingCLIOverrides([:])
+        #expect(env.command(["claude", "mcp", "list"], for: .claude)
+                == ["claude", "mcp", "list"], "registry を読みに戻っている")
+    }
+
+    /// 単発の操作（追加・削除・ピン留め）は未解決のまま来る。
+    /// そちらは押した時点の最新を読む方が正しい。
+    @Test("未解決なら registry から読む")
+    func unresolvedReadsRegistry() throws {
+        let root = try home(withManualPath: Self.executable)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let env = Environment.test(home: root)
+        #expect(env.command(["claude", "mcp", "list"], for: .claude)
+                == [Self.executable, "mcp", "list"])
+    }
+
+    /// 消えた・移動した実行ファイルを掴んだままにしない（3.7）。
+    @Test("実行できないパスは無視する")
+    func ignoresNonExecutable() throws {
+        let root = try home()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let env = Environment.test(home: root)
+            .resolvingCLIOverrides([.claude: "/nope/claude"])
+        #expect(env.command(["claude", "mcp", "list"], for: .claude)
+                == ["claude", "mcp", "list"])
+    }
+
+    @Test("空のコマンドは触らない")
+    func leavesEmptyAlone() throws {
+        let root = try home()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let env = Environment.test(home: root)
+            .resolvingCLIOverrides([.claude: Self.executable])
+        #expect(env.command([], for: .claude).isEmpty)
+    }
+}

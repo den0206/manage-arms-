@@ -19,6 +19,12 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
   command-line results are cached. The same applied to the reason reported when unpacking a
   downloaded archive failed.
 
+### Changed
+
+- Unpacking a downloaded archive no longer holds on to a background thread while it waits, and
+  it stops promptly when the window that started it goes away.
+- A command-line tool located by hand is now resolved once per scan instead of once per call.
+
 
 ## [0.1.1] — 2026-09-07
 
