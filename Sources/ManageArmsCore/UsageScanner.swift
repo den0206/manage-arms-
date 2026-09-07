@@ -133,17 +133,17 @@ public enum UsageScanner {
 
     private static func merge(line: Data, fallbackDate: Date?,
                               into found: inout [String: Date]) {
-            guard line.count <= lineLimit else { return }
-            // 候補行だけ JSON にかける。大半の行は tool_use を含まない。
-            guard line.range(of: skillMarker) != nil || line.range(of: codexSkillMarker) != nil
-                    || line.range(of: skillPathMarker) != nil
-                    || line.range(of: mcpMarker) != nil
-            else { return }
-            guard let (date, names) = parse(Data(line), fallbackDate: fallbackDate) else { return }
-            for name in names where found[name] == nil || found[name]! < date {
-                guard found[name] != nil || found.count < historyLimit else { continue }
-                found[name] = date
-            }
+        guard line.count <= lineLimit else { return }
+        // 候補行だけ JSON にかける。大半の行は tool_use を含まない。
+        guard line.range(of: skillMarker) != nil || line.range(of: codexSkillMarker) != nil
+                || line.range(of: skillPathMarker) != nil
+                || line.range(of: mcpMarker) != nil
+        else { return }
+        guard let (date, names) = parse(line, fallbackDate: fallbackDate) else { return }
+        for name in names where found[name] == nil || found[name]! < date {
+            guard found[name] != nil || found.count < historyLimit else { continue }
+            found[name] = date
+        }
     }
 
     static let skillMarker = Data("\"Skill\"".utf8)
