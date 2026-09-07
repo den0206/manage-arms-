@@ -15,7 +15,8 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 - Updates now pin the fetched commit, compare every installed file, reject unsafe links and
   oversized extraction trees, and roll back files, links, and registry state as one operation.
 - Settings edits now detect concurrent external changes, preserve restrictive permissions,
-  redact secrets from summaries and errors, and keep collision-free bounded backups.
+  redact secrets from summaries and errors, and keep collision-free bounded backups. Backups
+  stay byte-identical to the file they came from, so restoring one is a plain copy.
 
 - A skill or subagent fetched from GitHub could no longer be written outside the directories
   ManageArms manages. The `name` in a `SKILL.md` front matter is written by whoever publishes

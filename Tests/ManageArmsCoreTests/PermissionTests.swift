@@ -221,13 +221,12 @@ struct PermissionTests {
         let backups = try FileManager.default.contentsOfDirectory(
             at: dir, includingPropertiesForKeys: nil)
         #expect(backups.count == 1)
-        // バックアップは編集「前」の中身
-        let envelope = try #require(
-            try JSONSerialization.jsonObject(with: Data(contentsOf: backups[0])) as? [String: String])
-        let content = try #require(envelope["content"])
-        let body = String(decoding: Data(base64Encoded: content) ?? Data(), as: UTF8.self)
-        #expect(body.contains("\"X\""))
-        #expect(body.contains("\"Y\""))
+        // バックアップは編集「前」の中身を**そのまま**。復元導線はアプリに無く、
+        // Finder でコピーして戻すのが唯一の手段なので、包んではいけない。
+        #expect(try Data(contentsOf: backups[0])
+                == Data(#"{"permissions":{"allow":["X","Y"]}}"#.utf8))
+        // 名前から元ファイルが分かること（fingerprint は不可逆なので末尾を添える）。
+        #expect(backups[0].lastPathComponent.contains("settings.json"))
         // バックアップはアプリの保存領域に置く。プロジェクトを汚さない。
         // macOS では `/var` が `/private/var` への symlink なので、
         // 列挙で返る解決済みパスと `env.appSupport` を揃えてから比べる。
@@ -351,6 +350,26 @@ struct PermissionBackupTests {
         #expect(names.count == PermissionWriter.generations)
         #expect(names.contains { $0.contains("1970-01-01T00-07-00Z") }, "最後の編集が消えている")
         #expect(names.contains { $0.contains("1970-01-01T00-03-00Z") }, "古い方から捨てていない")
+    }
+
+    /// 0.2.x の `<ISO8601>__<slug>` は自分が書いたと分かる。ここを新形式だけ見て
+    /// いると、既存利用者の控えが永久に残って自分でディスクを汚す。
+    @Test("0.2.x 形式のバックアップも同じ上限で刈る")
+    func prunesPreviousFormat() throws {
+        let s = try session()
+        defer { try? FileManager.default.removeItem(at: s.root) }
+        let dir = s.env.appSupport.appending(path: PermissionWriter.backupDirectory)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = s.env.home.appending(path: ".claude/settings.json")
+        let previous = dir.appending(
+            path: "1970-01-01T00-00-00Z" + PermissionWriter.stampSeparator
+                + PermissionWriter.slug(of: file))
+        try Data("old".utf8).write(to: previous)
+
+        try s.edit(times: PermissionWriter.generations)
+        #expect(!FileManager.default.fileExists(atPath: previous.path(percentEncoded: false)),
+                "旧形式が刈られずに残っている")
+        #expect(backupNames(s.env).count == PermissionWriter.generations)
     }
 
     /// **帰属を判定できないものは消さない。** 0.1.0 が書いた旧形式の名前は
