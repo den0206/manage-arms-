@@ -375,3 +375,4 @@
 "確認後に更新内容が変化したため適用を中止しました" = "The update changed after review, so it was not applied";
 "更新に失敗し、元の状態も完全には復元できませんでした: %@" = "The update failed and the original state could not be fully restored: %@";
 "%@ の親ディレクトリに安全でないシンボリックリンクがあります" = "A parent directory of %@ contains an unsafe symbolic link";
+"更新に失敗し、元の状態も完全には復元できませんでした: %1$@。更新前の実体は %2$@ に残してあります" = "The update failed and the original state could not be fully restored: %1$@. The resource as it was before the update is kept at %2$@";
