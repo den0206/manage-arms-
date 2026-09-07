@@ -317,9 +317,17 @@ public enum Fetcher {
         // 読み手を付けて上限まで溜める（`ditto -xk` は標準出力を使わない）。
         let err = Pipe()
         let message = Mutex(Data())
+        // `Exec.run` と同じ理由で EOF を待てるようにする。終了を待っただけでは
+        // 未配送分が残り、ハンドラを外した瞬間に消える（失敗理由が空になる）。
+        let drained = DispatchGroup()
+        drained.enter()
         err.fileHandleForReading.readabilityHandler = { handle in
             let chunk = handle.availableData
-            guard !chunk.isEmpty else { handle.readabilityHandler = nil; return }
+            guard !chunk.isEmpty else {
+                handle.readabilityHandler = nil
+                drained.leave()
+                return
+            }
             message.withLock { if $0.count < 4096 { $0.append(chunk.prefix(4096 - $0.count)) } }
         }
         defer {
@@ -350,6 +358,7 @@ public enum Fetcher {
             if process.isRunning { Darwin.kill(process.processIdentifier, SIGKILL) }
         }
         process.waitUntilExit()
+        _ = drained.wait(timeout: .now() + Exec.drainTimeout)
         if let validationFailure { throw validationFailure }
         guard process.terminationStatus == 0 else {
             let reason = String(decoding: message.withLock { $0 }, as: UTF8.self)
