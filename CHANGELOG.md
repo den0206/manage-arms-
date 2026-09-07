@@ -51,6 +51,8 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
   screen it displayed `codex plugin remove` but ran the Claude equivalent, which then failed
   with an unrelated message.
 - Applying an update no longer keeps reporting that an update is available afterwards.
+- "Pin this version" in the update sheet now actually pins the resource. It previously just
+  closed the sheet without recording anything.
 - Refreshing after an action no longer gets dropped when a scan is already running, which
   could leave the list showing stale contents.
 - A skill description ending near the 4 KB front-matter limit no longer shows a replacement
@@ -58,6 +60,13 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 
 ### Changed
 
+- The update sheet now lists every file in the resource that changed, not just `SKILL.md`.
+  A skill whose scripts changed while `SKILL.md` stayed the same previously looked unchanged.
+- A command-line path you set by hand is now used for every operation on that agent — listing,
+  adding and removing MCP servers and plugins — not only for detection.
+- Resources whose installed commit is unknown are now reported as having an update available
+  instead of as up to date. Anything installed before this version is in that state until you
+  update it once; updating records the commit it came from.
 - Returning to ManageArms is faster: the command-line tools for each agent are queried at most
   every few minutes instead of on every activation. Explicit refreshes, agent settings changes
   and removals still query immediately.
