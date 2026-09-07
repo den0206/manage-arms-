@@ -37,7 +37,7 @@ struct ManageArmsApp: App {
                                        set: { model.setMenuBarResident($0) })) {
             MenuBarMenu(model: model)
         } label: {
-            MenuBarIcon(alert: model.watcher.pending != nil)
+            MenuBarIcon(alert: model.watcher.pending != nil, badge: model.hasUpdates)
         }
 
     }
@@ -70,6 +70,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @Observable
 final class AppModel {
     private(set) var inventory = Inventory.empty
+    /// 更新があるか。**一覧は閉じたら捨てるが、この Bool だけは残す**（3.5 の
+    /// 「設定と検知の状態」と同じ扱い）。値は最後に読んだ `registry.json` 由来で、
+    /// 常駐中に勝手にチェックしに行きはしない（7.3 のスロットル）。
+    private(set) var hasUpdates = false
     private(set) var isLoading = false
     var errorMessage: String?
     var isChecking = false
@@ -106,6 +110,9 @@ final class AppModel {
 
     init() {
         let registry = Registry.load(env: .live)
+        // 走査もネットワークも要らない値なので、ここで決めてしまう。
+        // 最初の `reload` を待つと、開くまでバッジが出ない。
+        hasUpdates = UpdateChecker.hasAvailable(registry)
         detectsBrowserURLs = registry.detectsBrowserURLs
         staysInMenuBar = registry.staysInMenuBar
         appearance = Appearance(stored: registry.appearance)
@@ -184,6 +191,7 @@ final class AppModel {
                 return
             }
             inventory = loaded
+            hasUpdates = UpdateChecker.hasAvailable(loaded.registry)
             refreshActivity()
             permissions = await Task.detached {
                 PermissionScanner.scan(projects: loaded.projectScan.projects, env: .live)

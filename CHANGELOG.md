@@ -10,6 +10,11 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 
 ## [Unreleased]
 
+### Added
+
+- The menu bar icon now shows a small green dot beside it when any managed resource has an
+  update waiting as of the last update check. Pinned resources are not counted.
+
 ### Fixed
 
 - Installing or updating a resource from a repository whose *other* files include a

@@ -24,6 +24,20 @@ struct UpdateCheckerTests {
         #expect(keys == ["o/r#dev", "o/r#main", "x/y#main"])
     }
 
+    /// メニューバーのバッジ用。固定中は「更新しない」と決めたものなので数えない。
+    @Test("更新があるものが1つでもあればバッジを出す")
+    func hasAvailable() {
+        var registry = Registry()
+        registry.repos["o/r#main"] = Registry.RepoState(latestSha: "new")
+        #expect(!UpdateChecker.hasAvailable(registry))
+        registry.upsert(Self.entry("current", sha: "new"))
+        #expect(!UpdateChecker.hasAvailable(registry))
+        registry.upsert(Self.entry("pinned", sha: "old", pinned: true))
+        #expect(!UpdateChecker.hasAvailable(registry))
+        registry.upsert(Self.entry("behind", sha: "old"))
+        #expect(UpdateChecker.hasAvailable(registry))
+    }
+
     @Test("取得元が無いものはチェック対象にしない")
     func skipsUnmanaged() {
         var registry = Registry()

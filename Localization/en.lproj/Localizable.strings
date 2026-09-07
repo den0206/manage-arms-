@@ -300,6 +300,7 @@
 /* Menu bar and settings (DESIGN.md 3.5) */
 "ManageArms" = "ManageArms";
 "ManageArms（追加できるToolがあります）" = "ManageArms (a tool is ready to add)";
+"ManageArms（更新があります）" = "ManageArms (updates available)";
 "ManageArmsを開く" = "Open ManageArms";
 "設定" = "Settings";
 "設定…" = "Settings…";

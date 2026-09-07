@@ -38,31 +38,44 @@ struct MenuBarMenu: View {
 /// メニューバーの大きさで描き直したもの。比率は `Scripts/make-icon.sh` に合わせてある。
 /// SF Symbol に寄せると「1 つの GUI から 4 エージェントを束ねる」という図が崩れる。
 ///
-/// 検知したものがある間だけ右上のノードを**緑**にする。数字や件数は出さない —
+/// 検知したものがある間だけ図案を**緑**にする。数字や件数は出さない —
 /// 出せるのは常に 1 件で、点で足りる。
+/// 更新があるときは図案の**右横**に緑の点を並べる（検知と混ざらないよう別の場所）。
 struct MenuBarIcon: View {
     let alert: Bool
+    /// 更新があるか。図案を塗り替えず、横に点を足すだけ。
+    var badge: Bool = false
 
     /// メニューバーの他アイコンと同じくらいの見え方になる大きさ。
     private static let size = 18.0
     /// ハブから見たノードの距離。
     private static let spoke = size * 0.40
+    /// 横に並べる点。図案の中に置くと 18pt では気づけないので外に出す。
+    private static let dotSize = 5.0
+    private static let dotGap = 2.0
 
     /// **色を出せるのは非テンプレート画像だけ。** `MenuBarExtra` はラベルを
     /// まるごとテンプレートとして描くため、`Circle().fill(.green)` を重ねても
     /// 単色に潰れる（実機で確認）。そこで検知中だけ色付きの画像に差し替える。
     var body: some View {
         // 通常時はテンプレート。明暗の追従・メニュー選択中の反転を OS に任せられる。
-        Image(nsImage: Self.mark(alert: alert))
-            .renderingMode(alert ? .original : .template)
-            .accessibilityLabel(alert ? Text("ManageArms（追加できるToolがあります）") : Text("ManageArms"))
+        Image(nsImage: Self.mark(alert: alert, badge: badge))
+            .renderingMode(alert || badge ? .original : .template)
+            .accessibilityLabel(label)
     }
 
-    /// 18pt の図形 1 枚。描くのは alert が変わったときだけで、持ち回らない。
-    private static func mark(alert: Bool) -> NSImage {
-        let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+    private var label: Text {
+        if alert { return Text("ManageArms（追加できるToolがあります）") }
+        if badge { return Text("ManageArms（更新があります）") }
+        return Text("ManageArms")
+    }
+
+    /// 18pt の図形 1 枚（+ 点）。描くのは状態が変わったときだけで、持ち回らない。
+    private static func mark(alert: Bool, badge: Bool) -> NSImage {
+        let width = badge ? size + dotGap + dotSize : size
+        let image = NSImage(size: NSSize(width: width, height: size), flipped: false) { rect in
             let spoke = MenuBarIcon.spoke
-            let center = CGPoint(x: rect.midX, y: rect.midY)
+            let center = CGPoint(x: rect.minX + MenuBarIcon.size / 2, y: rect.midY)
             let nodes = [45.0, 135.0, 225.0, 315.0].map { deg -> CGPoint in
                 let r = deg * .pi / 180
                 return CGPoint(x: center.x + cos(r) * spoke, y: center.y + sin(r) * spoke)
@@ -72,7 +85,9 @@ struct MenuBarIcon: View {
             }
             // **検知中は図案ごと緑にする。** ノード 1 つだけだと 18pt では気づけない
             // （実機で確認）。通常時はテンプレートなのでここの色は使われない。
-            let ink: NSColor = alert ? .systemGreen : .black
+            // 非テンプレートになる（= 点を出す）ときは、明暗追従を OS に任せられない。
+            // `labelColor` は描画時の appearance で解決されるのでここで拾える。
+            let ink: NSColor = alert ? .systemGreen : (badge ? .labelColor : .black)
             ink.setStroke()
             ink.setFill()
             let spokes = NSBezierPath()
@@ -85,9 +100,17 @@ struct MenuBarIcon: View {
             spokes.stroke()
             for node in nodes { dot(node, spoke * 0.276) }
             dot(center, spoke * 0.438)
+            if badge {
+                NSColor.systemGreen.setFill()
+                dot(CGPoint(x: rect.maxX - MenuBarIcon.dotSize / 2, y: rect.midY),
+                    MenuBarIcon.dotSize / 2)
+            }
             return true
         }
-        image.isTemplate = !alert
+        // 点は色なので、あるうちはテンプレートにできない（実機で確認）。
+        image.isTemplate = !alert && !badge
+        // 外観が変わったら描き直させる（`labelColor` を焼き付けない）。
+        image.cacheMode = .never
         return image
     }
 }

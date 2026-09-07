@@ -33,6 +33,16 @@ public enum UpdateChecker {
         return behind ? .available(sha: latest) : .upToDate
     }
 
+    /// 更新が来ているものが 1 つでもあるか。`registry.json` だけで決まるので、
+    /// 走査もネットワークも要らない（メニューバーのバッジ用）。
+    /// **固定中は数えない** — 遅れていても更新しないと利用者が決めたもの（7.4）。
+    public static func hasAvailable(_ registry: Registry) -> Bool {
+        registry.resources.contains {
+            if case .available = status(of: $0, in: registry) { return true }
+            return false
+        }
+    }
+
     /// チェックが必要な repo キー。`force` でスロットルを無視する。
     public static func staleKeys(_ registry: Registry, now: Date, force: Bool) -> [String] {
         let keys = Set(registry.resources.filter { !$0.pinned }.compactMap(repoKey))
