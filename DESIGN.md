@@ -8,7 +8,7 @@ AI コーディングエージェント（Claude Code / Cursor / Codex / Gemini 
 - **配布**: DMG の直配布（App Sandbox 非対応のため App Store 不可）。公開先は
   [den0206/manage-arms-releases](https://github.com/den0206/manage-arms-releases)。13 章
 - **状態**: **v1〜v5 実装済み**（Skills / Subagents / Plugins / 使用実績 / MCP。v4 の権限は撤去）、
-  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト定義 366 件
+  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト定義 355 件（`MANUAL=1` の実CLI確認 14 件は通常の `swift test` では無効）
   （`@Test` の数。`arguments:` 付きは実行時にさらに分かれる）
 - **実装**: SPM パッケージ。`swift test` / `CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh`
   （`.xcodeproj` は不要。実 CLI・実ネットワークを使う確認は `MANUAL=1 swift test`）

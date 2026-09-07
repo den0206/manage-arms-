@@ -42,7 +42,7 @@ The project is a Swift Package — there is no `.xcodeproj` (open `Package.swift
 directly).
 
 ```bash
-swift test                  # unit tests (366 @Test declarations)
+swift test                  # 355 @Test declarations (MANUAL=1 adds 14 live-CLI checks)
 swift build                 # compile check
 
 # The distributable form is a hand-assembled .app bundle.

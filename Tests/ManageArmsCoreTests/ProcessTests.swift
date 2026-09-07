@@ -145,3 +145,46 @@ struct ProcessTests {
         #expect(ProcessScanner.snapshot(env: env).isEmpty)
     }
 }
+
+/// `Exec.run` のパイプ読み取り。**実 CLI ではなく `/bin/sh` を使う**ので、
+/// 10.4 の「CLI 呼び出しはフェイク」の対象外（ネットワークもエージェントも要らない）。
+///
+/// ここが守るのは「子プロセスの出力を 1 バイトも落とさない」こと。
+/// `readabilityHandler` は別キューで非同期に配送されるため、`waitUntilExit()` の
+/// 直後にハンドラを外すと未配送分が消える。JSON の途中で切れると
+/// `claude plugin list --json` が読めなくなり、`CLIScan` が 3 分その状態を持つ。
+@Suite("子プロセスの出力")
+struct ExecOutputTests {
+
+    /// パイプバッファ（64 KB）を跨ぐ量にする。1 回の readability イベントで
+    /// 収まる大きさだと、取りこぼしのレースを踏めない。
+    static let lines = 20_000
+    static let bytes = lines * "hello\n".utf8.count
+
+    @Test("終了後もパイプを読み切る")
+    func capturesFullOutput() throws {
+        let out = try Exec.run(["sh", "-c", "yes hello | head -n \(Self.lines)"], path: nil)
+        #expect(out.utf8.count == Self.bytes, "出力を \(Self.bytes - out.utf8.count) バイト取りこぼした")
+    }
+
+    @Test("失敗したときの stderr も読み切る")
+    func capturesStderrOnFailure() throws {
+        #expect(throws: Exec.Failure.self) {
+            try Exec.run(["sh", "-c", "echo boom >&2; exit 3"], path: nil)
+        }
+        do {
+            _ = try Exec.run(["sh", "-c", "echo boom >&2; exit 3"], path: nil)
+        } catch let failure as Exec.Failure {
+            #expect(failure.code == 3)
+            #expect(failure.stderr.contains("boom"), "stderr が空: \(failure.stderr)")
+        }
+    }
+
+    /// 上限を超える出力でも固まらず、上限までは取れる。
+    @Test("上限で打ち切っても終了を待てる")
+    func stopsAtLimit() throws {
+        let out = try Exec.run(
+            ["sh", "-c", "yes hello | head -c \(Exec.outputLimit + 100_000)"], path: nil)
+        #expect(out.utf8.count == Exec.outputLimit)
+    }
+}

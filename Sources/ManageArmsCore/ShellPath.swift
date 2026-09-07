@@ -44,6 +44,9 @@ public enum ShellPath {
 public enum Exec {
     public static let outputLimit = 2 * 1024 * 1024
     public static let timeout: TimeInterval = 180
+    /// プロセス終了後、パイプを読み切るのを待つ上限。
+    /// **無期限には待たない** — 孫プロセスがパイプを握ったまま生き残ると EOF が来ない。
+    static let drainTimeout: TimeInterval = 5
     public struct Failure: Error, CustomStringConvertible {
         public let command: [String]
         public let code: Int32
@@ -74,9 +77,22 @@ public enum Exec {
         process.standardInput = FileHandle.nullDevice
         try process.run()
         let output = Mutex(Data()), errors = Mutex(Data())
+        // **EOF を見たことを待てるようにする。** `readabilityHandler` は別キューで
+        // 非同期に配送されるので、`waitUntilExit()` の直後にハンドラを外すと、
+        // まだ配送されていない分がそのまま消える。`readDataToEndOfFile()` から
+        // 差し替えたときに落ちた保証がこれで、実害は
+        // `claude plugin list --json` の JSON が途中で切れて読めなくなること。
+        // 空の chunk が EOF。そこでハンドラを外すので `leave` は 1 回しか走らない。
+        let drained = DispatchGroup()
+        drained.enter()
+        drained.enter()
         out.fileHandleForReading.readabilityHandler = { handle in
             let chunk = handle.availableData
-            guard !chunk.isEmpty else { handle.readabilityHandler = nil; return }
+            guard !chunk.isEmpty else {
+                handle.readabilityHandler = nil
+                drained.leave()
+                return
+            }
             output.withLock { data in
                 if data.count < outputLimit {
                     data.append(chunk.prefix(outputLimit - data.count))
@@ -85,7 +101,11 @@ public enum Exec {
         }
         err.fileHandleForReading.readabilityHandler = { handle in
             let chunk = handle.availableData
-            guard !chunk.isEmpty else { handle.readabilityHandler = nil; return }
+            guard !chunk.isEmpty else {
+                handle.readabilityHandler = nil
+                drained.leave()
+                return
+            }
             errors.withLock { data in
                 if data.count < outputLimit {
                     data.append(chunk.prefix(outputLimit - data.count))
@@ -105,6 +125,10 @@ public enum Exec {
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: deadline)
         defer { deadline.cancel() }
         process.waitUntilExit()
+        // 終了を待っただけでは、パイプに残った分がまだ配送されていない。
+        // 読み切り（EOF）まで待ってからハンドラを外す。上限を過ぎたら
+        // 取れた分だけで進む — 出力を諦めることはあっても、ここで固まらない。
+        _ = drained.wait(timeout: .now() + drainTimeout)
         out.fileHandleForReading.readabilityHandler = nil
         err.fileHandleForReading.readabilityHandler = nil
         try? out.fileHandleForReading.close()
