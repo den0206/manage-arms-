@@ -151,20 +151,36 @@ struct ProcessTests {
 ///
 /// ここが守るのは「子プロセスの出力を 1 バイトも落とさない」こと。
 /// `readabilityHandler` は別キューで非同期に配送されるため、`waitUntilExit()` の
-/// 直後にハンドラを外すと未配送分が消える。JSON の途中で切れると
-/// `claude plugin list --json` が読めなくなり、`CLIScan` が 3 分その状態を持つ。
+/// 直後にハンドラを外すと未配送分が消える。
 @Suite("子プロセスの出力")
 struct ExecOutputTests {
 
-    /// パイプバッファ（64 KB）を跨ぐ量にする。1 回の readability イベントで
-    /// 収まる大きさだと、取りこぼしのレースを踏めない。
+    /// パイプバッファ（64 KB）を跨ぐ量。読み手が消費しないと子は 64 KB より先へ
+    /// 書けないので、**量を増やしても取りこぼしのレースは踏めない**（実測でも
+    /// 1 MB × 150 回で 0 件）。ここが守るのはバッファ跨ぎで欠けないことだけで、
+    /// 未配送分が消える方は下の `capturesOutputFlushedAfterExit` が見る。
     static let lines = 20_000
     static let bytes = lines * "hello\n".utf8.count
 
-    @Test("終了後もパイプを読み切る")
+    @Test("パイプバッファを跨いでも欠けない")
     func capturesFullOutput() throws {
         let out = try Exec.run(["sh", "-c", "yes hello | head -n \(Self.lines)"], path: nil)
         #expect(out.utf8.count == Self.bytes, "出力を \(Self.bytes - out.utf8.count) バイト取りこぼした")
+    }
+
+    /// **取りこぼしが実際に起きるのはこの形だけ。** 直接の子が先に終わり、
+    /// パイプを継いだ孫が後から書く。`waitUntilExit()` はプロセスの終了しか
+    /// 待たないので、EOF を待たずにハンドラを外すとこの 10 バイトが丸ごと消える。
+    /// 修正前のコードでは 20/20 で落ち、修正後は 20/20 で通る（実測）。
+    ///
+    /// エージェント CLI がデーモンを起こして標準出力を継がせると同じ形になり、
+    /// `claude plugin list --json` の JSON が途中で切れて `CLIScan` が
+    /// 3 分その状態を持つ。
+    @Test("子より後に孫が書いた分も取りこぼさない")
+    func capturesOutputFlushedAfterExit() throws {
+        let out = try Exec.run(
+            ["sh", "-c", "( sleep 0.3; printf '0123456789' ) & exit 0"], path: nil)
+        #expect(out == "0123456789", "孫がパイプへ書いた分を取りこぼした: \(out.debugDescription)")
     }
 
     @Test("失敗したときの stderr も読み切る")

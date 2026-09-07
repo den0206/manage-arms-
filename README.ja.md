@@ -39,7 +39,7 @@ DMG から直接起動した場合は、起動時にアプリケーションフ�
 Swift Package として構成されている（`.xcodeproj` は無い。Xcode で `Package.swift` を直接開ける）。
 
 ```bash
-swift test                  # 単体テスト（374 件 / 52 スイート。MANUAL=1 で実CLI確認が加わる）
+swift test                  # 単体テスト（375 件 / 52 スイート。MANUAL=1 で実CLI確認が加わる）
 swift build                 # コンパイル確認
 
 # 配布形態は「手組みの .app バンドル」。build-app.sh が組み立て + 署名まで行う。
