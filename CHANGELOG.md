@@ -28,6 +28,11 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
   from your home directory once listed it as a project and pulled every other project's skills
   into that one tab — 350 entries on the reported machine — leaving the tab blank and the app
   unresponsive. Settings lists the entries that are skipped, so it is clear why they are missing.
+- MCP servers configured in Cursor now appear in the list. `~/.cursor/mcp.json` accepts `//`
+  comments and ManageArms did not, so one commented-out entry hid every server in the file. Files
+  containing comments are never rewritten, so anything you commented out stays where you put it.
+- Configuration files that cannot be parsed now name the file and what to do about it, instead of
+  showing a raw `NSCocoaErrorDomain` dump.
 - Error messages now appear in English in the English interface. Messages raised while
   scanning, installing, updating, pinning and editing permissions were left untranslated, as
   were list details such as the "disabled (parked)" label and broken-link notes.

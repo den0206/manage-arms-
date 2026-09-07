@@ -242,6 +242,57 @@ struct ManagementTests {
         #expect(scan.ignoredProjects == ["/", home])
     }
 
+    /// Cursor は `//` コメント入りの JSONC を受け付ける。**読めないと
+    /// 「読み取りに失敗した項目があります」が出たまま MCP が一覧から消える。**
+    @Test("コメント入りのCursor設定を読める")
+    func readsCommentedConfig() throws {
+        let env = try fixture([".cursor/mcp.json": """
+        {
+          "mcpServers": {
+            // "Figma": {
+            //   "url": "http://127.0.0.1:3845/mcp"
+            // },
+            "github": { "command": "npx", "args": ["-y", "pkg"] }
+          }
+        }
+        """])
+        defer { try? FileManager.default.removeItem(at: env.home) }
+        let servers = try MCPScanner.read(.cursor, env: env)
+        #expect(servers.map(\.name) == ["github"])
+    }
+
+    /// **読めても書き戻さない。** `JSONSerialization` で書くとコメントが復元されず、
+    /// 利用者が意図的に残したコメントアウト済みの設定が消える。
+    @Test("コメント入りのCursor設定は書き換えずに拒否する")
+    func refusesToRewriteCommentedConfig() throws {
+        let original = """
+        {
+          "mcpServers": {
+            // "Figma": { "url": "http://127.0.0.1:3845/mcp" },
+            "github": { "command": "npx", "args": ["-y", "pkg"] }
+          }
+        }
+        """
+        let env = try fixture([".cursor/mcp.json": original])
+        defer { try? FileManager.default.removeItem(at: env.home) }
+        #expect(throws: (any Error).self) {
+            try MCPManager.add(.init(name: "demo", transport: .stdio(command: "true", args: [], env: [:])),
+                               to: .cursor, env: env)
+        }
+        #expect(try String(contentsOf: env.home.appending(path: ".cursor/mcp.json"),
+                           encoding: .utf8) == original)
+    }
+
+    /// 文字列の中の `//` はコメントではない。壊すと接続先を失う。
+    @Test("URL の // をコメントとして落とさない")
+    func keepsURLSlashes() {
+        let text = #"{"url":"http://127.0.0.1:3845/mcp"}"#
+        #expect(MCPScanner.stripComments(text) == text)
+        #expect(MCPScanner.stripComments(#"{"a":"say \" // no"}"#) == #"{"a":"say \" // no"}"#)
+        #expect(MCPScanner.stripComments(#"{"a":"x"} // tail"#) == #"{"a":"x"} "#)
+        #expect(MCPScanner.stripComments("{/* c */\"a\":1}") == #"{"a":1}"#)
+    }
+
     /// `excludedProjects` に入れたパスは走査されず `userIgnoredProjects` に出る。
     @Test("ユーザーが除外したプロジェクトは走査しないが一覧に残る")
     func userExcludedProjectIsSkipped() throws {

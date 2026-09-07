@@ -28,7 +28,7 @@ public enum MCPScanner {
         case .file(let root, let path):
             let url = (root == .home ? env.home : env.appSupport).appending(path: path)
             guard FileManager.default.fileExists(atPath: url.path) else { return [] }
-            let object = try JSONSerialization.jsonObject(with: Data(contentsOf: url))
+            let object = try jsonObject(at: url)
             guard let dictionary = object as? [String: Any] else { throw ReadFailure("MCP設定を読み取れません") }
             guard let servers = dictionary["mcpServers"] else { return [] }
             return try decode(servers)
@@ -55,6 +55,33 @@ public enum MCPScanner {
                 throw ReadFailure("MCPサーバー定義が不正です")
             }
             return server
+        }
+    }
+
+    /// 設定ファイルを 1 つ読む。**失敗しても生の `NSError` を UI に出さない。**
+    ///
+    /// `JSONSerialization` の失敗は `Error Domain=NSCocoaErrorDomain Code=3840 …` を
+    /// そのまま吐き、それが「読み取りに失敗した項目があります」の中身になっていた。
+    /// 利用者に要るのは、どのファイルをどう直せばいいかの 1 行だけ。
+    static func jsonObject(at url: URL) throws -> Any {
+        let data = try Data(contentsOf: url)
+        if let object = try? JSONSerialization.jsonObject(with: data) { return object }
+        // Cursor は `//` コメント入りの JSONC を受け付ける（実測: `~/.cursor/mcp.json` に
+        // コメントアウトされた Figma 設定があり、こちらだけが読めていなかった）。
+        if let text = String(data: data, encoding: .utf8),
+           let object = try? JSONSerialization.jsonObject(with: Data(stripComments(text).utf8)) {
+            return object
+        }
+        throw ReadFailure("\(url.lastPathComponent) を読み取れませんでした。JSON として壊れています")
+    }
+
+    /// JSON からコメントを取り除く。**純粋関数**（10.1）。
+    ///
+    /// 文字列リテラルを最初の選択肢にして、そのまま書き戻す — 中の `//` を
+    /// コメント開始と読むと `"url": "http://127.0.0.1:3845/mcp"` を壊して読む。
+    static func stripComments(_ text: String) -> String {
+        text.replacing(#/"(?:\\.|[^"\\])*"|//[^\n]*|/\*[\s\S]*?\*//#) {
+            $0.0.hasPrefix("\"") ? String($0.0) : ""
         }
     }
 
@@ -217,7 +244,18 @@ public enum MCPManager {
         let url = env.home.appending(path: ".cursor/mcp.json")
         var root: [String: Any] = [:]
         if FileManager.default.fileExists(atPath: url.path) {
-            guard let decoded = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any] else {
+            // **コメント入りのファイルは書き換えない。** 読む側はコメントを飛ばして
+            // 解釈できるが、`JSONSerialization` で書き戻すとコメントは復元されない。
+            // 実測の `~/.cursor/mcp.json` にはコメントアウトされた Figma 設定があり、
+            // ここを黙って上書きすると利用者が意図的に残した設定が消える（3.1 / 9 章）。
+            let data = try Data(contentsOf: url)
+            let raw = try? JSONSerialization.jsonObject(with: data)
+            if raw == nil, let text = String(data: data, encoding: .utf8),
+               (try? JSONSerialization.jsonObject(with: Data(MCPScanner.stripComments(text).utf8))) != nil {
+                throw MCPScanner.ReadFailure(
+                    "~/.cursor/mcp.json はコメントを含むため、manage-arms からは変更できません。Cursor で直接編集してください")
+            }
+            guard let decoded = raw as? [String: Any] else {
                 throw MCPScanner.ReadFailure("Cursorの設定を読み取れません。変更していません")
             }
             root = decoded

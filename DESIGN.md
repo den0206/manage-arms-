@@ -72,13 +72,22 @@ AI コーディングエージェント（Claude Code / Cursor / Codex / Gemini 
 | 操作 | 実装 |
 |---|---|
 | MCP 追加/削除（Claude / Codex / Gemini） | `Process` で `<cli> mcp add\|remove` を実行 |
-| MCP 追加/削除（Cursor） | `~/.cursor/mcp.json` を直接編集（専用の小さいファイルなので安全） |
+| MCP 追加/削除（Cursor） | `~/.cursor/mcp.json` を直接編集（専用の小さいファイルなので安全）。**コメントを含むファイルは書き換えず拒否する** |
 | Plugin 追加/削除/更新（Claude） | `claude plugin install\|uninstall\|update` |
 | Plugin 追加/削除（Codex） | `codex plugin add\|remove`（`update` が無いため remove + add） |
 | Skill / Subagent 有効化 | 実体を配置 + `FileManager.createSymbolicLink`（3.2） |
 | Skill / Subagent 無効化 | 実体を退避ディレクトリへ移動 + symlink 削除（実体は消さない。3.2） |
 | 権限の削除 | `settings.json` / `settings.local.json` の `permissions` キーのみ書き換え（8 章）。**9 章のホワイトリストの唯一の例外**。バックアップ + アトミック |
 | 一覧読み取り | 列挙されたファイルの直読み + `<cli> mcp list --json` |
+
+**Cursor の `mcp.json` は JSONC** — `//` コメントを受け付ける（実測: コメントアウトされた
+Figma 設定が入っていた）。`JSONSerialization` はこれを拒否するので、素の parse に失敗したら
+コメントを落として読み直す（`MCPScanner.stripComments`。文字列リテラルの中の `//` は触らない —
+`"url": "http://…"` を壊す）。**読めても書き戻さない。** `JSONSerialization` で書くと
+コメントは復元されず、利用者が意図的に残した設定が黙って消える。
+読み取りの失敗は生の `NSError` を UI に出さず、どのファイルをどう直すかの 1 行にする
+（以前は `Error Domain=NSCocoaErrorDomain Code=3840 …` が
+「読み取りに失敗した項目があります」の中身だった）。
 
 自前で設定ファイルを組み立てる箇所が消えるため、**一番壊れやすいコードが存在しなくなる**。
 

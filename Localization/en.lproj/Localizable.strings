@@ -264,6 +264,8 @@
 "走査から除いています。「復元」を押すと再び一覧に出ます。" = "These are excluded from scanning. Press “Restore” to include them again.";
 "走査しないプロジェクト登録" = "Project entries that are not scanned";
 "ここはプロジェクトとして扱いません。ホームフォルダやルートを1つのプロジェクトとして読むと、配下にある他の全プロジェクトのスキルを巻き込んでしまうためです。ほかのプロジェクトは通常どおり一覧に出ます。" = "These are not treated as projects. Reading your home folder or the filesystem root as a single project would pull in the skills of every project beneath it. Your other projects are listed as usual.";
+"%@ を読み取れませんでした。JSON として壊れています" = "%@ could not be read. It is not valid JSON.";
+"~/.cursor/mcp.json はコメントを含むため、manage-arms からは変更できません。Cursor で直接編集してください" = "~/.cursor/mcp.json contains comments, so manage-arms cannot modify it. Edit it directly in Cursor.";
 "CursorのmcpServersを読み取れません。変更していません" = "Cursor mcpServers could not be read. Nothing was changed.";
 "Pluginの一覧をCLIから読み取れません" = "The plugin list could not be read from the CLI.";
 "Pluginの識別子がありません" = "A plugin identifier is missing.";
