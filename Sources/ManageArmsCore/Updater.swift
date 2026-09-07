@@ -45,7 +45,8 @@ public enum Updater {
         case candidateMissing(String)
         case stagingUnavailable
         case candidateChanged
-        case rollbackFailed(String)
+        /// 復元にも失敗した。`backup` に旧実体が残っている場合はその位置。
+        case rollbackFailed(String, backup: String?)
 
         public var description: String {
             switch self {
@@ -59,8 +60,12 @@ public enum Updater {
                 String(localized: "更新用の一時データは既に使用または破棄されています")
             case .candidateChanged:
                 String(localized: "確認後に更新内容が変化したため適用を中止しました")
-            case .rollbackFailed(let message):
-                String(localized: "更新に失敗し、元の状態も完全には復元できませんでした: \(message)")
+            case .rollbackFailed(let message, let backup):
+                if let backup {
+                    String(localized: "更新に失敗し、元の状態も完全には復元できませんでした: \(message)。更新前の実体は \(backup) に残してあります")
+                } else {
+                    String(localized: "更新に失敗し、元の状態も完全には復元できませんでした: \(message)")
+                }
             }
         }
     }
@@ -120,7 +125,10 @@ public enum Updater {
             .appending(path: "manage-arms-update-\(UUID().uuidString)")
         let backup = transaction.appending(path: "previous")
         try fileManager.createDirectory(at: transaction, withIntermediateDirectories: true)
-        defer { try? fileManager.removeItem(at: transaction) }
+        // **復元に失敗したら控えを消さない。** 旧実体はこの時点で `backup` にしか無いので、
+        // ここで畳むと戻す手段が一つも残らない（ゴミ箱にも入らない）。
+        var keepTransaction = false
+        defer { if !keepTransaction { try? fileManager.removeItem(at: transaction) } }
         let hadExisting = fileManager.fileExists(atPath: destination.path(percentEncoded: false))
 
         do {
@@ -146,7 +154,10 @@ public enum Updater {
                 }
                 if hadExisting { try fileManager.moveItem(at: backup, to: destination) }
             } catch let rollbackError {
-                throw Failure.rollbackFailed("\(error); \(rollbackError)")
+                keepTransaction = true
+                throw Failure.rollbackFailed(
+                    "\(error); \(rollbackError)",
+                    backup: hadExisting ? backup.path(percentEncoded: false) : nil)
             }
             throw error
         }
