@@ -355,3 +355,80 @@ struct UsageHistoryTests {
         #expect(kept["skill-0"] == nil, "最古が残っている")
     }
 }
+
+extension UsageTests {
+    @Test("ファイル上限で中断した履歴を保存後も未読分から再開する")
+    func resumesAfterFileLimit() throws {
+        var (env, home) = try Self.fixture([
+            ".claude/projects/p/a.jsonl": Self.skillLine("alpha", "2026-01-01T00:00:00Z"),
+            ".claude/projects/p/b.jsonl": Self.skillLine("beta", "2026-01-02T00:00:00Z"),
+        ])
+        defer { try? FileManager.default.removeItem(at: home) }
+        let firstStart = Date(timeIntervalSince1970: 2_000_000_000)
+        env.now = { firstStart }
+        var registry = UsageScanner.refreshed(Registry(), env: env, maxFiles: 1, clock: Date.init)
+        #expect(registry.usage.scannedSources["claude"] == nil)
+        #expect(registry.usage.scannedUpTo == nil)
+        #expect(registry.usage.lastUsed["alpha"] != nil)
+        #expect(registry.usage.lastUsed["beta"] == nil)
+        #expect(registry.usage.pendingSources["claude"]?.file == "p/a.jsonl")
+        try registry.save(env: env)
+        registry = try Registry.read(env: env)
+        env.now = { firstStart.addingTimeInterval(60) }
+        registry = UsageScanner.refreshed(registry, env: env, maxFiles: 1, clock: Date.init)
+        #expect(registry.usage.pendingSources.isEmpty)
+        #expect(registry.usage.lastUsed["beta"] != nil)
+        #expect(registry.usage.scannedSources["claude"] == firstStart)
+        #expect(registry.usage.scannedUpTo == firstStart)
+    }
+
+    @Test("巨大ログの処理中にも中断し行境界から再開する")
+    func resumesInsideFile() throws {
+        let first = Self.skillLine("alpha", "2026-01-01T00:00:00Z")
+        let second = Self.skillLine("beta", "2026-01-02T00:00:00Z")
+        let (_, home) = try Self.fixture(["log.jsonl": first + "\n" + second + "\n"])
+        defer { try? FileManager.default.removeItem(at: home) }
+        let file = home.appending(path: "log.jsonl")
+        var found: [String: Date] = [:]
+        var checks = 0
+        let position = try #require(UsageScanner.read(file: file, fallbackDate: nil,
+            into: &found, offset: 0, discarding: false, permitted: { checks += 1; return checks <= 2 }))
+        #expect(position.offset == UInt64(first.utf8.count + 1))
+        #expect(found["alpha"] != nil)
+        #expect(found["beta"] == nil)
+        let next = UsageScanner.read(file: file, fallbackDate: nil, into: &found,
+            offset: position.offset, discarding: position.discarding, permitted: { true })
+        #expect(next == nil)
+        #expect(found["beta"] != nil)
+    }
+
+    @Test("履歴件数が上限を超えても後半の新しい記録を読む")
+    func readsPastHistoryLimit() throws {
+        let lines = (0...UsageScanner.historyLimit).map {
+            Self.skillLine("skill-\($0)", $0 == UsageScanner.historyLimit
+                           ? "2026-02-01T00:00:00Z" : "2026-01-01T00:00:00Z")
+        }.joined(separator: "\n")
+        let (env, home) = try Self.fixture([".claude/projects/p/log.jsonl": lines])
+        defer { try? FileManager.default.removeItem(at: home) }
+        let registry = UsageScanner.refreshed(Registry(), env: env)
+        #expect(registry.usage.lastUsed.count == UsageScanner.historyLimit)
+        #expect(registry.usage.lastUsed["skill-\(UsageScanner.historyLimit)"] != nil)
+        #expect(registry.usage.pendingSources.isEmpty)
+    }
+
+    @Test("時間切れは集計完了とせず再開情報を残す")
+    func deadlineDoesNotAdvanceWatermark() throws {
+        let (env, home) = try Self.fixture([
+            ".claude/projects/p/log.jsonl": Self.skillLine("alpha", "2026-01-01T00:00:00Z")
+        ])
+        defer { try? FileManager.default.removeItem(at: home) }
+        var ticks = 0
+        let registry = UsageScanner.refreshed(Registry(), env: env, maxFiles: 10, clock: {
+            ticks += 1
+            return Date(timeIntervalSince1970: Double(ticks) * 60)
+        })
+        #expect(registry.usage.scannedSources["claude"] == nil)
+        #expect(registry.usage.pendingSources["claude"] != nil)
+        #expect(registry.usage.scannedUpTo == nil)
+    }
+}

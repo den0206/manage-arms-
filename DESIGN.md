@@ -8,7 +8,7 @@ AI コーディングエージェント（Claude Code / Cursor / Codex / Gemini 
 - **配布**: DMG の直配布（App Sandbox 非対応のため App Store 不可）。公開先は
   [den0206/manage-arms-releases](https://github.com/den0206/manage-arms-releases)。13 章
 - **状態**: **v1〜v5 実装済み**（Skills / Subagents / Plugins / 使用実績 / MCP。v4 の権限は撤去）、
-  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト定義 375 件
+  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト定義 379 件
   （`@Test` の数。`arguments:` 付きは実行時にさらに分かれる）
 - **実装**: SPM パッケージ。`swift test` / `CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh`
   （`.xcodeproj` は不要。実 CLI・実ネットワークを使う確認は `MANUAL=1 swift test`）
@@ -1311,7 +1311,12 @@ OS が回収する。アプリが自前の掃除機能を持たなくて済む�
 
 - ダウンロードは 50 MiB、一般 API 応答は 2 MiB、コマンドの stdout / stderr は各 2 MiB
 - 展開は 200 MiB 合計・20 MiB/ファイル・10,000項目・30秒で停止し、symlink と特殊ファイルを拒否する
-- JSONL は 64 KiB 単位で読み、1行 1 MiB・10,000ファイル・30秒を上限にする
+- JSONL は 64 KiB 単位で読み、1行 1 MiB・10,000ファイル・30秒を上限にする。
+  期限はファイル内でも確認する。パス順に走査し、中断したソースごとに開始時刻・
+  相対パス・行境界のオフセットを既存 registry の `usage.pendingSources` に保持する。
+  「使用状況を分析」で続きから再開し、完了したソースだけ `scannedSources` を進める。
+  全ソース完了までは未集計として表示し、途中結果を「未使用」の根拠にしない。
+  使用名が2,000件を超えても走査は続け、最新2,000件を保存する。
 - 作成先は trusted anchor から親までの既存要素を検査し、**信頼できる根の外へ出る**
   symlink を拒否する。`~/.claude` を dotfiles リポジトリへ張るのは普通の構成なので、
   symlink そのものは拒まない（拒むと有効化も更新もできなくなる）

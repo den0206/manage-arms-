@@ -260,7 +260,9 @@ public struct Inventory: Sendable {
 
     /// 使用実績をいつ集計したか。`nil` = 未集計。
     /// 「未集計」を「未使用」として出さないために要る（DESIGN.md 5.3）。
-    public var usageScannedAt: Date? { registry.usage.scannedUpTo }
+    public var usageScannedAt: Date? {
+        registry.usage.pendingSources.isEmpty ? registry.usage.scannedUpTo : nil
+    }
 
     /// このエージェントの画面に出す行（DESIGN.md 8 章）。
     ///

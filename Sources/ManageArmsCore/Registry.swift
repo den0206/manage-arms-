@@ -60,6 +60,16 @@ public struct Registry: Codable, Equatable, Sendable {
         public var lastUsed: [String: Date] = [:]
         /// ログ形式ごとの増分走査位置。新しい Agent を足した初回だけ全走査する。
         public var scannedSources: [String: Date] = [:]
+        /// 完了時刻とは分ける。途中のログは行境界から次回再開する。
+        public var pendingSources: [String: Progress] = [:]
+
+        public struct Progress: Codable, Equatable, Sendable {
+            public var startedAt: Date
+            public var file: String
+            /// nil はこのファイルまで完了、値ありはファイル内で中断。
+            public var offset: UInt64?
+            public var discardingLongLine: Bool = false
+        }
 
         public init(scannedUpTo: Date? = nil, lastUsed: [String: Date] = [:],
                     scannedSources: [String: Date] = [:]) {
@@ -68,7 +78,7 @@ public struct Registry: Codable, Equatable, Sendable {
             self.scannedSources = scannedSources
         }
 
-        enum CodingKeys: String, CodingKey { case scannedUpTo, lastUsed, scannedSources }
+        enum CodingKeys: String, CodingKey { case scannedUpTo, lastUsed, scannedSources, pendingSources }
 
         public init(from decoder: any Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -76,6 +86,8 @@ public struct Registry: Codable, Equatable, Sendable {
             lastUsed = try c.decodeIfPresent([String: Date].self, forKey: .lastUsed) ?? [:]
             scannedSources = try c.decodeIfPresent([String: Date].self,
                                                     forKey: .scannedSources) ?? [:]
+            pendingSources = try c.decodeIfPresent([String: Progress].self,
+                                                    forKey: .pendingSources) ?? [:]
         }
     }
 

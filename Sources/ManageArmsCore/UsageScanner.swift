@@ -47,23 +47,63 @@ public enum UsageScanner {
         for source in logSources(env: env) {
             scan(source, since: since, into: &found)
         }
-        return found
+        return bounded(found)
     }
 
-    static func scan(_ source: LogSource, since: Date?, into found: inout [String: Date]) {
-        let keys: [URLResourceKey] = [.contentModificationDateKey, .isRegularFileKey]
-        guard let walker = FileManager.default.enumerator(
-            at: source.root, includingPropertiesForKeys: keys) else { return }
-        let deadline = Date().addingTimeInterval(scanTimeLimit)
+    /// 安定したパス順で歩き、打ち切った位置を返す。nil だけが完了を表す。
+    @discardableResult
+    static func scan(_ source: LogSource, since: Date?, into found: inout [String: Date],
+                     progress: Registry.Usage.Progress? = nil, startedAt: Date = Date(),
+                     maxFiles: Int = scannedFileLimit,
+                     clock: () -> Date = Date.init) -> Registry.Usage.Progress? {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: source.root.path) else { return nil }
+        let deadline = clock().addingTimeInterval(scanTimeLimit)
+        var cursor = progress ?? .init(startedAt: startedAt, file: "", offset: nil)
         var scannedFiles = 0
-        for case let url as URL in walker where url.pathExtension == "jsonl" {
-            guard Date() < deadline, scannedFiles < scannedFileLimit,
-                  found.count < historyLimit else { break }
-            scannedFiles += 1
-            let modified = try? url.resourceValues(
-                forKeys: [.contentModificationDateKey]).contentModificationDate
-            if let since, let modified, modified <= since { continue }
-            merge(file: url, fallbackDate: source.usesFileDate ? modified : nil, into: &found)
+        let keys: Set<URLResourceKey> = [.isDirectoryKey, .isRegularFileKey,
+                                        .isSymbolicLinkKey, .contentModificationDateKey]
+        func permitted() -> Bool { clock() < deadline && !Task.isCancelled }
+        func before(_ a: String, _ b: String) -> Bool {
+            a.split(separator: "/").lexicographicallyPrecedes(b.split(separator: "/"))
+        }
+        func walk(_ directory: URL, prefix: String, depth: Int) throws -> Bool {
+            guard permitted(), depth < 64 else { return false }
+            let children = try fm.contentsOfDirectory(at: directory,
+                includingPropertiesForKeys: Array(keys)).sorted { $0.lastPathComponent < $1.lastPathComponent }
+            for url in children {
+                guard permitted() else { return false }
+                let relative = prefix.isEmpty ? url.lastPathComponent : prefix + "/" + url.lastPathComponent
+                let values = try url.resourceValues(forKeys: keys)
+                guard values.isSymbolicLink != true else { continue }
+                if values.isDirectory == true {
+                    // 再開位置より前の完了済みサブツリーは歩き直さない。
+                    if before(relative, cursor.file), !cursor.file.hasPrefix(relative + "/") { continue }
+                    if try walk(url, prefix: relative, depth: depth + 1) == false { return false }
+                } else if values.isRegularFile == true, url.pathExtension == "jsonl" {
+                    if before(relative, cursor.file) || (relative == cursor.file && cursor.offset == nil) { continue }
+                    if let since, let modified = values.contentModificationDate, modified <= since { continue }
+                    guard scannedFiles < maxFiles else { return false }
+                    scannedFiles += 1
+                    let resume = relative == cursor.file ? cursor : nil
+                    cursor.file = relative
+                    cursor.offset = resume?.offset ?? 0
+                    cursor.discardingLongLine = resume?.discardingLongLine ?? false
+                    let position = read(file: url,
+                        fallbackDate: source.usesFileDate ? values.contentModificationDate : nil,
+                        into: &found, offset: cursor.offset ?? 0,
+                        discarding: cursor.discardingLongLine, permitted: permitted)
+                    cursor.offset = position?.offset
+                    cursor.discardingLongLine = position?.discarding ?? false
+                    if position != nil { return false }
+                }
+            }
+            return true
+        }
+        do { return try walk(source.root, prefix: "", depth: 0) ? nil : cursor }
+        catch {
+            // 読めなかったディレクトリを完了扱いにせず、次回もう一度試す。
+            return .init(startedAt: cursor.startedAt, file: "", offset: nil)
         }
     }
 
@@ -74,19 +114,31 @@ public enum UsageScanner {
     /// `inout` ではなく値を返す。全走査は数秒かかるためメインスレッドの外で回す必要があり、
     /// `inout` は `Task.detached` に渡せない。
     public static func refreshed(_ registry: Registry, env: Environment) -> Registry {
-        // 走査中に書かれた行を取りこぼさないよう、開始時刻を基準にする。
+        refreshed(registry, env: env, maxFiles: scannedFileLimit, clock: Date.init)
+    }
+
+    static func refreshed(_ registry: Registry, env: Environment, maxFiles: Int,
+                          clock: () -> Date) -> Registry {
         let startedAt = env.now()
         var updated = registry
         for source in logSources(env: env) {
             var found: [String: Date] = [:]
-            scan(source, since: registry.usage.scannedSources[source.id], into: &found)
+            let previous = registry.usage.pendingSources[source.id]
+            let pending = scan(source, since: registry.usage.scannedSources[source.id], into: &found,
+                               progress: previous, startedAt: startedAt, maxFiles: maxFiles, clock: clock)
             for (name, date) in found
             where updated.usage.lastUsed[name] == nil || updated.usage.lastUsed[name]! < date {
                 updated.usage.lastUsed[name] = date
             }
-            updated.usage.scannedSources[source.id] = startedAt
+            updated.usage.pendingSources[source.id] = pending
+            if pending == nil {
+                // 複数回に分かれた走査は最初の開始時刻までを完了とする。
+                updated.usage.scannedSources[source.id] = previous?.startedAt ?? startedAt
+            }
         }
-        updated.usage.scannedUpTo = startedAt
+        if updated.usage.pendingSources.isEmpty {
+            updated.usage.scannedUpTo = updated.usage.scannedSources.values.min()
+        }
         updated.usage.lastUsed = bounded(updated.usage.lastUsed)
         return updated
     }
@@ -108,27 +160,47 @@ public enum UsageScanner {
 
     /// 固定バッファで逐次読む。巨大な 1 行は解析せず捨てる。
     static func merge(file url: URL, fallbackDate: Date?, into found: inout [String: Date]) {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return }
+        _ = read(file: url, fallbackDate: fallbackDate, into: &found,
+                 offset: 0, discarding: false, permitted: { true })
+        found = bounded(found)
+    }
+
+    /// 読み取り中にも期限を確認する。未完の行は次回のために読み戻せる位置を返す。
+    static func read(file url: URL, fallbackDate: Date?, into found: inout [String: Date],
+                     offset: UInt64, discarding: Bool, permitted: () -> Bool)
+        -> (offset: UInt64, discarding: Bool)? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return (offset, discarding) }
         defer { try? handle.close() }
+        var position = offset
         var pending = Data()
-        var discardingLongLine = false
-        while let chunk = try? handle.read(upToCount: 64 * 1024), !chunk.isEmpty {
-            pending.append(chunk)
-            while let newline = pending.firstIndex(of: UInt8(ascii: "\n")) {
-                let line = pending[..<newline]
-                pending.removeSubrange(...newline)
-                if !discardingLongLine { merge(line: Data(line), fallbackDate: fallbackDate, into: &found) }
-                discardingLongLine = false
-                if found.count >= historyLimit { return }
+        var discardingLongLine = discarding
+        do {
+            let size = try handle.seekToEnd()
+            if position > size { position = 0; discardingLongLine = false }
+            try handle.seek(toOffset: position)
+            while permitted() {
+                guard let chunk = try handle.read(upToCount: 64 * 1024), !chunk.isEmpty else {
+                    if !discardingLongLine, !pending.isEmpty {
+                        merge(line: pending, fallbackDate: fallbackDate, into: &found)
+                    }
+                    return nil
+                }
+                position += UInt64(chunk.count)
+                pending.append(chunk)
+                while let newline = pending.firstIndex(of: UInt8(ascii: "\n")) {
+                    guard permitted() else { return (position - UInt64(pending.count), discardingLongLine) }
+                    let line = Data(pending[..<newline])
+                    pending.removeSubrange(...newline)
+                    if !discardingLongLine { merge(line: line, fallbackDate: fallbackDate, into: &found) }
+                    discardingLongLine = false
+                }
+                if pending.count > lineLimit {
+                    pending.removeAll(keepingCapacity: true)
+                    discardingLongLine = true
+                }
             }
-            if pending.count > lineLimit {
-                pending.removeAll(keepingCapacity: true)
-                discardingLongLine = true
-            }
-        }
-        if !discardingLongLine, !pending.isEmpty {
-            merge(line: pending, fallbackDate: fallbackDate, into: &found)
-        }
+        } catch { /* 元の完了時刻を進めず、同じ位置から再試行する。 */ }
+        return (position - UInt64(pending.count), discardingLongLine)
     }
 
     private static func merge(line: Data, fallbackDate: Date?,
@@ -141,9 +213,9 @@ public enum UsageScanner {
         else { return }
         guard let (date, names) = parse(line, fallbackDate: fallbackDate) else { return }
         for name in names where found[name] == nil || found[name]! < date {
-            guard found[name] != nil || found.count < historyLimit else { continue }
             found[name] = date
         }
+        if found.count > historyLimit * 2 { found = bounded(found) }
     }
 
     static let skillMarker = Data("\"Skill\"".utf8)

@@ -12,6 +12,8 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 
 ### Fixed
 
+- Resume incomplete usage scans from saved file positions without marking unread logs as scanned, including time limits within large files.
+
 - Run MCP pinning reads and registration commands off the main thread.
 
 - Preserve original resources when update backups fail, and keep concurrent registry changes during installation and lifecycle operations.

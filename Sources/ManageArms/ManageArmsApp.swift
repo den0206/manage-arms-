@@ -358,6 +358,9 @@ final class AppModel {
             }.value
             do {
                 try Registry.update(env: .live) { $0.usage = analyzed.usage }
+                if !analyzed.usage.pendingSources.isEmpty {
+                    errorMessage = String(localized: "使用履歴の分析は途中まで完了しました。「使用状況を分析」をもう一度押すと続きから再開します。")
+                }
             } catch { errorMessage = "\(error)" }
             isAnalyzing = false
             reloadIfVisible()
