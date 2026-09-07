@@ -14,6 +14,10 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 
 - The menu bar icon now shows a small green dot beside it when any managed resource has an
   update waiting as of the last update check. Pinned resources are not counted.
+- Every skill, subagent, and plugin row now shows how much disk it uses, and the Home
+  screen's summary band ends with the total for the tools you added. A body reachable
+  through several symlinks is counted once; MCP servers show nothing because they have
+  no local body.
 
 ### Fixed
 

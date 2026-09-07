@@ -146,6 +146,8 @@ struct StatTile: View {
     let title: LocalizedStringKey
     let count: Int
     let symbol: String
+    /// 件数ではなく量を出すとき（容量）。`count` は変化を検知するためだけに使う。
+    var value: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
@@ -153,9 +155,11 @@ struct StatTile: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-            Text(count.formatted())
+            Text(verbatim: value ?? count.formatted())
                 .font(.system(size: 21, weight: .regular))
                 .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)   // 「123.4 MB」でも 1 行に収める
                 .contentTransition(.numericText())
                 .animation(Motion.count, value: count)
                 .foregroundStyle(count == 0 ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.primary))

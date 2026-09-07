@@ -345,6 +345,9 @@ struct HomeView: View {
 
     private var broken: Int { mine.count(where: \.isUnusable) }
 
+    /// 実体を測れたものの合計。MCP は実体が無いので 0 のまま足されない。
+    private var totalBytes: Int { mine.reduce(0) { $0 + $1.bytes } }
+
     /// 種別ごとの件数。**同梱は数えない** — 自分で入れたものの規模が知りたい。
     /// 4 枚のカードに散らさず、1 本の帯を縦罫で仕切る（合計が 1 つの事実だと分かる）。
     private var statRow: some View {
@@ -358,6 +361,11 @@ struct HomeView: View {
                          symbol: kind.symbol)
                     .padding(.horizontal, 14)
             }
+            // 規模の右隣に量を置く。内訳は各エージェントの画面（行ごとに出る）。
+            Divider().frame(height: 30)
+            StatTile(title: "ストレージ", count: totalBytes, symbol: "internaldrive",
+                     value: totalBytes.formatted(.byteCount(style: .file)))
+                .padding(.horizontal, 14)
         }
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity)
@@ -813,6 +821,10 @@ struct ResourceRowView: View {
                     if let note = row.isUnusable ? row.detail : managedBy {
                         Text(note).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
                             .textSelection(.enabled)
+                    }
+                    // 容量は数字だけ（翻訳対象ではない）。実体を持たないものは出ない。
+                    if let size = row.sizeText {
+                        Text(verbatim: size).font(.caption2).foregroundStyle(.tertiary)
                     }
                 }
                 HStack(spacing: 8) {
