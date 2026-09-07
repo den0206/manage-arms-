@@ -51,7 +51,10 @@ final class AddModel {
         isBusy = true
         Task {
             do {
-                let revision = try await UpdateChecker.resolve(source, env: .live)
+                // SHA を固定できれば固定する。ただし**レート制限で導入まで止めない** —
+                // 未認証は 60 req/時（DESIGN.md 7.3）で、枯れているのは日常的に起きる。
+                // 解決できなければブランチの zip を取り、sha は不明のままにする。
+                let revision = try? await UpdateChecker.resolve(source, env: .live)
                 let result = try await Fetcher.stage(source, resolvedSHA: revision)
                 if token == generation { staged = result } else { result.discard() }
             } catch { if token == generation { self.error = "\(error)" } }
