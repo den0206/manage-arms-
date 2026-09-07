@@ -13,11 +13,11 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 ### Fixed
 
 - Reading the installed MCP servers and plugins from an agent's command-line tool no longer
-  fails intermittently. Output was read asynchronously but the reader was torn down as soon as
-  the process exited, so whatever had not been delivered yet was dropped — a truncated JSON
-  response then failed to parse, and the error stuck around for a few minutes because
-  command-line results are cached. The same applied to the reason reported when unpacking a
-  downloaded archive failed.
+  drops output. The reader was torn down as soon as the tool itself exited, so anything written
+  afterwards by a background process the tool had left holding the output was lost — a
+  truncated JSON response then failed to parse, and the error stuck around for a few minutes
+  because command-line results are cached. The same applied to the reason reported when
+  unpacking a downloaded archive failed.
 
 ### Changed
 
