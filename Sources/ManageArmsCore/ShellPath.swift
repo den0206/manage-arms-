@@ -73,7 +73,6 @@ public enum Exec {
         process.standardError = err
         process.standardInput = FileHandle.nullDevice
         try process.run()
-        _ = Darwin.setpgid(process.processIdentifier, process.processIdentifier)
         let output = Mutex(Data()), errors = Mutex(Data())
         out.fileHandleForReading.readabilityHandler = { handle in
             let chunk = handle.availableData
@@ -93,6 +92,9 @@ public enum Exec {
                 }
             }
         }
+        // 子プロセスグループごと止める。`Process` は posix_spawn で子を独立した
+        // プロセスグループに置くので、pid をそのままグループ ID として使える
+        // （親から `setpgid` を呼んでも exec 済みで EACCES になり、意味が無い）。
         let deadline = DispatchWorkItem {
             guard process.isRunning else { return }
             Darwin.kill(-process.processIdentifier, SIGTERM)
