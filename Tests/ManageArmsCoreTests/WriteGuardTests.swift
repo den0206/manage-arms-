@@ -140,6 +140,23 @@ struct WriteGuardTests {
         }
     }
 
+    /// **symlink そのものは拒まない。** `~/.claude` や `~/.agents` を dotfiles
+    /// リポジトリへ張るのは普通の構成で、一律に弾くと有効化も更新も権限編集も
+    /// できなくなる。拒むのは home の外へ出るリンクだけ。
+    @Test("home の中に収まる親 symlink は通す")
+    func parentSymlinkInsideHomeAllowed() throws {
+        let root = URL(filePath: NSTemporaryDirectory()).appending(path: UUID().uuidString)
+        let home = root.appending(path: "home")
+        let dotfiles = home.appending(path: "dotfiles/.agents")
+        try FileManager.default.createDirectory(at: dotfiles, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: home.appending(path: ".agents"),
+                                                   withDestinationURL: dotfiles)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let env = Environment.test(home: home)
+        try WriteGuard.assertSafeCreation(env.skillStore.appending(path: "demo"),
+                                          inside: env.skillStore, anchor: env.home)
+    }
+
     /// `ProjectScan.skillRoots` を歩き直さずに同じ集合を引けること。
     /// **歩く実装に戻すと UI が行数ぶん止まる**（実測 0.16 秒 × 350 行）。
     @Test("プロジェクト配下の許可ルートは走査せずに判定できる", arguments: [

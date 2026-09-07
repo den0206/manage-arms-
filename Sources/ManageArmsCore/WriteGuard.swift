@@ -111,8 +111,13 @@ public enum WriteGuard {
         }
     }
 
-    /// 作成・移動先の途中にある symlink を拒否する。文字列上の配下判定だけでは、
+    /// 作成・移動先の途中にある symlink を検査する。文字列上の配下判定だけでは、
     /// `~/.agents/skills -> /outside` のような付け替えで管理外へ到達するため。
+    ///
+    /// **symlink そのものは拒まない。** `~/.claude` や `~/.agents` を dotfiles
+    /// リポジトリへ張るのは、このアプリの利用者にとって普通の構成で、
+    /// 一律に弾くと有効化・更新・権限編集が全部できなくなる。
+    /// 拒むのは**信頼できる根（home / プロジェクト）の外へ出る**リンクだけ。
     public static func assertSafeCreation(_ url: URL, inside root: URL,
                                           anchor: URL? = nil) throws {
         let trusted = (anchor ?? root).standardizedFileURL
@@ -131,8 +136,13 @@ public enum WriteGuard {
         var current = trusted
         for component in targetParts.dropFirst(trustedParts.count) {
             current.append(path: component)
-            guard FileManager.default.fileExists(atPath: current.path) else { continue }
-            if isSymlink(current) { throw Denial.unsafeParent(current.path) }
+            guard FileManager.default.fileExists(atPath: current.path),
+                  isSymlink(current) else { continue }
+            guard let resolved = symlinkTarget(current)?.resolvingSymlinksInPath()
+                    .standardizedFileURL, isInside(resolved, trusted) else {
+                throw Denial.unsafeParent(current.path)
+            }
+            current = resolved
         }
     }
 
