@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Darwin
 
 /// 取得した中身の解釈結果。**自動では入れない。**
@@ -307,9 +308,21 @@ public enum Fetcher {
         process.executableURL = URL(filePath: "/usr/bin/ditto")
         process.arguments = ["-xk", zip.path(percentEncoded: false),
                              destination.path(percentEncoded: false)]
-        process.standardError = FileHandle.nullDevice
         // **読まないパイプを渡さない。** バッファが埋まると子プロセスが書き込みで止まる。
-        // `InstallLocationGuard.run` と同じく捨てる（`ditto -xk` は標準出力を使わない）。
+        // かといって捨てると展開失敗の理由が出せなくなるので、`Exec.run` と同じく
+        // 読み手を付けて上限まで溜める（`ditto -xk` は標準出力を使わない）。
+        let err = Pipe()
+        let message = Mutex(Data())
+        err.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            guard !chunk.isEmpty else { handle.readabilityHandler = nil; return }
+            message.withLock { if $0.count < 4096 { $0.append(chunk.prefix(4096 - $0.count)) } }
+        }
+        defer {
+            err.fileHandleForReading.readabilityHandler = nil
+            try? err.fileHandleForReading.close()
+        }
+        process.standardError = err
         process.standardOutput = FileHandle.nullDevice
         try process.run()
         let deadline = Date().addingTimeInterval(extractTimeLimit)
@@ -323,7 +336,10 @@ public enum Fetcher {
             }
             do { try validateExtractedTree(destination) }
             catch { validationFailure = error; process.terminate(); break }
-            Thread.sleep(forTimeInterval: 0.25)
+            // 1 秒間隔。この検査は展開ツリーを毎回歩くので、細かく回すと
+            // 上限いっぱい（10,000 項目 × 30 秒）で数十万回の stat になる。
+            // ディスクを埋めさせない役目は取得前の空き容量検査が担っている。
+            Thread.sleep(forTimeInterval: 1)
         }
         if validationFailure != nil, process.isRunning {
             Thread.sleep(forTimeInterval: 0.2)
@@ -332,7 +348,10 @@ public enum Fetcher {
         process.waitUntilExit()
         if let validationFailure { throw validationFailure }
         guard process.terminationStatus == 0 else {
-            throw Failure.extractFailed(String(localized: "展開コマンドが失敗しました"))
+            let reason = String(decoding: message.withLock { $0 }, as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            throw Failure.extractFailed(reason.isEmpty
+                ? String(localized: "展開コマンドが失敗しました") : reason)
         }
         try validateExtractedTree(destination)
     }
