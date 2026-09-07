@@ -24,7 +24,7 @@ public struct Environment: Sendable {
     /// `CLIScan` の 1 回の走査で 6〜8 回になる。
     /// 単発の操作（追加・削除・ピン留め）は nil のままでよい — 押した時点の
     /// 最新の設定を読む方が正しい。
-    public var cliOverrides: [Agent: String]?
+    public var cliOverrides: [Agent: String]? = nil
 
     public struct HTTPResult: Sendable {
         public let body: Data
@@ -64,10 +64,15 @@ extension Environment {
     /// 手動指定された CLI は検出だけでなく、すべての実操作で同じ実体を使う。
     public func command(_ command: [String], for agent: Agent) -> [String] {
         guard !command.isEmpty else { return command }
-        // `cliOverrides` が入っていればそれが答え。入っていない**エージェント**は
-        // 手動指定なしであって、「まだ読んでいない」ではない。
-        let manual = cliOverrides.map { $0[agent] }
-            ?? Registry.load(env: self).setting(agent).path
+        // `cliOverrides` が入っていればそれが答え。**辞書にエントリが無いエージェントは
+        // 「手動指定なし」**であって、「まだ読んでいない」ではない
+        // （ここで registry へ読みに戻ると、持ち回らせた意味が無くなる）。
+        let manual: String?
+        if let overrides = cliOverrides {
+            manual = overrides[agent]
+        } else {
+            manual = Registry.load(env: self).setting(agent).path
+        }
         guard let manual, FileManager.default.isExecutableFile(atPath: manual) else {
             return command
         }

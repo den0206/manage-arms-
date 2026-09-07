@@ -136,6 +136,13 @@ public enum Fetcher {
         }
     }
 
+    /// 標準エラーの読み取り状態。**`Mutex` の捕捉を 1 つに保つため 1 つの値にまとめる。**
+    private struct Drain {
+        var message = Data()
+        /// EOF（空の chunk）を見た。
+        var finished = false
+    }
+
     static let extractedSizeLimit = 200 * 1024 * 1024
     static let singleFileLimit = 20 * 1024 * 1024
     static let entryLimit = 10_000
@@ -320,19 +327,25 @@ public enum Fetcher {
         // かといって捨てると展開失敗の理由が出せなくなるので、`Exec.run` と同じく
         // 読み手を付けて上限まで溜める（`ditto -xk` は標準出力を使わない）。
         let err = Pipe()
-        let message = Mutex(Data())
         // `Exec.run` と同じ理由で EOF を待てるようにする。終了を待っただけでは
         // 未配送分が残り、ハンドラを外した瞬間に消える（失敗理由が空になる）。
-        let drained = DispatchGroup()
-        drained.enter()
+        //
+        // ただし `Exec.run` の `DispatchGroup.wait(timeout:)` はここでは使えない —
+        // この関数は `async` で、`wait` は async コンテキストから unavailable。
+        // フラグを見て `Task.sleep` で待つ。
+        let stderr = Mutex(Drain())
         err.fileHandleForReading.readabilityHandler = { handle in
             let chunk = handle.availableData
             guard !chunk.isEmpty else {
                 handle.readabilityHandler = nil
-                drained.leave()
+                stderr.withLock { $0.finished = true }
                 return
             }
-            message.withLock { if $0.count < 4096 { $0.append(chunk.prefix(4096 - $0.count)) } }
+            stderr.withLock {
+                if $0.message.count < 4096 {
+                    $0.message.append(chunk.prefix(4096 - $0.message.count))
+                }
+            }
         }
         defer {
             err.fileHandleForReading.readabilityHandler = nil
@@ -369,10 +382,14 @@ public enum Fetcher {
             if process.isRunning { Darwin.kill(process.processIdentifier, SIGKILL) }
         }
         process.waitUntilExit()
-        _ = drained.wait(timeout: .now() + Exec.drainTimeout)
+        // 読み切り（EOF）まで待ってから理由を読む。上限を過ぎたら取れた分で進む。
+        let drainDeadline = Date().addingTimeInterval(Exec.drainTimeout)
+        while !stderr.withLock({ $0.finished }), Date() < drainDeadline {
+            do { try await Task.sleep(for: .milliseconds(20)) } catch { break }
+        }
         if let validationFailure { throw validationFailure }
         guard process.terminationStatus == 0 else {
-            let reason = String(decoding: message.withLock { $0 }, as: UTF8.self)
+            let reason = String(decoding: stderr.withLock { $0.message }, as: UTF8.self)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             throw Failure.extractFailed(reason.isEmpty
                 ? String(localized: "展開コマンドが失敗しました") : reason)
