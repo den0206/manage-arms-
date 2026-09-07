@@ -400,6 +400,17 @@ final class AppModel {
         } catch { errorMessage = "\(error)" }
     }
 
+    /// 走査から除く／戻す。保存順は誰も読まない（表示順は `ProjectScan` 側で整える）。
+    func setProject(_ path: String, excluded: Bool) {
+        do {
+            var reg = try Registry.read(env: .live)
+            reg.excludedProjects.removeAll { $0 == path }
+            if excluded { reg.excludedProjects.append(path) }
+            try reg.save(env: .live)
+            reload()
+        } catch { errorMessage = "\(error)" }
+    }
+
     func refreshActivity() {
         guard !isRefreshingActivity else { return }
         isRefreshingActivity = true

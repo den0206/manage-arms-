@@ -20,6 +20,9 @@ public struct Registry: Codable, Equatable, Sendable {
     public var menuBar: Bool?
     /// 外観（`"light"` / `"dark"`）。nil はシステムに合わせる。同上で Optional。
     public var appearance: String?
+    /// 利用者が明示的に走査から除いたプロジェクトパス。自動除外（ホーム・ルート）とは別管理。
+    /// 読み取りは `decodeIfPresent` なので、キーが無い旧 registry.json にも後方互換。
+    public var excludedProjects: [String] = []
 
     /// 既定は ON。メニューバー常駐が既定になったので、検知はアプリの主機能として動く。
     /// 許可（TCC）は最初に既知ブラウザが前面へ来たときに求め、拒否されたら OFF に戻す。
@@ -109,6 +112,7 @@ public struct Registry: Codable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case resources, repos, usage, projects, agents, browserDetection, menuBar, appearance
+        case excludedProjects
     }
 
     /// **欠けているキーは既定値で埋める。**
@@ -126,6 +130,7 @@ public struct Registry: Codable, Equatable, Sendable {
         browserDetection = try container.decodeIfPresent(Bool.self, forKey: .browserDetection)
         menuBar = try container.decodeIfPresent(Bool.self, forKey: .menuBar)
         appearance = try container.decodeIfPresent(String.self, forKey: .appearance)
+        excludedProjects = try container.decodeIfPresent([String].self, forKey: .excludedProjects) ?? []
     }
 
     public func setting(_ agent: Agent) -> AgentSetting { agents[agent.rawValue] ?? AgentSetting() }

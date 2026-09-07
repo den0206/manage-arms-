@@ -257,6 +257,13 @@
 "Codex CLIはこのHTTPヘッダを登録できません。先にCodex側で認証を設定してください。" = "Codex CLI cannot register these HTTP headers. Configure authentication in Codex first.";
 "MCPの起動コマンドを入力してください" = "Enter the MCP launch command.";
 "Cursorの設定を読み取れません。変更していません" = "Cursor configuration could not be read. Nothing was changed.";
+"走査中プロジェクト" = "Projects being scanned";
+"除外" = "Exclude";
+"除外したプロジェクト" = "Excluded projects";
+"復元" = "Restore";
+"走査から除いています。「復元」を押すと再び一覧に出ます。" = "These are excluded from scanning. Press “Restore” to include them again.";
+"走査しないプロジェクト登録" = "Project entries that are not scanned";
+"ここはプロジェクトとして扱いません。ホームフォルダやルートを1つのプロジェクトとして読むと、配下にある他の全プロジェクトのスキルを巻き込んでしまうためです。ほかのプロジェクトは通常どおり一覧に出ます。" = "These are not treated as projects. Reading your home folder or the filesystem root as a single project would pull in the skills of every project beneath it. Your other projects are listed as usual.";
 "CursorのmcpServersを読み取れません。変更していません" = "Cursor mcpServers could not be read. Nothing was changed.";
 "Pluginの一覧をCLIから読み取れません" = "The plugin list could not be read from the CLI.";
 "Pluginの識別子がありません" = "A plugin identifier is missing.";

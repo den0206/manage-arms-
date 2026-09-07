@@ -17,8 +17,17 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
   the repository, and it was used as a path component without checking, so a name containing
   `../` escaped the managed store. Names are now validated before anything is created.
 
+### Added
+
+- Settings lists every scanned project with an Exclude button; excluded projects are kept in
+  `registry.json` and come back with Restore.
+
 ### Fixed
 
+- Your home folder and the filesystem root are no longer treated as projects. Starting an agent
+  from your home directory once listed it as a project and pulled every other project's skills
+  into that one tab — 350 entries on the reported machine — leaving the tab blank and the app
+  unresponsive. Settings lists the entries that are skipped, so it is clear why they are missing.
 - Error messages now appear in English in the English interface. Messages raised while
   scanning, installing, updating, pinning and editing permissions were left untranslated, as
   were list details such as the "disabled (parked)" label and broken-link notes.

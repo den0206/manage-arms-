@@ -213,4 +213,78 @@ struct ManagementTests {
         try registry.save(env: env)
         #expect(ProjectScan.projectPaths(in: env) == registry.projects)
     }
+
+    /// ホームで `claude` を一度起動すると `~/.claude.json` にホーム自身が載る。
+    /// これをプロジェクトとして歩くと、他の全プロジェクトの `.claude/skills` が
+    /// 1 つの偽プロジェクトに吸い込まれる（実測 350 件・UI が固まる）。
+    @Test("ホーム自身とルートはプロジェクトとして扱わない")
+    func homeIsNotProject() throws {
+        let env = try fixture()
+        defer { try? FileManager.default.removeItem(at: env.home) }
+        let home = env.home.standardized.path(percentEncoded: false)
+        var registry = Registry()
+        registry.projects = [home, home + "/", "/", env.home.appending(path: "real").path]
+        try registry.save(env: env)
+        #expect(ProjectScan.projectPaths(in: env) == [env.home.appending(path: "real").path])
+    }
+
+    /// 落としたものは設定画面に出すので、捨てずに返す必要がある。
+    @Test("走査しない登録は無視せず持ち帰る")
+    func reportsIgnoredProjects() throws {
+        let env = try fixture()
+        defer { try? FileManager.default.removeItem(at: env.home) }
+        let home = env.home.standardized.path(percentEncoded: false)
+        var registry = Registry()
+        registry.projects = [home, "/", env.home.appending(path: "real").path]
+        try registry.save(env: env)
+        let scan = ProjectScan.load(env: env)
+        #expect(scan.projects == [env.home.appending(path: "real").path])
+        #expect(scan.ignoredProjects == ["/", home])
+    }
+
+    /// `excludedProjects` に入れたパスは走査されず `userIgnoredProjects` に出る。
+    @Test("ユーザーが除外したプロジェクトは走査しないが一覧に残る")
+    func userExcludedProjectIsSkipped() throws {
+        let env = try fixture()
+        defer { try? FileManager.default.removeItem(at: env.home) }
+        let realPath = env.home.appending(path: "real").path(percentEncoded: false)
+        let excludedPath = env.home.appending(path: "excluded").path(percentEncoded: false)
+        var registry = Registry()
+        registry.projects = [realPath, excludedPath]
+        registry.excludedProjects = [excludedPath]
+        try registry.save(env: env)
+        let scan = ProjectScan.load(env: env)
+        #expect(scan.projects == [realPath])
+        #expect(scan.userIgnoredProjects == [excludedPath])
+        #expect(scan.ignoredProjects.isEmpty)
+    }
+
+    /// `excludedProjects` が永続化→復元されること。
+    @Test("除外リストがregistryに正しく永続化される")
+    func excludedProjectsRoundTrip() throws {
+        let env = try fixture()
+        defer { try? FileManager.default.removeItem(at: env.home) }
+        let path = env.home.appending(path: "proj").path(percentEncoded: false)
+        var registry = Registry()
+        registry.excludedProjects = [path]
+        try registry.save(env: env)
+        let loaded = Registry.load(env: env)
+        #expect(loaded.excludedProjects == [path])
+    }
+
+    /// ホームは自動除外なので `excludedProjects` に入れても `autoIgnored` に分類される。
+    @Test("ホームはユーザー除外でなく自動除外に分類される")
+    func homeGoesToAutoIgnoredNotUserIgnored() throws {
+        let env = try fixture()
+        defer { try? FileManager.default.removeItem(at: env.home) }
+        let home = env.home.standardized.path(percentEncoded: false)
+        var registry = Registry()
+        registry.projects = [home]
+        registry.excludedProjects = [home]  // 万一ホームを除外リストに入れても安全か確認
+        try registry.save(env: env)
+        let scan = ProjectScan.load(env: env)
+        #expect(scan.projects.isEmpty)
+        #expect(scan.ignoredProjects == [home])
+        #expect(scan.userIgnoredProjects.isEmpty)
+    }
 }

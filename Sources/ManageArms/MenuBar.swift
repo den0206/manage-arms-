@@ -119,6 +119,38 @@ struct SettingsView: View {
             } header: {
                 Text("常駐")
             }
+            if !model.inventory.projectScan.projects.isEmpty {
+                Section {
+                    projectRows(model.inventory.projectScan.projects, button: "除外") {
+                        model.setProject($0, excluded: true)
+                    }
+                } header: {
+                    Text("走査中プロジェクト")
+                }
+            }
+            // 利用者が明示的に除外したもの。復元できる（自動除外と区別する）。
+            if !model.inventory.projectScan.userIgnoredProjects.isEmpty {
+                Section {
+                    projectRows(model.inventory.projectScan.userIgnoredProjects, button: "復元") {
+                        model.setProject($0, excluded: false)
+                    }
+                    Text("走査から除いています。「復元」を押すと再び一覧に出ます。")
+                        .font(.caption).foregroundStyle(.secondary)
+                } header: {
+                    Text("除外したプロジェクト")
+                }
+            }
+            // 走査しないと決めたものを黙って捨てない。**削除の導線は置かない**
+            // （理由と実測は DESIGN.md 5.1）。事実だけ出して判断は利用者に返す。
+            if !model.inventory.projectScan.ignoredProjects.isEmpty {
+                Section {
+                    projectRows(model.inventory.projectScan.ignoredProjects)
+                    Text("ここはプロジェクトとして扱いません。ホームフォルダやルートを1つのプロジェクトとして読むと、配下にある他の全プロジェクトのスキルを巻き込んでしまうためです。ほかのプロジェクトは通常どおり一覧に出ます。")
+                        .font(.caption).foregroundStyle(.secondary)
+                } header: {
+                    Label("走査しないプロジェクト登録", systemImage: "exclamationmark.triangle")
+                }
+            }
             Section {
                 Toggle("ブラウザで見つけたToolを知らせる",
                        isOn: .init(get: { model.detectsBrowserURLs },
@@ -131,4 +163,23 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
     }
+    /// パス 1 行 + 任意の操作ボタン。3 つの節で形が同じなのでここにまとめる。
+    @ViewBuilder
+    func projectRows(_ paths: [String], button: LocalizedStringKey? = nil,
+                     action: @escaping (String) -> Void = { _ in }) -> some View {
+        ForEach(paths, id: \.self) { path in
+            HStack {
+                Text(verbatim: path)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                if let button {
+                    Spacer()
+                    Button(button) { action(path) }
+                        .buttonStyle(.borderless)
+                        .font(.caption)
+                }
+            }
+        }
+    }
+
 }

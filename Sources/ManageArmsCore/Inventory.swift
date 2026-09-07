@@ -611,6 +611,12 @@ public struct Inventory: Sendable {
 public struct ProjectScan: Sendable {
     /// `~/.claude.json` と既存 registry から得た、信頼するプロジェクト一覧。
     public var projects: [String] = []
+    /// `projects` に載っているが走査しないもの（`isProject` が落とした分）。
+    /// 設定画面に出して「登録したのに一覧に出ない」を説明する。
+    public var ignoredProjects: [String] = []
+    /// 利用者が明示的に走査から除いたもの。自動除外（ホーム・ルート）とは別管理で、
+    /// 設定画面から復元できる。
+    public var userIgnoredProjects: [String] = []
     /// 種別 → 名前 → プロジェクトの絶対パス。
     var byKind: [Kind: [String: [String]]] = [:]
     /// プロジェクトにしか無いものの説明。一覧に出すために持つ。
@@ -628,13 +634,46 @@ public struct ProjectScan: Sendable {
     }
 
     static func projectPaths(in env: Environment, registry: Registry) -> [String] {
+        partitioned(in: env, registry: registry).used
+    }
+
+
+    /// 走査するものと、走査しないものに分ける。
+    ///
+    /// **落としたものを黙って捨てない。** 除外したことを設定画面に出さないと、
+    /// 利用者は「登録したのに一覧に出ない」を原因不明のまま抱えることになる。
+    ///
+    /// - `used`: 走査する
+    /// - `autoIgnored`: ホーム・ルートなど自動除外（復元不可）
+    /// - `userIgnored`: 利用者が明示的に除外（設定画面から復元可能）
+    static func partitioned(in env: Environment, registry: Registry)
+        -> (used: [String], autoIgnored: [String], userIgnored: [String])
+    {
         var paths = Set(registry.projects)
         if let data = try? Data(contentsOf: env.home.appending(path: ".claude.json")),
            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let projects = object["projects"] as? [String: Any] {
             paths.formUnion(projects.keys)
         }
-        return paths.sorted()
+        let home = env.home.standardized.path(percentEncoded: false)
+        let userExcluded = Set(registry.excludedProjects)
+        var split = (used: [String](), autoIgnored: [String](), userIgnored: [String]())
+        for path in paths.sorted() {
+            if !isProject(path, home: home) { split.autoIgnored.append(path) }
+            else if userExcluded.contains(path) { split.userIgnored.append(path) }
+            else { split.used.append(path) }
+        }
+        return split
+    }
+
+    /// プロジェクトとして走査してよいパスか。**純粋関数**（10.1）。
+    ///
+    /// **ホーム自身とルートはプロジェクトではない。** 信じると `skillRoots` が
+    /// ホーム配下を深さ 3 まで歩き、他の全プロジェクトの `.claude/skills` を
+    /// 1 つの偽プロジェクトに吸い込む（理由と実測は DESIGN.md 5.1）。
+    static func isProject(_ path: String, home: String) -> Bool {
+        let trimmed = path.hasSuffix("/") && path.count > 1 ? String(path.dropLast()) : path
+        return !trimmed.isEmpty && trimmed != "/" && trimmed != home
     }
 
     /// プロジェクト直下から 3 段までの `.claude/skills` だけを読む。
@@ -698,7 +737,10 @@ public struct ProjectScan: Sendable {
 
     static func load(env: Environment, registry: Registry) -> ProjectScan {
         var scan = ProjectScan()
-        scan.projects = projectPaths(in: env, registry: registry)
+        let split = partitioned(in: env, registry: registry)
+        scan.projects = split.used
+        scan.ignoredProjects = split.autoIgnored
+        scan.userIgnoredProjects = split.userIgnored
         let mcp = MCPScanner.byProject(projects: scan.projects, env: env)
         for path in scan.projects {
             let root = URL(filePath: path)
