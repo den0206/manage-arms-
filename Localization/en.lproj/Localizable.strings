@@ -190,7 +190,6 @@
 "最終スキャン: 未実行" = "Last scan: never";
 "持ち物の要約" = "What you have";
 "%lld 件" = "%lld items";
-"その他 (%lld)" = "More (%lld)";
 "更新が %lld 件あります" = "%lld updates available";
 
 /* Management workflow */
