@@ -47,6 +47,22 @@ public enum WriteGuard {
     ]
     static let deniedExtensions: Set<String> = ["sqlite", "sqlite-wal", "sqlite-shm"]
 
+    /// Config Inspector からの書き込みを許可する。第 3 の書き込み経路（ConfigWriter）。
+    ///
+    /// `assertMutable` の deniedNames リスト（settings.json / config.toml 等）とは
+    /// 独立した許可リスト方式。認証ファイル・MCPファイル・セッションログは通らない。
+    public static func assertConfigFile(_ url: URL) throws {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let allowed: Set<String> = [
+            home.appending(path: ".claude/settings.json").standardizedFileURL.path,
+            home.appending(path: ".codex/config.toml").standardizedFileURL.path,
+            home.appending(path: ".gemini/settings.json").standardizedFileURL.path,
+        ]
+        guard allowed.contains(url.standardizedFileURL.path) else {
+            throw Denial.deniedPath(url.path(percentEncoded: false))
+        }
+    }
+
     /// 取得物が名乗った名前を、そのままパス要素に使ってよいか。**純粋関数**（10.1）。
     ///
     /// **名前は取得先リポジトリの `SKILL.md` frontmatter 由来**で、こちらの管理下にない。

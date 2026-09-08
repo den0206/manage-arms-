@@ -102,6 +102,18 @@ extension Agent {
 }
 
 extension Agent {
+    /// Config Inspector で読み書きする設定ファイル（ホーム相対パス）。
+    /// 書き込みは ConfigWriter / WriteGuard.assertConfigFile を経由する（第 3 の書き込み経路）。
+    /// Cursor は mcp.json しか持たず、MCP タブで既出のため空にする。
+    public var configFiles: [(label: String, path: String)] {
+        switch self {
+        case .claude:  [("settings.json", ".claude/settings.json")]
+        case .cursor:  []
+        case .codex:   [("config.toml", ".codex/config.toml")]
+        case .gemini:  [("settings.json", ".gemini/settings.json")]
+        }
+    }
+
     /// MCP の読み取り元（DESIGN.md 3.1）。設定ファイルの直読みを優先し、
     /// Codex だけ設定が `config.toml` なので CLI の JSON を使う。
     /// **`.file` は `mcpServers` キーで読まれる**（`MCPScanner.scan`）。

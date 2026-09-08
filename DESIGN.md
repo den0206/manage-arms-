@@ -66,7 +66,6 @@ AI コーディングエージェント（Claude Code / Cursor / Codex / Gemini 
 `~/.claude.json` は **98 KB** あり、MCP 設定だけでなくプロジェクト履歴・
 オンボーディング状態・キャッシュが同居している。ここをアプリが読んで
 書き戻すと、Claude Code の実行中に競合して**ユーザーの全状態を破壊する**。
-`~/.codex/config.toml` も、素朴に読み書きするとコメントが消える。
 
 したがって:
 
@@ -79,6 +78,7 @@ AI コーディングエージェント（Claude Code / Cursor / Codex / Gemini 
 | Skill / Subagent 有効化 | 実体を配置 + `FileManager.createSymbolicLink`（3.2） |
 | Skill / Subagent 無効化 | 実体を退避ディレクトリへ移動 + symlink 削除（実体は消さない。3.2） |
 | 一覧読み取り | 列挙されたファイルの直読み + `<cli> mcp list --json` |
+| スカラー設定の読み書き（Config Inspector） | `ConfigWriter` が直接編集（後述） |
 
 **Cursor の `mcp.json` は JSONC** — `//` コメントを受け付ける（実測: コメントアウトされた
 Figma 設定が入っていた）。`JSONSerialization` はこれを拒否するので、素の parse に失敗したら
@@ -90,6 +90,20 @@ Figma 設定が入っていた）。`JSONSerialization` はこれを拒否する
 「読み取りに失敗した項目があります」の中身だった）。
 
 自前で設定ファイルを組み立てる箇所が消えるため、**一番壊れやすいコードが存在しなくなる**。
+
+**ConfigWriter — スカラー設定の直接編集（第 3 の書き込み経路）**
+
+`~/.claude/settings.json`・`~/.codex/config.toml`・`~/.gemini/settings.json` の
+スカラー値（文字列・bool）を Config Inspector タブから読み書きする。
+CLI がキー単位の書き込みコマンドを提供しないため、Cursor の `mcp.json` と同じ根拠で
+直接編集を選んだ（`WriteGuard.assertConfigFile` で 3 パスに限定）。
+
+- **JSON**: `JSONSerialization` で読んで書き直す。キーはアルファベット順に揃う
+- **TOML**: ライン単位で差し替え・挿入・削除する。コメント行はそのまま保持される。
+  セクション（`[section]`）内のキーは `section.key` 形式で扱う。
+  動的セクション（`[projects."/path"]` 等）はスキップ
+- **競合検出**: 書き込み直前にファイルを再読し、ロード時と一致しなければ中断
+- **アトミック書き込み**: `Data.write(to:options:.atomic)`
 
 ### 3.2 実体は `~/.agents/skills/` に置き、symlink は Claude 用の 1 本だけ
 
@@ -1611,6 +1625,7 @@ npm: chrome-devtools-mcp@latest → @1.8.0 に固定
   この 1 機能のためだけに抱えていた
 
 撤去して不変条件が 2 つ単純になった（書き込みは 2 か所、削除・移動の許可は 2 つ）。
+（現在は Config Inspector の追加で書き込みは 3 か所。3.1 参照。）
 掃除が要るなら Claude Code の `/permissions` で足りる。
 
 ### v5 — 画面の作り直しと削除（実装済み）

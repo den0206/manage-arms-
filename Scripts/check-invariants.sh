@@ -15,17 +15,20 @@ status=0
 fail() { echo "::error::$1"; shift; printf '%s\n' "$@"; status=1; }
 
 # --- 1. ファイル書き込みの限定（DESIGN.md 3.1 / 9 章）--------------------------
-# 設定ファイルの書き戻しは 2 か所だけ。ここが増えると、CLI に委譲するという
-# 中核の設計判断（3.1）が崩れ、実行中の Claude と競合してユーザーの全状態を壊しうる。
-#   Registry   … アプリ自身の registry.json
-#   MCPScanner … ~/.cursor/mcp.json（CLI が無いため直接編集する。3.1）
+# 設定ファイルの書き戻しは 3 か所だけ。ここが増えると、実行中の Claude と競合して
+# ユーザーの全状態を壊しうる。
+#   Registry     … アプリ自身の registry.json
+#   MCPScanner   … ~/.cursor/mcp.json（CLI が無いため直接編集する。3.1）
+#   ConfigWriter … ~/.claude/settings.json 等のスカラー値を直接編集する設定エディタ。
+#                  CLI が個別キーを書き込むコマンドを提供しないため直接書く（MCPScanner
+#                  と同じ根拠）。WriteGuard.assertConfigFile で 3 パスに限定済み。
 LEAKS=$(grep -rnE '\.write\(to:|write\(toFile:|createFile\(' Sources/ --include='*.swift' \
-        | grep -vE '/(Registry|MCPScanner)\.swift:' \
+        | grep -vE '/(Registry|MCPScanner|ConfigWriter)\.swift:' \
         | grep -vE ':[0-9]+:[[:space:]]*//')
 if [ -n "$LEAKS" ]; then
-    fail "ファイル書き込みが Registry / MCPScanner の外に漏れています（DESIGN.md 3.1 / 9 章）" "$LEAKS"
+    fail "ファイル書き込みが Registry / MCPScanner / ConfigWriter の外に漏れています（DESIGN.md 3.1 / 9 章）" "$LEAKS"
 else
-    echo "✓ ファイル書き込みは 2 か所に限定されています"
+    echo "✓ ファイル書き込みは 3 か所に限定されています"
 fi
 
 # --- 2. 削除・移動の限定（DESIGN.md 9 章）------------------------------------

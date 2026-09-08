@@ -744,7 +744,7 @@ struct AgentPage: View {
                 } description: {
                     Text("インストールするか、ホームで CLI のパスを指定すると、ここに持っているスキルが並びます。")
                 }
-            } else if rows.isEmpty {
+            } else if rows.isEmpty && agent.configFiles.isEmpty {
                 ContentUnavailableView {
                     Label("まだ何も入っていません", systemImage: "shippingbox")
                 } description: {
@@ -767,33 +767,37 @@ struct AgentPage: View {
         let current = visibleTabs.contains(tab) ? tab : .user
         return VStack(alignment: .leading, spacing: 0) {
             ScopeTabs(items: items, selection: $tab)
-            HStack(spacing: 10) {
-                Text(note(for: current)).foregroundStyle(.secondary)
-                if case .project(let path) = current {
-                    Button {
-                        NSWorkspace.shared.open(URL(filePath: path))
-                    } label: {
-                        Label("Finder で開く", systemImage: "arrow.up.forward.app")
-                    }
-                    .buttonStyle(.link)
-                    .help(path)
-                    let rows = rows(for: current, in: scoped)
-                    if !rows.isEmpty {
-                        Button("このプロジェクトの \(rows.count) 件を削除…") {
-                            model.cleanup = model.inventory
-                                .cleanupItems(rows, agent: agent, project: path)
+            if current == .config {
+                AgentConfigView(agent: agent)
+            } else {
+                HStack(spacing: 10) {
+                    Text(note(for: current)).foregroundStyle(.secondary)
+                    if case .project(let path) = current {
+                        Button {
+                            NSWorkspace.shared.open(URL(filePath: path))
+                        } label: {
+                            Label("Finder で開く", systemImage: "arrow.up.forward.app")
                         }
                         .buttonStyle(.link)
+                        .help(path)
+                        let rows = rows(for: current, in: scoped)
+                        if !rows.isEmpty {
+                            Button("このプロジェクトの \(rows.count) 件を削除…") {
+                                model.cleanup = model.inventory
+                                    .cleanupItems(rows, agent: agent, project: path)
+                            }
+                            .buttonStyle(.link)
+                        }
                     }
+                    Spacer()
                 }
-                Spacer()
+                .font(.caption)
+                .padding(.horizontal, 16).padding(.bottom, 10)
+                Divider()
+                table(rows(for: current, in: scoped), tab: current)
+                    .id(current)
+                    .transition(.opacity)
             }
-            .font(.caption)
-            .padding(.horizontal, 16).padding(.bottom, 10)
-            Divider()
-            table(rows(for: current, in: scoped), tab: current)
-                .id(current)
-                .transition(.opacity)
         }
         .animation(Motion.gentle, value: current)
     }
@@ -858,6 +862,13 @@ struct AgentPage: View {
                                       icon: "shippingbox", count: scoped.bundled.count,
                                       help: nil))
         }
+        if !agent.configFiles.isEmpty {
+            items.append(ScopeTabItem(tab: .config,
+                                      title: String(localized: "設定ファイル"),
+                                      icon: "gearshape",
+                                      count: agent.configFiles.count,
+                                      help: nil))
+        }
         return items
     }
 
@@ -866,6 +877,7 @@ struct AgentPage: View {
         case .user:              scoped.user
         case .bundled:           scoped.bundled
         case .project(let path): scoped.byProject.first { $0.path == path }?.rows ?? []
+        case .config:            []
         }
     }
 
@@ -877,6 +889,8 @@ struct AgentPage: View {
             String(localized: "このプロジェクトの中でだけ効きます。ユーザー全体にも同じものがあれば、こちら側は消せます。")
         case .bundled:
             String(localized: "エージェントに同梱されているため、manage-arms からは変更できません。")
+        case .config:
+            ""
         }
     }
 
@@ -889,6 +903,7 @@ struct AgentPage: View {
         case .user:    .userWide
         case .project: .project
         case .bundled: .bundled
+        case .config:  .userWide
         }
     }
 }
@@ -920,6 +935,7 @@ enum ScopeTab: Hashable {
     case user
     case project(String)
     case bundled
+    case config
 }
 
 struct ScopeTabItem: Identifiable {
@@ -1293,6 +1309,344 @@ struct ScopeNote: View {
                 .font(.caption2).foregroundStyle(.orange)
         default:
             EmptyView()
+        }
+    }
+}
+
+// MARK: - 設定ファイル Inspector（汎用 Key-Value エディタ）
+
+/// 各エージェントの設定ファイルを汎用的に読み書きするビュー。
+/// 現在設定されているスカラー値を全表示し、追加・編集・削除ができる。
+/// 書き込みは ConfigWriter（WriteGuard の第 3 の書き込み経路）を使う。
+/// タブを離れたらメモリから解放する（DESIGN.md 3.5）。
+struct AgentConfigView: View {
+    let agent: Agent
+
+    struct Entry: Identifiable {
+        var id: String { key }
+        let key: String
+        let value: ConfigWriter.Value
+    }
+
+    struct FileState: Identifiable {
+        let id: Int
+        let url: URL
+        let format: ConfigWriter.Format
+        var rawData: Data?
+        var entries: [Entry] = []
+    }
+
+    @State private var fileStates: [FileState] = []
+    @State private var pendingText: [String: String] = [:]
+    @State private var writeError: String?
+    @State private var confirmDeleteKey: String?
+    @State private var confirmDeleteFileIndex: Int?
+    @State private var showAdd: [Int: Bool] = [:]
+    @State private var addKey: String = ""
+    @State private var addValueIsString: Bool = true
+    @State private var addValueString: String = ""
+    @State private var addValueBool: Bool = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.block) {
+                if let err = writeError {
+                    Label(err, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.callout)
+                        .padding(.horizontal, 20)
+                }
+                ForEach(fileStates) { state in
+                    fileSection(state)
+                }
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .onAppear { load() }
+        .onDisappear {
+            fileStates = []
+            pendingText = [:]
+            showAdd = [:]
+        }
+        .confirmationDialog(
+            "「\(confirmDeleteKey ?? "")」を削除しますか？",
+            isPresented: Binding(
+                get: { confirmDeleteKey != nil },
+                set: { if !$0 { confirmDeleteKey = nil; confirmDeleteFileIndex = nil } }
+            )
+        ) {
+            Button("削除", role: .destructive) {
+                if let key = confirmDeleteKey, let fi = confirmDeleteFileIndex {
+                    deleteValue(key: key, fileIndex: fi)
+                }
+                confirmDeleteKey = nil
+                confirmDeleteFileIndex = nil
+            }
+            Button("キャンセル", role: .cancel) {}
+        }
+    }
+
+    // MARK: - ファイル 1 つ分のセクション
+
+    private func fileSection(_ state: FileState) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "doc.plaintext")
+                Text(verbatim: state.url.path(percentEncoded: false))
+                    .textSelection(.enabled)
+                Spacer(minLength: 8)
+                Button {
+                    NSWorkspace.shared.open(state.url)
+                } label: {
+                    Label("エディタで開く", systemImage: "arrow.up.forward.app")
+                }
+                .buttonStyle(.link)
+            }
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+
+            if state.rawData != nil {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(state.entries.enumerated()), id: \.element.id) { idx, entry in
+                        if idx > 0 { Divider() }
+                        entryRow(entry: entry, state: state)
+                    }
+                    if state.entries.isEmpty {
+                        Text("設定値がありません")
+                            .font(.callout).foregroundStyle(.tertiary)
+                            .padding(12)
+                    }
+                    Divider()
+                    addSection(state: state)
+                }
+                .background(.background.tertiary,
+                            in: RoundedRectangle(cornerRadius: Theme.radiusS))
+            } else {
+                Label("設定ファイルがありません", systemImage: "doc.badge.questionmark")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .padding(10)
+            }
+        }
+    }
+
+    // MARK: - 1 エントリ行
+
+    @ViewBuilder
+    private func entryRow(entry: Entry, state: FileState) -> some View {
+        let pickerOptions = agent.configPickerHints[entry.key]
+        HStack(spacing: 10) {
+            Text(verbatim: entry.key)
+                .font(.system(.callout, design: .monospaced))
+                .textSelection(.enabled)
+                .foregroundStyle(.primary)
+            Spacer()
+            valueControl(entry: entry, pickerOptions: pickerOptions, state: state)
+            Button(role: .destructive) {
+                confirmDeleteKey = entry.key
+                confirmDeleteFileIndex = state.id
+            } label: {
+                Image(systemName: "trash")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("削除")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
+    @ViewBuilder
+    private func valueControl(
+        entry: Entry, pickerOptions: [String]?, state: FileState
+    ) -> some View {
+        let key = entry.key
+        switch entry.value {
+        case .bool:
+            Toggle("", isOn: Binding(
+                get: {
+                    if let s = fileStates.first(where: { $0.id == state.id })?
+                        .entries.first(where: { $0.key == key })?.value,
+                       case .bool(let b) = s { return b }
+                    return false
+                },
+                set: { writeValue(.bool($0), key: key, fileIndex: state.id) }
+            ))
+            .labelsHidden()
+
+        case .string(let current):
+            if let options = pickerOptions {
+                Picker("", selection: Binding(
+                    get: {
+                        fileStates.first(where: { $0.id == state.id })?
+                            .entries.first(where: { $0.key == key })
+                            .flatMap { if case .string(let s) = $0.value { return s } else { return nil } }
+                            ?? current
+                    },
+                    set: { writeValue(.string($0), key: key, fileIndex: state.id) }
+                )) {
+                    ForEach(options, id: \.self) { Text(verbatim: $0).tag($0) }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .fixedSize()
+            } else {
+                TextField("", text: Binding(
+                    get: { pendingText[key] ?? current },
+                    set: { pendingText[key] = $0 }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .frame(minWidth: 120, maxWidth: 280)
+                .onSubmit {
+                    if let text = pendingText[key] {
+                        writeValue(.string(text), key: key, fileIndex: state.id)
+                        pendingText.removeValue(forKey: key)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - 追加フォーム
+
+    private func addSection(state: FileState) -> some View {
+        let isOpen = showAdd[state.id] == true
+        return Group {
+            if isOpen {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        let keyPlaceholder = state.format == .json
+                            ? String(localized: "キー (例: myKey, parent.key)")
+                            : String(localized: "キー (例: myKey)")
+                        TextField(keyPlaceholder, text: $addKey)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 220)
+                        Picker("型", selection: $addValueIsString) {
+                            Text("文字列").tag(true)
+                            Text(verbatim: "true / false").tag(false)
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 140)
+                    }
+                    HStack(spacing: 8) {
+                        if addValueIsString {
+                            TextField("値", text: $addValueString)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(maxWidth: 260)
+                        } else {
+                            Toggle(addValueBool ? "true" : "false", isOn: $addValueBool)
+                                .toggleStyle(.switch)
+                                .frame(maxWidth: 100, alignment: .leading)
+                        }
+                        Spacer()
+                        Button("キャンセル") { resetAdd(fileIndex: state.id) }
+                        Button("追加") { submitAdd(fileIndex: state.id, state: state) }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(addKey.isEmpty || tomlKeyError(for: state) != nil)
+                    }
+                    if let err = tomlKeyError(for: state) {
+                        Text(err)
+                            .font(.caption2).foregroundStyle(.orange)
+                    }
+                }
+                .padding(12)
+            } else {
+                Button {
+                    resetAdd(fileIndex: state.id)
+                    showAdd[state.id] = true
+                } label: {
+                    Label("設定を追加", systemImage: "plus.circle")
+                        .font(.callout)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+                .padding(12)
+            }
+        }
+    }
+
+    // MARK: - バリデーション
+
+    /// TOML キー形式のエラーメッセージ。nil なら問題なし。
+    /// 許容: "key"（top-level）/ "section.key"（ドット 1 つ）。
+    /// 拒否: ドット 2 つ以上、空セグメント。
+    private func tomlKeyError(for state: FileState) -> String? {
+        guard state.format == .toml, !addKey.isEmpty else { return nil }
+        let parts = addKey.components(separatedBy: ".")
+        if parts.count > 2 {
+            return String(localized: "TOML キーは key または section.key の形式で入力してください")
+        }
+        if parts.contains(where: { $0.isEmpty }) {
+            return String(localized: "TOML キーは key または section.key の形式で入力してください")
+        }
+        return nil
+    }
+
+    // MARK: - 操作
+
+    private func writeValue(_ value: ConfigWriter.Value, key: String, fileIndex: Int) {
+        guard let state = fileStates.first(where: { $0.id == fileIndex }),
+              let rawData = state.rawData else { return }
+        do {
+            try ConfigWriter.write(key: key, value: value,
+                                   to: state.url, format: state.format,
+                                   originalData: rawData)
+            writeError = nil
+            load()
+        } catch ConfigWriter.Failure.concurrentModification {
+            writeError = String(localized: "別のプロセスが設定を変更したため保存できませんでした。再読み込みしてください。")
+            load()
+        } catch {
+            writeError = error.localizedDescription
+        }
+    }
+
+    private func deleteValue(key: String, fileIndex: Int) {
+        guard let state = fileStates.first(where: { $0.id == fileIndex }),
+              let rawData = state.rawData else { return }
+        do {
+            try ConfigWriter.delete(key: key, from: state.url,
+                                    format: state.format, originalData: rawData)
+            writeError = nil
+            load()
+        } catch ConfigWriter.Failure.concurrentModification {
+            writeError = String(localized: "別のプロセスが設定を変更したため保存できませんでした。再読み込みしてください。")
+            load()
+        } catch {
+            writeError = error.localizedDescription
+        }
+    }
+
+    private func submitAdd(fileIndex: Int, state: FileState) {
+        let value: ConfigWriter.Value = addValueIsString
+            ? .string(addValueString)
+            : .bool(addValueBool)
+        writeValue(value, key: addKey, fileIndex: fileIndex)
+        resetAdd(fileIndex: fileIndex)
+    }
+
+    private func resetAdd(fileIndex: Int) {
+        showAdd[fileIndex] = false
+        addKey = ""
+        addValueString = ""
+        addValueBool = false
+        addValueIsString = true
+    }
+
+    private func load() {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        fileStates = agent.configFiles.enumerated().map { (i, item) in
+            let url = home.appending(path: item.path)
+            let format: ConfigWriter.Format = item.path.hasSuffix(".toml") ? .toml : .json
+            if let result = try? ConfigWriter.read(from: url, format: format) {
+                return FileState(id: i, url: url, format: format,
+                                 rawData: result.raw,
+                                 entries: result.entries.map { Entry(key: $0.key, value: $0.value) })
+            }
+            return FileState(id: i, url: url, format: format)
         }
     }
 }

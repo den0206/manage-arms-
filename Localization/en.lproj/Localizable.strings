@@ -102,6 +102,21 @@
 "同梱" = "Bundled";
 "このプロジェクトの中でだけ効きます。ユーザー全体にも同じものがあれば、こちら側は消せます。" = "These only apply inside this project. If the same thing is installed for all projects, this copy can go.";
 "Finder で開く" = "Open in Finder";
+"エディタで開く" = "Open in Editor";
+"設定ファイル" = "Config";
+"設定ファイルがありません" = "No config file found";
+"別のプロセスが設定を変更したため保存できませんでした。再読み込みしてください。" = "The config file was modified by another process and could not be saved. Please reload.";
+
+/* ConfigWriter (generic key-value editor) */
+"設定値がありません" = "No settings configured";
+"キー (例: myKey, parent.key)" = "Key (e.g. myKey, parent.key)";
+"キー (例: myKey)" = "Key (e.g. myKey)";
+"型" = "Type";
+"文字列" = "String";
+"値" = "Value";
+"TOML キーは key または section.key の形式で入力してください" = "TOML key must be key or section.key (max one dot)";
+"設定を追加" = "Add Setting";
+
 "このアプリで管理" = "Manage in this app";
 "registry に登録して、切り替えと削除ができるようにします。ファイルは動かしません" = "Records it so this app can enable, disable and delete it. No files are moved.";
 "実体を ~/%@ から ~/.agents/skills へ移すと、このアプリで切り替え・削除できるようになります（移動は手で行ってください）。" = "Move the files from ~/%@ to ~/.agents/skills and this app can enable, disable and delete it (move them yourself).";

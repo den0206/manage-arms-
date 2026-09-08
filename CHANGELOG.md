@@ -21,6 +21,10 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 - When you paste an MCP server's JSON into the Add sheet, a "Generated command" panel appears
   with the exact `claude mcp add-json <name> '…'` line and a Copy button, so the flow no
   longer dead-ends. The name is inline-editable and defaults to the JSON's top-level key.
+- The agent detail page now has a "Config" tab that lists every scalar setting in the agent's
+  config file (JSON or TOML). Values can be edited or deleted inline, and new top-level keys
+  can be added. Writes are atomic, comments in TOML files are preserved, and a save aborts
+  automatically if another process has modified the file since it was loaded.
 
 ### Changed
 
