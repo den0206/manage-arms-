@@ -216,6 +216,19 @@
 "MCP設定JSON / HTTPS接続先 / 起動コマンド" = "MCP configuration JSON / HTTPS endpoint / command";
 "GitHubのURL" = "GitHub URL";
 "読み取りに失敗した項目があります" = "Some items could not be read";
+
+/* Add-sheet additions (v2.7) */
+"検証中…" = "Validating…";
+"プレビュー" = "Preview";
+"これは MCP の設定です。「MCP接続」タブに切り替えてください。" = "This looks like an MCP configuration. Switch to the “MCP connection” tab.";
+"これは起動コマンドです。「MCP接続」タブに切り替えてください。" = "This looks like a launch command. Switch to the “MCP connection” tab.";
+"GitHub の URL として解釈できませんでした。" = "Could not read this as a GitHub URL.";
+"GitHubのURLを貼り付けて「追加」を押してください。" = "Paste a GitHub URL and press Add.";
+"選択したエージェントの全プロジェクトに効きます。" = "Applies to every project of the selected agent.";
+"生成コマンド" = "Generated command";
+"`~/.claude.json` は Claude Code が使うので、アプリからは書きません。以下をコピーして実行してください。" = "Claude Code owns `~/.claude.json`, so the app does not write to it. Copy the command below and run it.";
+"接続名" = "Name";
+"✓ コピーしました" = "✓ Copied";
 "メンテナンス" = "Maintenance";
 "起動状態はウィンドウ表示中に3秒ごとに確認します。Tool呼び出し中を示すものではありません。" = "Process status is checked every 3 seconds while a window is visible. It does not indicate an active tool call.";
 "スキル・MCP・Pluginを追加します" = "Add skills, MCP connections, and plugins.";
