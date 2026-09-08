@@ -103,6 +103,13 @@ final class AppModel {
     var incomingLead: ToolLead?
     /// メニューバー・⌘, から開きたい画面。ContentView が拾って切り替える。
     var pendingScreen: Screen?
+    /// ホームの「未処理の更新」から Agent 画面へジャンプするための橋渡し。
+    /// 表示更新を経由するので、ContentView は `.task(id:)` で拾ってから消す。
+    /// 常駐中に抱えないので `releaseForBackground` で捨てる。
+    var pendingScrollTarget: PulseTarget?
+    /// スクロール先の行を短時間だけ強調するためのターゲット。
+    /// 更新の適用直後にも同じ経路で使う（DESIGN.md 8 章の「押した結果が分かる」）。
+    var pulseTarget: PulseTarget?
 
     init() {
         let registry = Registry.load(env: .live)
@@ -159,8 +166,24 @@ final class AppModel {
         previewGeneration = UUID()
         inventory = .empty
         cleanup = nil
+        // ジャンプの橋渡しも捨てる。閉じている間に外から状態を書き込ませない。
+        pendingScrollTarget = nil
+        pulseTarget = nil
         discardPreview()
         CLIScan.clear()          // CLI の結果も持ち越さない（3.5 の例外を閉じる）
+    }
+
+    /// 更新差分の適用に成功したときに、行を短時間だけ強調する。
+    /// 「動きを減らす」設定は行の色だけの静的な変化に落とす（Motion.reduced）。
+    func flashPulse(agent: Agent?, kind: Kind, name: String) {
+        let target = PulseTarget(agent: agent, kind: kind, name: name)
+        pulseTarget = target
+        let duration: TimeInterval = Motion.reduced ? 1.0 : 1.2
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(duration))
+            guard let self, self.pulseTarget == target else { return }
+            self.pulseTarget = nil
+        }
     }
 
     /// ファイル走査はキャッシュしない（DESIGN.md 3.5）。毎回読み直す。
@@ -303,6 +326,8 @@ final class AppModel {
     func applyPreview() {
         guard let preview, !isMutating else { return }
         isMutating = true
+        let appliedName = preview.name
+        let appliedKind = preview.candidate.kind
         Task {
             let failure = await Task.detached { () -> String? in
                 do {
@@ -311,7 +336,13 @@ final class AppModel {
                     return nil
                 } catch { return "\(error)" }
             }.value
-            if let failure { errorMessage = failure } else { self.preview = nil }
+            if let failure {
+                errorMessage = failure
+            } else {
+                self.preview = nil
+                // 成功したら該当行を短時間強調する（DESIGN.md 8 章：押した結果が分かる）。
+                flashPulse(agent: nil, kind: appliedKind, name: appliedName)
+            }
             isMutating = false
             reloadIfVisible(forceCLI: true)
         }
@@ -491,5 +522,23 @@ final class AppModel {
 
     private nonisolated static func loadOffMain(forceCLI: Bool) async -> Inventory {
         await Task.detached { Inventory.load(env: .live, forceCLI: forceCLI) }.value
+    }
+}
+
+/// 「更新の適用直後にどこを光らせるか」「ホームから飛ばした先のどこへ寄せるか」を
+/// 1 つの値にまとめる。ownerAgent が付く行（MCP / Plugin）は agent も含めて一意にし、
+/// Skill / Subagent は agent を持たない。
+///
+/// **常駐中に抱えない。** ウィンドウを閉じたら `releaseForBackground` が捨てる。
+struct PulseTarget: Equatable, Hashable {
+    let agent: Agent?
+    let kind: Kind
+    let name: String
+
+    /// ResourceRow の id と付き合わせる。agent は行に無ければ照合しない。
+    func matches(_ row: ResourceRow) -> Bool {
+        guard row.name == name, row.kind == kind else { return false }
+        if let agent, let owner = row.ownerAgent, owner != agent { return false }
+        return true
     }
 }

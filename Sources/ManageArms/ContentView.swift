@@ -775,6 +775,9 @@ struct ScopeTabs: View {
 /// リソース 1 件。**操作できるのは registry.json に載っているものだけ**（DESIGN.md 9 章）。
 /// 操作できないものも同じ行の形で出し、代わりに「どこで管理されているか」を書く —
 /// **消せないことと、消し方が分からないことを、同じ見た目にしない。**
+///
+/// v2.7 で 2 行構成に詰めた（1 行目 = 名前 + 状態 Pill / 2 行目 = 補足 Pill 群）。
+/// **⋯ は常時表示**（ホバーで出す方式は「押せることが見えない」の最悪型）。
 struct ResourceRowView: View {
     let row: ResourceRow
     /// どのエージェントの画面か。**削除の案内は CLI ごとに違う**ので必要。
@@ -789,53 +792,36 @@ struct ResourceRowView: View {
     @State private var confirmExisting = false
     @State private var removalFile: URL?
     @State private var hovering = false
+    @State private var pulsing = false
+
+    /// このアプリの更新適用直後などに強調される行か。
+    private var isPulseTarget: Bool { model.pulseTarget?.matches(row) == true }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .center, spacing: 10) {
             // 行の頭に固定幅の目印を置く。**どこで 1 件が始まるのか**が分からないと、
             // 説明文まで含めた塊が 1 枚の壁に見える。
             KindIcon(kind: row.kind)
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 2) {
+                // 1 行目 — 名前 + 状態 Pill。**無効行はタイトルを .secondary に落とす**
+                // （全体を半透明にすると、ホバーの当たり判定まで薄く見える）。
                 HStack(spacing: 6) {
-                    Text(row.name).font(.body.weight(.semibold))
-                    if row.isDisabled { Pill(text: String(localized: "無効")) }
-                    // 事故（リンク切れ等）は無効化と別物として見せる。
-                    if row.isUnusable {
-                        Label("読み込めません", systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption2).foregroundStyle(.orange)
+                    Text(row.name)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(row.isDisabled ? AnyShapeStyle(.secondary)
+                                                        : AnyShapeStyle(.primary))
+                    if row.isDisabled {
+                        Pill(text: String(localized: "無効"))
                     }
-                }
-                if let summary = row.summary {
-                    Text(summary).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                }
-                // 補足はできるだけ 1 行に畳む。1 件が 5 行になると、
-                // 行の切れ目が説明文に埋もれる。
-                HStack(spacing: 10) {
-                    UsageLabel(row: row, scannedAt: scannedAt)
-                    UpdateLabel(row: row, model: model)
-                    // リンク切れは置き場を、CLI 管理のものは管理元を出す。
-                    if let note = row.isUnusable ? row.detail : managedBy {
-                        Text(note).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
-                            .textSelection(.enabled)
+                    if row.origin == .bundled {
+                        Pill(text: String(localized: "同梱"))
                     }
-                    // 容量は数字だけ（翻訳対象ではない）。実体を持たないものは出ない。
-                    if let size = row.sizeText {
-                        Text(verbatim: size).font(.caption2).foregroundStyle(.tertiary)
-                    }
+                    Spacer(minLength: 0)
                 }
-                HStack(spacing: 8) {
-                    ScopeNote(reach: row.reach, context: context)
-                    if context == .userWide, case .both(let paths) = row.reach {
-                        Button("プロジェクト側 \(paths.count) 件を削除…") {
-                            model.cleanup = paths.flatMap {
-                                model.inventory.cleanupItems([row], agent: agent, project: $0)
-                            }
-                        }
-                        .buttonStyle(.link).font(.caption2)
-                    }
-                }
+                // 2 行目 — 補足 Pill 群。順序を DESIGN で固定してあるので混ぜない:
+                // 更新 → 失敗 → 使用 → managedBy → サイズ。
+                subInfoLine
             }
-            Spacer(minLength: 8)
             controls
                 .disabled(model.isMutating || model.isPinning || model.isChecking || model.isAnalyzing)
         }
@@ -853,14 +839,102 @@ struct ResourceRowView: View {
                 Text("\(agent.displayName) / \(project ?? String(localized: "ユーザー全体")) の登録を削除します。必要な場合は再追加してください。")
             }
         }
-        .padding(.vertical, 7)
+        .padding(.vertical, 6)
         .padding(.horizontal, 6)
-        .background(hovering ? AnyShapeStyle(.quaternary.opacity(0.5)) : AnyShapeStyle(.clear),
-                    in: RoundedRectangle(cornerRadius: Theme.radiusS))
+        .frame(minHeight: 40)
+        .background(rowBackground, in: RoundedRectangle(cornerRadius: Theme.radiusS))
         .animation(Motion.gentle, value: hovering)
+        .animation(Motion.gentle, value: pulsing)
         .onHover { hovering = $0 }
-        .opacity(row.isDisabled ? 0.6 : 1)
-        .animation(Motion.gentle, value: row.isDisabled)
+        .onChange(of: isPulseTarget) { _, active in
+            if active { triggerPulse() }
+        }
+        .task(id: row.id) {
+            // 一覧が再読み込みされた後で、新しい行が pulseTarget と一致することがある。
+            if isPulseTarget { triggerPulse() }
+        }
+        .id(row.id)
+    }
+
+    /// 2 行目に並ぶ補足の Pill 群。順序は DESIGN で固定した:
+    /// 更新 → 失敗 → 使用 → managedBy → サイズ。
+    ///
+    /// ここに置かない情報:
+    /// - `summary`（説明文） — 2 行に収める都合で、詳細を開かないと出さない。
+    /// - `both` の警告 — 別行として下に出す（**Pill が 6 個並ぶと目が滑る**）。
+    @ViewBuilder
+    private var subInfoLine: some View {
+        HStack(spacing: 8) {
+            // 更新（クリック可能ではない。差分は ⋯ から）
+            updatePill
+            // 失敗（読み取れないもの）
+            if row.isUnusable {
+                Pill(text: String(localized: "読み込めません"),
+                     tint: .orange, icon: "exclamationmark.triangle.fill")
+                    .help(row.detail)
+            }
+            // 使用（既存の UsageLabel をそのまま流用）
+            UsageLabel(row: row, scannedAt: scannedAt)
+            // managedBy
+            if let note = managedBy {
+                Text(note).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                    .textSelection(.enabled)
+            }
+            // サイズ（数字は verbatim。翻訳対象ではない）
+            if let size = row.sizeText {
+                Text(verbatim: size).font(.caption2).foregroundStyle(.tertiary)
+            }
+            // 散らかりの注記。**指摘の 1 行だけ橙にする** — 5.2 の原則。
+            ScopeNote(reach: row.reach, context: context)
+            if context == .userWide, case .both(let paths) = row.reach {
+                Button("プロジェクト側 \(paths.count) 件を削除…") {
+                    model.cleanup = paths.flatMap {
+                        model.inventory.cleanupItems([row], agent: agent, project: $0)
+                    }
+                }
+                .buttonStyle(.link).font(.caption2)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// 更新 Pill。**差分を見る導線は ⋯ メニュー**に一本化する — 行の中に link を混ぜると、
+    /// タイトル・link・Toggle・⋯ の 4 種類のクリック標的が縦に並んで押し間違える。
+    @ViewBuilder
+    private var updatePill: some View {
+        switch row.update {
+        case .available:
+            Pill(text: String(localized: "更新あり"), tint: .orange,
+                 icon: "arrow.triangle.2.circlepath")
+        case .pinned(let behind):
+            Pill(text: behind ? String(localized: "固定中（更新あり）")
+                              : String(localized: "固定中"),
+                 tint: behind ? .orange : nil, icon: "pin.fill")
+        case .upToDate, .unknown, .unmanaged:
+            EmptyView()
+        }
+    }
+
+    /// 行の下敷き。**強調は 1 種類ずつ** — pulse とホバーが同時に来たら pulse を優先する。
+    private var rowBackground: AnyShapeStyle {
+        if pulsing {
+            return AnyShapeStyle(Color.accentColor.opacity(0.28))
+        }
+        if hovering {
+            return AnyShapeStyle(.quaternary.opacity(0.5))
+        }
+        return AnyShapeStyle(.clear)
+    }
+
+    /// 短時間だけ地色を差し色にする。**「動きを減らす」設定は色だけの静的変化**に落とす
+    /// （Motion.reduced）。
+    private func triggerPulse() {
+        pulsing = true
+        let duration: TimeInterval = Motion.reduced ? 1.0 : 1.2
+        Task {
+            try? await Task.sleep(for: .seconds(duration))
+            pulsing = false
+        }
     }
 
     /// **「他ツールが入れた」で片付けない。** ユーザーが入れたものは
@@ -889,35 +963,91 @@ struct ResourceRowView: View {
         row.removableFiles(agent: agent, project: project, env: .live)
     }
 
+    /// **Toggle と ⋯ の 2 つだけ**（DESIGN.md 8 章の再設計）。ホバーで出さない。
+    /// - bundled: どちらも出さない（`Pill("同梱")` が Line 1 に付いている）
+    /// - registry 管理 & ユーザー全体: Toggle + ⋯
+    /// - それ以外: ⋯ のみ
     @ViewBuilder
     private var controls: some View {
         if row.origin == .bundled {
-            Label("同梱・変更不可", systemImage: "lock.fill").font(.caption).foregroundStyle(.secondary)
-        } else if row.isManaged && project == nil {
-            VStack(alignment: .trailing, spacing: 6) {
-                Toggle("共有先すべてで有効", isOn: .init(get: { !row.isDisabled }, set: { _ in model.toggle(row) }))
-                    .toggleStyle(.switch).controlSize(.small).font(.caption)
-                Button("削除…", role: .destructive) { confirmDelete = true }
-                    .contextMenuAndConfirm(row: row, model: model, confirmDelete: $confirmDelete)
-            }
+            EmptyView()   // 状態 Pill だけで足りる（Toggle も ⋯ も無い）
         } else {
-            VStack(alignment: .trailing, spacing: 6) {
-                if row.kind == .mcp || row.kind == .plugin {
-                    Button("削除…", role: .destructive) { removalFile = nil; confirmExisting = true }
-                        .disabled(agent != .cursor && model.inventory.agents[agent]?.isUsable != true)
-                    if row.kind == .mcp && row.canPin && project == nil {
-                        Button("最新版に固定…") { model.pin(row, agent: agent) }.font(.caption)
-                    }
-                } else if !removableFiles.isEmpty {
-                    Menu("削除…") {
-                        ForEach(removableFiles, id: \.path) { file in
-                            Button(file.path) { removalFile = file; confirmExisting = true }
-                        }
-                    }
-                } else {
-                    Label("保護対象・管理元で変更", systemImage: "lock.fill").font(.caption)
+            HStack(spacing: 12) {
+                if row.isManaged && project == nil {
+                    Toggle("共有先すべてで有効",
+                           isOn: .init(get: { !row.isDisabled },
+                                       set: { _ in model.toggle(row) }))
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .labelsHidden()
+                        .help(row.isDisabled ? String(localized: "有効にする")
+                                             : String(localized: "無効にする"))
+                }
+                actionsMenu
+            }
+        }
+    }
+
+    /// ⋯ メニュー。**常時表示** — ホバーで出す方式だとキーボード操作でたどれない。
+    /// アイコンは `ellipsis`（丸なし）。当たり判定 28×28 pt。
+    private var actionsMenu: some View {
+        Menu {
+            // 更新差分
+            if case .available = row.update {
+                Button("更新差分を見る…") { model.showDiff(for: row) }
+            }
+            // ピン留め / 解除
+            if row.isManaged {
+                Button(isPinnedRow(row) ? "更新の固定を解除" : "このバージョンで固定") {
+                    model.togglePin(row)
                 }
             }
+            if row.kind == .mcp, row.canPin, project == nil {
+                Button("最新版に固定…") { model.pin(row, agent: agent) }
+            }
+            // 掃除（重複導入があるとき）
+            if context == .userWide, case .both(let paths) = row.reach {
+                Button("プロジェクト側 \(paths.count) 件を削除…") {
+                    model.cleanup = paths.flatMap {
+                        model.inventory.cleanupItems([row], agent: agent, project: $0)
+                    }
+                }
+            }
+            Divider()
+            // 削除は destructive で末尾
+            if row.isManaged && project == nil {
+                Button("削除…", role: .destructive) { confirmDelete = true }
+            } else if row.kind == .mcp || row.kind == .plugin {
+                let canOperateCLI = agent == .cursor
+                    || model.inventory.agents[agent]?.isUsable == true
+                Button("削除…", role: .destructive) {
+                    removalFile = nil; confirmExisting = true
+                }
+                .disabled(!canOperateCLI)
+            } else if !removableFiles.isEmpty {
+                Menu("削除…") {
+                    ForEach(removableFiles, id: \.path) { file in
+                        Button(file.path) { removalFile = file; confirmExisting = true }
+                    }
+                }
+            } else {
+                // 何も選べないメニューにならないよう、案内を 1 行入れておく。
+                Text("保護対象・管理元で変更")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.body)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .confirmationDialog("「\(row.name)」を削除しますか？", isPresented: $confirmDelete) {
+            Button("削除", role: .destructive) { model.remove(row) }
+            Button("キャンセル", role: .cancel) {}
+        } message: {
+            Text("ファイルはゴミ箱へ移動します。あとから Finder で戻せます。")
         }
     }
 
@@ -971,28 +1101,6 @@ struct KindIcon: View {
             .frame(width: size, height: size)
             .padding(.top, 1)
             .help(kind.rawValue.uppercased())
-    }
-}
-
-extension View {
-    /// 右クリックメニューと削除確認。行本体ではなく操作側に付けて、
-    /// 一覧のスクロール中に誤爆しないようにする。
-    func contextMenuAndConfirm(row: ResourceRow, model: AppModel,
-                               confirmDelete: Binding<Bool>) -> some View {
-        contextMenu {
-            Button(row.isDisabled ? "有効にする" : "無効にする") { model.toggle(row) }
-            Button(isPinnedRow(row) ? "更新の固定を解除" : "このバージョンで固定") {
-                model.togglePin(row)
-            }
-            Divider()
-            Button("削除…", role: .destructive) { confirmDelete.wrappedValue = true }
-        }
-        .confirmationDialog("「\(row.name)」を削除しますか？", isPresented: confirmDelete) {
-            Button("削除", role: .destructive) { model.remove(row) }
-            Button("キャンセル", role: .cancel) {}
-        } message: {
-            Text("ファイルはゴミ箱へ移動します。あとから Finder で戻せます。")
-        }
     }
 }
 
@@ -1078,28 +1186,6 @@ struct RunningDot: View {
                     pulsing = true
                 }
             }
-    }
-}
-
-/// 更新状態（DESIGN.md 7.6）。
-struct UpdateLabel: View {
-    let row: ResourceRow
-    let model: AppModel
-
-    var body: some View {
-        switch row.update {
-        case .available:
-            Button("更新があります（差分を見る）") { model.showDiff(for: row) }
-                .buttonStyle(.link).font(.caption2)
-        case .pinned(let behind):
-            Label(behind ? "固定中（更新あり）" : "固定中", systemImage: "pin.fill")
-                .font(.caption2).foregroundStyle(behind ? .orange : .secondary)
-                .help("解除は右クリックメニューから")
-        case .upToDate:
-            Text("最新").font(.caption2).foregroundStyle(.secondary)
-        case .unknown, .unmanaged:
-            EmptyView()
-        }
     }
 }
 

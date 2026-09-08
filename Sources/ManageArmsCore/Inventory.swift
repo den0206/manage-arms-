@@ -262,6 +262,18 @@ public struct Inventory: Sendable {
     /// 「未集計」を「未使用」として出さないために要る（DESIGN.md 5.3）。
     public var usageScannedAt: Date? { registry.usage.scannedUpTo }
 
+    /// 「更新がある」と分かっている行の合計。ツールバーの「更新を確認」バッジと
+    /// ホームの未処理一覧の両方で使う（DESIGN.md 7.6）。
+    /// **固定中は数えない** — 遅れていても更新しないと利用者が決めたもの（7.4）。
+    /// `Inventory.rows` は同じ SHA を持つ Skill を 1 件に畳んで持つので、
+    /// ここでも 1 件として数える（コミット単位ではなくリソース単位）。
+    public var pendingUpdateRows: [ResourceRow] {
+        rows.filter {
+            if case .available = $0.update { return true }
+            return false
+        }
+    }
+
     /// このエージェントの画面に出す行（DESIGN.md 8 章）。
     ///
     /// 「全部を 1 つの表に出す」のをやめ、エージェントごとに分ける。

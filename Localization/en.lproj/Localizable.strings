@@ -80,6 +80,8 @@
 /* Updates */
 "最新" = "Up to date";
 "更新があります（差分を見る）" = "Update available — see the changes";
+"更新あり" = "Update available";
+"更新差分を見る…" = "See update changes…";
 "固定中（更新あり）" = "Pinned (update available)";
 "固定中" = "Pinned";
 "解除は右クリックメニューから" = "Unpin from the right-click menu";
