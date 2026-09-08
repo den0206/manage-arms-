@@ -114,39 +114,15 @@ struct ContentView: View {
             }
         }
         .navigationSplitViewColumnWidth(min: 208, ideal: 228, max: 300)
-        .safeAreaInset(edge: .bottom) { sidebarFooter }
-    }
-
-    /// 最後に何を読んだのか。**使用状況は明示的に集計する**（3.9）ので、
-    /// 「まだ押していない」ことが分かる場所が要る。
-    private var sidebarFooter: some View {
-        usageFooter
-            .padding(.horizontal, 14).padding(.vertical, 8)
-    }
-
-    /// ブラウザ検知の ON/OFF は設定画面（⌘,）に置く。ここには置かない — 同じ設定を
-    /// 2 か所に出すと、片方だけ直したときに食い違う。
-    private var usageFooter: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "clock.arrow.circlepath")
-            if let at = model.inventory.usageScannedAt {
-                Text("使用状況 \(at.formatted(.relative(presentation: .numeric)))")
-            } else {
-                Text("使用状況は未集計")
-            }
-            Spacer(minLength: 0)
-        }
-        .help("起動状態はウィンドウ表示中に3秒ごとに確認します。Tool呼び出し中を示すものではありません。")
-        .font(.caption2)
-        .foregroundStyle(.tertiary)
-        .lineLimit(1)
+        // v2.7 でサイドバー脚注（最終スキャン）は撤去し、ホームの「未処理の更新」カードに集約。
+        // 同じ情報を 2 か所に置くと、片方だけ直したときに食い違う。
     }
 
     @ViewBuilder
     private var detail: some View {
         switch screen {
         case .home:
-            HomeView(model: model, add: add, showAdd: $showAdd, screen: $screen)
+            HomeView(model: model, screen: $screen)
         case .agent(let agent):
             AgentPage(agent: agent, model: model, showAdd: $showAdd)
         case .settings:
@@ -223,23 +199,34 @@ struct AgentSidebarRow: View {
     }
 }
 
-// MARK: - ホーム（追加の入口・DESIGN.md 6 章 / 8 章）
+// MARK: - ホーム（DESIGN.md 8 章）
+//
+// v2.7 の再設計:
+// - 追加はツールバーの「追加」に一本化（ホームからは貼り付け欄を撤去）
+// - ホームは「未処理の更新」と「持ち物の要約」の 2 枚のカードで要約する
+// - 未処理更新の行をクリックしたら Agent 画面へ跳んで、行を短時間だけ強調する
+//
+// 追加のヒーロー画像は置かない — 起動直後にこの画面が出るので、視線の一番上に
+// 「今やるべきこと」を置いた方が実用的（旧ヒーローは「なんのアプリか」の説明で、
+// 一度読めば要らない情報だった）。
 
 struct HomeView: View {
     let model: AppModel
-    @Bindable var add: AddModel
-    @Binding var showAdd: Bool
     @Binding var screen: Screen
+    @State private var showAllUpdates = false
 
     /// 自分で入れたもの全部（このアプリ経由に限らない）。同梱は数えない。
     private var mine: [ResourceRow] { model.inventory.rows.filter { $0.origin != .bundled } }
+    /// 更新待ち。並びは名前順に固定して、開くたびに順序が変わらないようにする。
+    private var pending: [ResourceRow] {
+        model.inventory.pendingUpdateRows.sorted { $0.name < $1.name }
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.block) {
-                hero
-                addCard
-                summary
+                updatesCard
+                summaryCard
                 agentList
             }
             .padding(28)
@@ -247,88 +234,80 @@ struct HomeView: View {
             .frame(maxWidth: .infinity)
         }
         .navigationTitle("ホーム")
-    }
-
-    /// 表紙。**ロゴを大きく飾らない** — ここで要るのは「何ができるアプリか」の 1 行だけ。
-    private var hero: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Image(nsImage: NSApp.applicationIconImage)
-                .resizable().frame(width: 26, height: 26)
-                .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 5 }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(verbatim: "ManageArms").font(.title2.weight(.semibold))
-                Text("AI エージェントが持っているスキルを、ここでまとめて追加・削除できます。")
-                    .foregroundStyle(.secondary)
+        .sheet(isPresented: $showAllUpdates) {
+            PendingUpdatesSheet(rows: pending, model: model) { row in
+                showAllUpdates = false
+                jump(to: row)
             }
         }
     }
 
-    /// 貼って押すだけ。**取得して中身を見せるまで何も入らない**（6 章）。
-    private var addCard: some View {
+    /// 未処理の更新カード。**上位 5 件だけ**を並べ、残りは「すべて見る (n)」で開く。
+    /// 5 件を超えると縦に伸びすぎて、下の要約カードが視界から外れる。
+    private var updatesCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("スキル・サブエージェントを追加する").font(.headline)
-            Text("使いたいスキルの GitHub ページを開き、その URL をそのまま貼り付けてください。")
-                .font(.callout).foregroundStyle(.secondary)
-            HStack(spacing: 8) {
-                TextField("https://github.com/owner/repo/tree/main/skills/foo", text: $add.text)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.body, design: .monospaced))
-                    .onSubmit { openAdd() }
-                Button("追加") { openAdd() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(add.text.isEmpty)
+            HStack(alignment: .firstTextBaseline) {
+                Text("未処理の更新").font(.headline)
+                Spacer()
+                if !pending.isEmpty {
+                    Pill(text: pending.count.formatted(), tint: .orange)
+                }
             }
-            // 貼った瞬間に「何として読んだか」を返す。シートを開く前に間違いに気づける（6 章）。
-            if !add.text.isEmpty {
-                interpretation
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+            if pending.isEmpty {
+                Label("更新はありません。", systemImage: "checkmark.seal")
+                    .font(.callout).foregroundStyle(.secondary)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(pending.prefix(5)) { row in
+                        if row.id != pending.first?.id { Divider() }
+                        PendingUpdateRow(row: row) { jump(to: row) }
+                    }
+                }
+                .background(.background.tertiary,
+                            in: RoundedRectangle(cornerRadius: Theme.radiusS))
+                if pending.count > 5 {
+                    Button("すべて見る (\(pending.count))") { showAllUpdates = true }
+                        .buttonStyle(.link)
+                        .font(.callout)
+                }
             }
-            // **貼る URL の入手先は、貼る場所と同じ箱に置く。**
-            // 「どうやって入れるのか分からない」が最大の詰まり所（6 章）なので、
-            // 探し先まで含めて 1 か所で完結させる。節に切り出すと追加導線から離れる。
+            // 最終スキャン時刻はここに落とす（旧サイドバー脚注は撤去）。
+            // 「使用状況を分析」を押したことがない = nil で、その区別も残す（5.3）。
             HStack(spacing: 6) {
-                Text("探す:")
-                Link(destination: URL(string: "https://github.com/anthropics/skills")!) {
-                    Text(verbatim: "anthropics/skills")
-                }
-                Text(verbatim: "·")
-                Link(destination: URL(string: "https://github.com/topics/claude-skills")!) {
-                    Text(verbatim: "github.com/topics/claude-skills")
+                Image(systemName: "clock.arrow.circlepath")
+                if let at = model.inventory.usageScannedAt {
+                    Text("最終スキャン: \(at.formatted(.relative(presentation: .numeric)))")
+                } else {
+                    Text("最終スキャン: 未実行")
                 }
             }
-            .font(.caption)
-            Text("中身を確認するまで何も入りません。追加したものは Claude Code / Cursor / Codex の全部から使えます。")
-                .font(.caption).foregroundStyle(.tertiary)
+            .font(.caption2).foregroundStyle(.tertiary)
         }
         .card()
-        .animation(Motion.pop, value: add.text.isEmpty)
     }
 
-    @ViewBuilder
-    private var interpretation: some View {
-        switch add.interpretation {
-        case .github:
-            Label("GitHub リポジトリとして解釈しました", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.green).font(.caption)
-        case .mcpJSON, .command:
-            Label("MCP の設定です。追加は claude mcp add で行います", systemImage: "terminal")
-                .foregroundStyle(.orange).font(.caption)
-        case .unrecognized:
-            Label("解釈できませんでした", systemImage: "questionmark.circle")
-                .foregroundStyle(.secondary).font(.caption)
+    /// ジャンプ先の Agent と行 ID を AppModel に渡し、画面を切り替える。
+    /// スクロールと pulse は AgentPage 側の `.task(id:)` が拾って実行する。
+    private func jump(to row: ResourceRow) {
+        let agent = row.ownerAgent ?? .claude
+        model.pendingScrollTarget = PulseTarget(agent: agent, kind: row.kind, name: row.name)
+        model.pulseTarget = model.pendingScrollTarget
+        withAnimation(Motion.gentle) { screen = .agent(agent) }
+        // pulse は AppModel.flashPulse と同じ寿命で自動的に消す。
+        let duration: TimeInterval = Motion.reduced ? 1.0 : 1.2
+        let target = model.pulseTarget
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(duration))
+            if model.pulseTarget == target { model.pulseTarget = nil }
         }
-    }
-
-    private func openAdd() {
-        add.syncFields()
-        showAdd = true
     }
 
     /// 持ち物の要約。**名前は並べない** — 18 個のチップを敷き詰めても押せないし、
     /// 同じ一覧は各エージェント画面にあって、そちらでは切り替えと削除ができる。
     /// ここに要るのは規模（何が何件か）と、異常があるという事実だけ。
-    private var summary: some View {
+    private var summaryCard: some View {
         VStack(alignment: .leading, spacing: Theme.gap) {
+            Text("持ち物の要約").font(.headline)
             statRow
             // 正常なら何も出ない。読み込めないものは各画面に散るので気づけない（5.3）。
             if broken > 0 {
@@ -337,6 +316,7 @@ struct HomeView: View {
                     .font(.caption).foregroundStyle(.orange)
             }
         }
+        .card()
     }
 
     private var broken: Int { mine.count(where: \.isUnusable) }
@@ -363,12 +343,7 @@ struct HomeView: View {
                      value: totalBytes.formatted(.byteCount(style: .file)))
                 .padding(.horizontal, 14)
         }
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity)
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: Theme.radiusM))
-        .overlay {
-            RoundedRectangle(cornerRadius: Theme.radiusM).strokeBorder(.separator, lineWidth: 1)
-        }
+        .padding(.vertical, 4)
     }
 
     /// 旧「エージェント」画面の中身（DESIGN.md 8 章）。専用画面を持つほどの情報量が無い。
@@ -426,6 +401,68 @@ struct HomeView: View {
 
     private var manuallyLocated: [Agent] {
         Agent.allCases.filter { model.inventory.registry.setting($0).path != nil }
+    }
+}
+
+/// ホームの「未処理の更新」1 行。**行そのものがボタン** — 隣に「見る」を置くと、
+/// どちらを押しても同じことをする 2 つのボタンが並ぶ。
+struct PendingUpdateRow: View {
+    let row: ResourceRow
+    let open: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 8) {
+                KindIcon(kind: row.kind, size: 18)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(row.name).font(.callout.weight(.medium))
+                    if let owner = row.ownerAgent {
+                        Text(verbatim: owner.displayName)
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    }
+                }
+                Spacer(minLength: 8)
+                Pill(text: String(localized: "更新あり"), tint: .orange,
+                     icon: "arrow.triangle.2.circlepath")
+                Image(systemName: "chevron.right")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 9)
+            .contentShape(Rectangle())
+            .background(hovering ? AnyShapeStyle(.quaternary.opacity(0.4))
+                                 : AnyShapeStyle(.clear))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(Motion.gentle, value: hovering)
+    }
+}
+
+/// 「すべて見る」から開く一覧。**行の見た目と挙動はホームと同じ** —
+/// 開き直したら別物、では覚えられない。
+struct PendingUpdatesSheet: View {
+    let rows: [ResourceRow]
+    let model: AppModel
+    let open: (ResourceRow) -> Void
+    @SwiftUI.Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SheetHeader(title: "未処理の更新",
+                        subtitle: String(localized: "\(rows.count) 件"))
+            List(rows) { row in
+                PendingUpdateRow(row: row, open: { open(row) })
+                    .listRowInsets(EdgeInsets())
+            }
+            .listStyle(.inset)
+            HStack {
+                Spacer()
+                Button("閉じる") { dismiss() }
+            }
+        }
+        .padding(20)
+        .frame(width: 520, height: 440)
     }
 }
 
@@ -604,38 +641,49 @@ struct AgentPage: View {
 
     private func table(_ rows: [ResourceRow], tab: ScopeTab) -> some View {
         let kinds = Kind.allCases.filter { k in rows.contains { $0.kind == k } }
-        return List {
-            if rows.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("あなたが入れたものはまだありません。", systemImage: "info.circle")
-                        .foregroundStyle(.secondary)
-                    Button("追加") { showAdd = true }.buttonStyle(.borderedProminent)
+        return ScrollViewReader { proxy in
+            List {
+                if rows.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("あなたが入れたものはまだありません。", systemImage: "info.circle")
+                            .foregroundStyle(.secondary)
+                        Button("追加") { showAdd = true }.buttonStyle(.borderedProminent)
+                    }
+                    .padding(.vertical, 4)
                 }
-                .padding(.vertical, 4)
+                ForEach(kinds, id: \.self) { kind in
+                    let items = rows.filter { $0.kind == kind }
+                    Section {
+                        ForEach(items) { row in
+                            ResourceRowView(row: row, agent: agent, model: model,
+                                            scannedAt: model.inventory.usageScannedAt,
+                                            context: context(of: tab),
+                                            project: projectPath(of: tab))
+                        }
+                    } header: {
+                        HStack(spacing: 6) {
+                            Text(kind.title)
+                            Text(items.count.formatted()).monospacedDigit().foregroundStyle(.tertiary)
+                        }
+                        .textCase(nil)
+                    }
+                }
             }
-            ForEach(kinds, id: \.self) { kind in
-                let items = rows.filter { $0.kind == kind }
-                Section {
-                    ForEach(items) { row in
-                        ResourceRowView(row: row, agent: agent, model: model,
-                                        scannedAt: model.inventory.usageScannedAt,
-                                        context: context(of: tab),
-                                        project: projectPath(of: tab))
-                    }
-                } header: {
-                    HStack(spacing: 6) {
-                        Text(kind.title)
-                        Text(items.count.formatted()).monospacedDigit().foregroundStyle(.tertiary)
-                    }
-                    .textCase(nil)
-                }
+            // 1 件が数行にわたるので、区切りが無いと塊の境目が読めない。
+            // 縞（alternatingRowBackgrounds）は入れない — 中身の無い下部まで縞が伸びて、
+            // 「まだ何かある」ように見える。行頭のアイコンとホバーで境目は足りている。
+            .listRowSeparator(.visible)
+            .listStyle(.inset)
+            // ホームの「未処理の更新」からジャンプしてきた行へ寄せる。
+            // pulseTarget と別に pendingScrollTarget を持たせているのは、
+            // 表示更新前に scrollTo を呼んでも効かないため（一覧が再描画されるまで待つ）。
+            .task(id: model.pendingScrollTarget) {
+                guard let target = model.pendingScrollTarget,
+                      let hit = rows.first(where: { target.matches($0) }) else { return }
+                withAnimation(Motion.pop) { proxy.scrollTo(hit.id, anchor: .center) }
+                model.pendingScrollTarget = nil
             }
         }
-        // 1 件が数行にわたるので、区切りが無いと塊の境目が読めない。
-        // 縞（alternatingRowBackgrounds）は入れない — 中身の無い下部まで縞が伸びて、
-        // 「まだ何かある」ように見える。行頭のアイコンとホバーで境目は足りている。
-        .listRowSeparator(.visible)
-        .listStyle(.inset)
     }
 
     private func tabs(_ scoped: Inventory.Scoped) -> [ScopeTabItem] {
