@@ -181,6 +181,13 @@
 "探す:" = "Find skills:";
 "読み込めないものが %lld 件あります（左のエージェントを選ぶと確認できます）" = "%lld items cannot be loaded — pick an agent on the left to see them";
 "ストレージ" = "Storage";
+"未処理の更新" = "Pending updates";
+"更新はありません。" = "No pending updates.";
+"すべて見る (%lld)" = "See all (%lld)";
+"最終スキャン: %@" = "Last scan: %@";
+"最終スキャン: 未実行" = "Last scan: never";
+"持ち物の要約" = "What you have";
+"%lld 件" = "%lld items";
 
 /* Management workflow */
 "Toolを追加" = "Add a tool";
