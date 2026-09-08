@@ -30,9 +30,6 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 - Home drops the hero and keeps the paste-URL card at the top, with "Pending updates" and the
   "Inventory summary" below it. The toolbar no longer carries an "Add" button — the paste card
   is the single entry point.
-- The scope switcher on each agent page is now pinned tabs plus a "More (n)" dropdown. User
-  and Bundled are always pinned; up to three projects with recent activity join them. The
-  dropdown disappears when nothing overflows.
 - The Add sheet reports its progress with a stage name ("Fetching…" → "Validating…" →
   "Preview") and puts the primary action on the right as [Cancel] [Add] with Esc and Enter
   wired up. URL problems surface as an inline red line under the field instead of an alert.
