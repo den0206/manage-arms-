@@ -602,12 +602,15 @@ struct AgentPage: View {
     }
 
     /// スコープはタブで切り替える。**同時に見せるのは 1 つの表だけ。**
+    /// v2.7 でカルーセルからピン留め+その他ドロップダウンへ置き換え。
     private var list: some View {
         let scoped = model.inventory.scoped(for: agent)
         let items = tabs(scoped)
-        let current = items.contains { $0.tab == tab } ? tab : .user
+        let split = ScopeTabPin.split(items: items, scoped: scoped)
+        let visibleTabs = Set(split.pinned.map(\.tab)).union(split.overflow.map(\.tab))
+        let current = visibleTabs.contains(tab) ? tab : .user
         return VStack(alignment: .leading, spacing: 0) {
-            ScopeTabs(items: items, selection: $tab)
+            ScopeTabs(pinned: split.pinned, overflow: split.overflow, selection: $tab)
             HStack(spacing: 10) {
                 Text(note(for: current)).foregroundStyle(.secondary)
                 if case .project(let path) = current {
@@ -772,51 +775,133 @@ struct ScopeTabItem: Identifiable {
     var id: ScopeTab { tab }
 }
 
+/// スコープ切替。v2.7 で横スクロールから **ピン留めタブ + 「その他」ドロップダウン**
+/// に置き換えた（DESIGN.md 8 章）。プロジェクトが 19 件並ぶ環境では、
+/// カルーセルが 3 段目を隠して見えない・触れないタブができていた。
+///
+/// ピンの規則（AgentPage が計算する。永続化しない — 開くたびに毎回引き直す）:
+/// - `user` と `bundled` は常にピン
+/// - 直近 14 日の使用実績を持つプロジェクトを上位 3 件までピン
+/// - 実績が無ければピンしない（無理にピンすると使わないタブが上位に居座る）
+/// - ピン外は「その他 (n) ▾」に畳む。n = 0 ならドロップダウンごと出さない
 struct ScopeTabs: View {
-    let items: [ScopeTabItem]
+    let pinned: [ScopeTabItem]
+    let overflow: [ScopeTabItem]
     @Binding var selection: ScopeTab
     /// 選択中の下敷きだけが動く。チップ全体をフェードさせるより、
     /// **どこからどこへ移ったか**が分かる。
     @Namespace private var underlay
 
     var body: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 6) {
-                ForEach(items) { item in
-                    let chosen = item.tab == selection
-                    Button {
-                        withAnimation(Motion.pop) { selection = item.tab }
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: item.icon).font(.caption)
-                            Text(verbatim: item.title).lineLimit(1)
-                            Text(item.count.formatted())
-                                .font(.caption2.weight(.semibold)).monospacedDigit()
-                                .opacity(0.75)
-                        }
-                        .font(.callout)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .foregroundStyle(chosen ? AnyShapeStyle(.white)
-                                                : AnyShapeStyle(.secondary))
-                        .background {
-                            if chosen {
-                                Capsule().fill(Color.accentColor)
-                                    .matchedGeometryEffect(id: "scope", in: underlay)
-                            } else {
-                                Capsule().fill(.quaternary.opacity(0.4))
-                            }
-                        }
-                        .contentShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .help(item.help ?? item.title)
+        HStack(spacing: 6) {
+            ForEach(pinned) { item in
+                chip(item)
+            }
+            if !overflow.isEmpty {
+                overflowMenu
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+
+    private func chip(_ item: ScopeTabItem) -> some View {
+        let chosen = item.tab == selection
+        return Button {
+            withAnimation(Motion.pop) { selection = item.tab }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: item.icon).font(.caption)
+                Text(verbatim: item.title).lineLimit(1)
+                Text(item.count.formatted())
+                    .font(.caption2.weight(.semibold)).monospacedDigit()
+                    .opacity(0.75)
+            }
+            .font(.callout)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .foregroundStyle(chosen ? AnyShapeStyle(.white)
+                                    : AnyShapeStyle(.secondary))
+            .background {
+                if chosen {
+                    Capsule().fill(Color.accentColor)
+                        .matchedGeometryEffect(id: "scope", in: underlay)
+                } else {
+                    Capsule().fill(.quaternary.opacity(0.4))
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .contentShape(Capsule())
         }
-        .scrollIndicators(.hidden)
+        .buttonStyle(.plain)
+        .help(item.help ?? item.title)
+    }
+
+    /// 「その他 (n) ▾」— 選んでもピンは増えない（次に開いたら消える）。
+    /// **ピンを勝手に増やさない** — 一度覗いただけの Project がツールバーに居座ると、
+    /// 意図が読めない状態が積み上がる。
+    private var overflowMenu: some View {
+        Menu {
+            ForEach(overflow) { item in
+                Button {
+                    withAnimation(Motion.pop) { selection = item.tab }
+                } label: {
+                    Label(item.title, systemImage: item.icon)
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text("その他 (\(overflow.count))")
+                Image(systemName: "chevron.down").font(.caption2)
+            }
+            .font(.callout)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .foregroundStyle(.secondary)
+            .background {
+                Capsule().fill(.quaternary.opacity(0.4))
+            }
+            .contentShape(Capsule())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+}
+
+/// ピン留めの計算（DESIGN.md 8 章 v2.7）。**純粋関数**にしてテストする（10.1）。
+///
+/// - `user` と `bundled` は常にピン。
+/// - プロジェクトは直近 14 日で使用実績があるものを上位 3 件までピン。
+///   実績はプロジェクト内の全 row の lastUsed の最大値を採る。
+enum ScopeTabPin {
+    static let horizon: TimeInterval = 14 * 86_400
+
+    static func split(items: [ScopeTabItem], scoped: Inventory.Scoped, now: Date = Date())
+        -> (pinned: [ScopeTabItem], overflow: [ScopeTabItem])
+    {
+        let cutoff = now.addingTimeInterval(-horizon)
+        var pinnedProjects: Set<String> = []
+        let ranked = scoped.byProject
+            .map { entry -> (path: String, latest: Date?) in
+                (entry.path, entry.rows.compactMap(\.lastUsed).max())
+            }
+            .filter { $0.latest != nil && $0.latest! >= cutoff }
+            .sorted { ($0.latest ?? .distantPast) > ($1.latest ?? .distantPast) }
+        for entry in ranked.prefix(3) { pinnedProjects.insert(entry.path) }
+
+        var pinned: [ScopeTabItem] = []
+        var overflow: [ScopeTabItem] = []
+        for item in items {
+            switch item.tab {
+            case .user, .bundled:
+                pinned.append(item)
+            case .project(let path):
+                if pinnedProjects.contains(path) { pinned.append(item) }
+                else { overflow.append(item) }
+            }
+        }
+        return (pinned, overflow)
     }
 }
 
