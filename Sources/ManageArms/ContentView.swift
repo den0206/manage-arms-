@@ -123,7 +123,7 @@ struct ContentView: View {
     private var detail: some View {
         switch screen {
         case .home:
-            HomeView(model: model, screen: $screen)
+            HomeView(model: model, add: add, showAdd: $showAdd, screen: $screen)
         case .agent(let agent):
             AgentPage(agent: agent, model: model, showAdd: $showAdd)
         case .settings:
@@ -131,16 +131,11 @@ struct ContentView: View {
         }
     }
 
-    /// 4 ボタン: 追加 / 更新を確認 / 使用状況を分析 / 再読込。
+    /// 3 ボタン: 更新を確認 / 使用状況を分析 / 再読込。
+    /// 追加はホーム画面の貼り付けカードから入る（ツールバーには置かない）。
     /// v2.7 で label 幅を固定し、状態遷移で並びがブレないようにする。
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
-        ToolbarItem(placement: .primaryAction) {
-            Button { showAdd = true } label: {
-                ToolbarLabel(text: String(localized: "追加"), symbol: "plus", minWidth: 60)
-            }
-            .help("スキル・MCP・Pluginを追加します")
-        }
         ToolbarItem(placement: .primaryAction) {
             // 「更新を確認」に更新件数のバッジを重ねる（DESIGN.md 8 章 v2.7）。
             // ゼロならバッジは出さない — 0 を数字で見せると「未確認」と紛れる。
@@ -299,8 +294,8 @@ struct AgentSidebarRow: View {
 // MARK: - ホーム（DESIGN.md 8 章）
 //
 // v2.7 の再設計:
-// - 追加はツールバーの「追加」に一本化（ホームからは貼り付け欄を撤去）
-// - ホームは「未処理の更新」と「持ち物の要約」の 2 枚のカードで要約する
+// - 追加はホーム画面の貼り付けカードから入る（ツールバーには置かない）
+// - ホームは「追加」「未処理の更新」「持ち物の要約」の 3 枚のカードで要約する
 // - 未処理更新の行をクリックしたら Agent 画面へ跳んで、行を短時間だけ強調する
 //
 // 追加のヒーロー画像は置かない — 起動直後にこの画面が出るので、視線の一番上に
@@ -309,6 +304,8 @@ struct AgentSidebarRow: View {
 
 struct HomeView: View {
     let model: AppModel
+    @Bindable var add: AddModel
+    @Binding var showAdd: Bool
     @Binding var screen: Screen
     @State private var showAllUpdates = false
 
@@ -322,6 +319,7 @@ struct HomeView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.block) {
+                addCard
                 updatesCard
                 summaryCard
                 agentList
@@ -337,6 +335,69 @@ struct HomeView: View {
                 jump(to: row)
             }
         }
+    }
+
+    /// 貼って押すだけ。**取得して中身を見せるまで何も入らない**（6 章）。
+    /// **貼る URL の入手先は、貼る場所と同じ箱に置く。** 「どうやって入れるのか
+    /// 分からない」が最大の詰まり所（6 章）なので、探し先まで含めて 1 か所で完結させる。
+    private var addCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("スキル・サブエージェントを追加する").font(.headline)
+            Text("使いたいスキルの GitHub ページを開き、その URL をそのまま貼り付けてください。")
+                .font(.callout).foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                TextField("https://github.com/owner/repo/tree/main/skills/foo", text: $add.text)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                    .onSubmit { openAdd() }
+                Button("追加") { openAdd() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(add.text.isEmpty)
+            }
+            // 貼った瞬間に「何として読んだか」を返す。シートを開く前に間違いに気づける（6 章）。
+            if !add.text.isEmpty {
+                interpretation
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+            HStack(spacing: 6) {
+                Text("探す:")
+                Link(destination: URL(string: "https://github.com/anthropics/skills")!) {
+                    Text(verbatim: "anthropics/skills")
+                }
+                Text(verbatim: "·")
+                Link(destination: URL(string: "https://github.com/topics/claude-skills")!) {
+                    Text(verbatim: "github.com/topics/claude-skills")
+                }
+            }
+            .font(.caption)
+            Text("中身を確認するまで何も入りません。追加したものは Claude Code / Cursor / Codex の全部から使えます。")
+                .font(.caption).foregroundStyle(.tertiary)
+        }
+        .card()
+        .animation(Motion.pop, value: add.text.isEmpty)
+    }
+
+    @ViewBuilder
+    private var interpretation: some View {
+        switch add.interpretation {
+        case .github:
+            Label("GitHub リポジトリとして解釈しました", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green).font(.caption)
+        case .mcpJSON:
+            Label("MCP の設定として解釈しました", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green).font(.caption)
+        case .command:
+            Label("MCP の起動コマンドとして解釈しました", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green).font(.caption)
+        case .unrecognized:
+            Label("解釈できませんでした", systemImage: "questionmark.circle")
+                .foregroundStyle(.secondary).font(.caption)
+        }
+    }
+
+    private func openAdd() {
+        add.syncFields()
+        showAdd = true
     }
 
     /// 未処理の更新カード。**上位 5 件だけ**を並べ、残りは「すべて見る (n)」で開く。

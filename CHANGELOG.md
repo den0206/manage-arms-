@@ -27,8 +27,9 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 - Resource rows are now a tight two-line design (title with a status pill on top, then update /
   failure / usage / management / size pills below). The ⋯ menu on the right is always visible
   instead of appearing on hover, and it holds the diff, pin, cleanup and delete actions.
-- Home is now summary-only: the paste-URL card and hero image are gone. Adding a tool is done
-  through the toolbar's "Add" button.
+- Home drops the hero and keeps the paste-URL card at the top, with "Pending updates" and the
+  "Inventory summary" below it. The toolbar no longer carries an "Add" button — the paste card
+  is the single entry point.
 - The scope switcher on each agent page is now pinned tabs plus a "More (n)" dropdown. User
   and Bundled are always pinned; up to three projects with recent activity join them. The
   dropdown disappears when nothing overflows.
