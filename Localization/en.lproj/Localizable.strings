@@ -142,6 +142,8 @@
 "GitHub リポジトリとして解釈しました" = "Interpreted as a GitHub repository";
 "MCP の設定です。追加は claude mcp add で行います" = "This is an MCP config — add it with claude mcp add";
 "MCP の起動コマンドです。追加は claude mcp add で行います" = "This is an MCP launch command — add it with claude mcp add";
+"MCP の設定として解釈しました" = "Interpreted as an MCP config";
+"MCP の起動コマンドとして解釈しました" = "Interpreted as an MCP launch command";
 "解釈できませんでした" = "Could not interpret this";
 "リポジトリ" = "Repository";
 "ブランチ" = "Branch";
