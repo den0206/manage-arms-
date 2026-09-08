@@ -32,10 +32,11 @@ struct ContentView: View {
                                       add: { model.watcher.accept(lead) },
                                       skip: { model.watcher.dismiss() })
                 }
+                // 読み取りに失敗した項目は Warning Pill + popover に置き換えた（v2.7）。
+                // DisclosureGroup + 素の橙背景は Theme に合わず、開閉状態が別で管理される
+                // 分だけ「気づけない」に近かった。Pill 1 個で常に見える形にする。
                 if !model.inventory.issues.isEmpty {
-                    DisclosureGroup("読み取りに失敗した項目があります") {
-                        ForEach(model.inventory.issues, id: \.self) { Text($0).font(.caption).textSelection(.enabled) }
-                    }.padding(12).background(.orange.opacity(0.1))
+                    IssuesWarningRow(issues: model.inventory.issues)
                 }
                 detail
             }
@@ -130,19 +131,50 @@ struct ContentView: View {
         }
     }
 
+    /// 4 ボタン: 追加 / 更新を確認 / 使用状況を分析 / 再読込。
+    /// v2.7 で label 幅を固定し、状態遷移で並びがブレないようにする。
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
-            Button { showAdd = true } label: { Label("追加", systemImage: "plus") }
-                .help("スキル・MCP・Pluginを追加します")
+            Button { showAdd = true } label: {
+                ToolbarLabel(text: String(localized: "追加"), symbol: "plus", minWidth: 60)
+            }
+            .help("スキル・MCP・Pluginを追加します")
+        }
+        ToolbarItem(placement: .primaryAction) {
+            // 「更新を確認」に更新件数のバッジを重ねる（DESIGN.md 8 章 v2.7）。
+            // ゼロならバッジは出さない — 0 を数字で見せると「未確認」と紛れる。
+            let pendingCount = model.inventory.pendingUpdateRows.count
+            Button {
+                model.checkUpdates()
+            } label: {
+                ToolbarLabel(text: model.isChecking ? String(localized: "確認中…")
+                                                    : String(localized: "更新を確認"),
+                             symbol: "arrow.triangle.2.circlepath",
+                             minWidth: 96,
+                             symbolActive: model.isChecking)
+                    .overlay(alignment: .topTrailing) {
+                        if pendingCount > 0 {
+                            CountBadge(count: pendingCount)
+                                .offset(x: 6, y: -6)
+                        }
+                    }
+            }
+            .disabled(model.isChecking)
+            .help(pendingCount > 0
+                  ? String(localized: "更新が \(pendingCount) 件あります")
+                  : String(localized: "更新を確認"))
         }
         ToolbarItem(placement: .primaryAction) {
             Button {
                 model.analyzeUsage()
             } label: {
-                Label(model.isAnalyzing ? "分析中…" : "使用状況を分析",
-                      systemImage: "clock.arrow.circlepath")
-                    .symbolEffect(.pulse, isActive: model.isAnalyzing && !Motion.reduced)
+                ToolbarLabel(text: model.isAnalyzing ? String(localized: "分析中…")
+                                                     : String(localized: "使用状況を分析"),
+                             symbol: "chart.bar.doc.horizontal",
+                             minWidth: 110,
+                             symbolActive: model.isAnalyzing,
+                             showsSpinner: model.isAnalyzing)
             }
             .disabled(model.isAnalyzing)
             .help(model.inventory.usageScannedAt.map {
@@ -150,25 +182,90 @@ struct ContentView: View {
             } ?? String(localized: "セッションログから最終使用日を集計します（初回は数秒かかります）"))
         }
         ToolbarItem(placement: .primaryAction) {
-            Button {
-                model.checkUpdates()
-            } label: {
-                Label(model.isChecking ? "確認中…" : "更新を確認",
-                      systemImage: "arrow.triangle.2.circlepath")
-                    .symbolEffect(.rotate, isActive: model.isChecking && !Motion.reduced)
-            }
-            .disabled(model.isChecking)
-        }
-        ToolbarItem(placement: .primaryAction) {
             // 明示的な再読み込みは CLI の間引き（DESIGN.md 3.5）も飛ばす。
             // 押したのに変わらないなら、このボタンは何のためにあるのか分からない。
             Button { model.reload(forceCLI: true) } label: {
-                Image(systemName: "arrow.clockwise")
-                    .symbolEffect(.rotate, isActive: model.isLoading && !Motion.reduced)
+                ToolbarLabel(text: String(localized: "再読み込み"),
+                             symbol: "arrow.clockwise",
+                             minWidth: 84,
+                             symbolActive: model.isLoading)
             }
             .help("再読み込み")
             .disabled(model.isLoading)
         }
+    }
+}
+
+/// ツールバーのラベル。**固定幅**にして、状態遷移でボタンの並びが左右にブレないようにする
+/// （DESIGN.md 8 章 v2.7）。
+struct ToolbarLabel: View {
+    let text: String
+    let symbol: String
+    let minWidth: CGFloat
+    var symbolActive: Bool = false
+    var showsSpinner: Bool = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if showsSpinner {
+                ProgressView().controlSize(.mini)
+            } else {
+                Image(systemName: symbol)
+                    .symbolEffect(.rotate, isActive: symbolActive && !Motion.reduced)
+            }
+            Text(verbatim: text)
+                .frame(minWidth: minWidth, alignment: .leading)
+                .lineLimit(1)
+        }
+    }
+}
+
+/// バッジ。**赤の系統は使わない** — 破壊操作の予告と見間違える。orange は 5.3 で
+/// 「注意」に既に使っており、この画面全体で orange = 注意で揃う。
+struct CountBadge: View {
+    let count: Int
+
+    var body: some View {
+        Text(verbatim: count > 99 ? "99+" : count.formatted())
+            .font(.caption2.weight(.semibold))
+            .monospacedDigit()
+            .foregroundStyle(.white)
+            .padding(.horizontal, 5).padding(.vertical, 1)
+            .background(Color.orange, in: Capsule())
+            .accessibilityLabel(Text("更新が \(count) 件あります"))
+    }
+}
+
+/// 読み取り失敗の警告行。**Pill + popover** で常に見える形にする（v2.7）。
+struct IssuesWarningRow: View {
+    let issues: [String]
+    @State private var showing = false
+
+    var body: some View {
+        HStack {
+            Button {
+                showing = true
+            } label: {
+                Pill(text: String(localized: "読み取りに失敗した項目があります"),
+                     tint: .orange, icon: "exclamationmark.triangle.fill")
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showing, arrowEdge: .bottom) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("読み取りに失敗した項目があります")
+                        .font(.subheadline.weight(.semibold))
+                    ForEach(issues, id: \.self) { issue in
+                        Text(verbatim: issue)
+                            .font(.caption)
+                            .textSelection(.enabled)
+                    }
+                }
+                .padding(12)
+                .frame(minWidth: 320, idealWidth: 420, maxWidth: 520, alignment: .leading)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 16).padding(.vertical, 6)
     }
 }
 
