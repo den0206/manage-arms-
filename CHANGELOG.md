@@ -10,6 +10,34 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 
 ## [Unreleased]
 
+### Added
+
+- Home now leads with a "Pending updates" card that lists what needs updating and jumps to the
+  target row on click (with a short accent highlight so you can see where you landed). The
+  last-scan timestamp moved into that card, and a full-list sheet appears once there are more
+  than five pending updates.
+- The toolbar's "Check for Updates" button carries a numeric badge with the total pending
+  updates across every agent. Zero updates hide the badge.
+- When you paste an MCP server's JSON into the Add sheet, a "Generated command" panel appears
+  with the exact `claude mcp add-json <name> '…'` line and a Copy button, so the flow no
+  longer dead-ends. The name is inline-editable and defaults to the JSON's top-level key.
+
+### Changed
+
+- Resource rows are now a tight two-line design (title with a status pill on top, then update /
+  failure / usage / management / size pills below). The ⋯ menu on the right is always visible
+  instead of appearing on hover, and it holds the diff, pin, cleanup and delete actions.
+- Home is now summary-only: the paste-URL card and hero image are gone. Adding a tool is done
+  through the toolbar's "Add" button.
+- The scope switcher on each agent page is now pinned tabs plus a "More (n)" dropdown. User
+  and Bundled are always pinned; up to three projects with recent activity join them. The
+  dropdown disappears when nothing overflows.
+- The Add sheet reports its progress with a stage name ("Fetching…" → "Validating…" →
+  "Preview") and puts the primary action on the right as [Cancel] [Add] with Esc and Enter
+  wired up. URL problems surface as an inline red line under the field instead of an alert.
+- Read-failure messages appear as an orange pill you can tap for a popover, rather than a
+  collapsible group.
+
 ### Fixed
 
 - Reading the installed MCP servers and plugins from an agent's command-line tool no longer
@@ -18,6 +46,8 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
   truncated JSON response then failed to parse, and the error stuck around for a few minutes
   because command-line results are cached. The same applied to the reason reported when
   unpacking a downloaded archive failed.
+- Toolbar buttons no longer reflow when they change label ("Analyzing…" etc.). Each button
+  keeps its intrinsic width.
 
 ### Changed
 
