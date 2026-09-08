@@ -188,6 +188,7 @@
 "最終スキャン: 未実行" = "Last scan: never";
 "持ち物の要約" = "What you have";
 "%lld 件" = "%lld items";
+"その他 (%lld)" = "More (%lld)";
 
 /* Management workflow */
 "Toolを追加" = "Add a tool";
