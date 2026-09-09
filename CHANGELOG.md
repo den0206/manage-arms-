@@ -28,6 +28,14 @@ heading for you (`Scripts/release-changelog.sh`). Section headings are limited t
 
 ### Changed
 
+- Hide `hooks` entries from the config editor while preserving them in the configuration file.
+- TOML config editing now supports dotted and quoted key paths plus integer and decimal
+  values. Saves reparse the supported syntax, preserve types and untouched text, and reject
+  ambiguous or unsupported documents instead of guessing how to rewrite them.
+- Config editing now offers searchable common settings, unset-field guidance, official reference
+  links, and explicit text saving. Keys stay untranslated and unknown scalar keys remain editable.
+  Codex project and array-table entries no longer appear as duplicate top-level settings;
+  scalar edits preserve trailing TOML comments and reject unsupported values.
 - Resource rows are now a tight two-line design (title with a status pill on top, then update /
   failure / usage / management / size pills below). The ⋯ menu on the right is always visible
   instead of appearing on hover, and it holds the diff, pin, cleanup and delete actions.

@@ -1334,6 +1334,7 @@ struct AgentConfigView: View {
         let format: ConfigWriter.Format
         var rawData: Data?
         var entries: [Entry] = []
+        var readFailed = false
     }
 
     @State private var fileStates: [FileState] = []
@@ -1343,13 +1344,26 @@ struct AgentConfigView: View {
     @State private var confirmDeleteFileIndex: Int?
     @State private var showAdd: [Int: Bool] = [:]
     @State private var addKey: String = ""
-    @State private var addValueIsString: Bool = true
+    private enum InputType { case string, bool, number }
+    @State private var addType: InputType = .string
     @State private var addValueString: String = ""
     @State private var addValueBool: Bool = false
+    @State private var searchText = ""
+    @State private var showOtherSettings = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.block) {
+                HStack {
+                    TextField("キーを検索", text: $searchText)
+                        .textFieldStyle(.roundedBorder)
+                    if let url = agent.configReferenceURL {
+                        Link("公式リファレンス", destination: url)
+                    }
+                    Button("再読み込み") { writeError = nil; pendingText = [:]; load() }
+                }
+                Text("ユーザー全体の設定です。プロジェクト設定などが優先される場合があります。文字列は保存ボタン、選択肢とスイッチは変更時に保存します。")
+                    .font(.caption).foregroundStyle(.secondary)
                 if let err = writeError {
                     Label(err, systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
@@ -1364,6 +1378,9 @@ struct AgentConfigView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear { load() }
+        .onChange(of: searchText) { _, text in
+            if !text.isEmpty { showOtherSettings = true }
+        }
         .onDisappear {
             fileStates = []
             pendingText = [:]
@@ -1408,10 +1425,34 @@ struct AgentConfigView: View {
 
             if state.rawData != nil {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(state.entries.enumerated()), id: \.element.id) { idx, entry in
-                        if idx > 0 { Divider() }
-                        entryRow(entry: entry, state: state)
+                    ForEach(agent.configFields.filter { matchesSearch($0.key) }) { field in
+                        if let entry = state.entries.first(where: { $0.key == field.key }) {
+                            entryRow(entry: entry, state: state)
+                        } else {
+                            HStack {
+                                fieldLabel(key: field.key)
+                                Spacer()
+                                Text("未設定").font(.caption).foregroundStyle(.secondary)
+                                Button("設定を追加") {
+                                    resetAdd(fileIndex: state.id)
+                                    addKey = field.key
+                                    addType = field.isBool ? .bool : .string
+                                    addValueString = field.options.first ?? ""
+                                    showAdd[state.id] = true
+                                }
+                            }.padding(12)
+                        }
+                        Divider()
                     }
+                    DisclosureGroup("その他の設定", isExpanded: $showOtherSettings) {
+                        ForEach(state.entries.filter { entry in
+                            !agent.configFields.contains(where: { $0.key == entry.key }) && matchesSearch(entry.key)
+                        }) { entry in
+                            entryRow(entry: entry, state: state)
+                            Divider()
+                        }
+                    }
+                    .padding(12)
                     if state.entries.isEmpty {
                         Text("設定値がありません")
                             .font(.callout).foregroundStyle(.tertiary)
@@ -1419,11 +1460,13 @@ struct AgentConfigView: View {
                     }
                     Divider()
                     addSection(state: state)
+                    Text("配列・インラインテーブル・未対応の構文はエディタで開いて編集してください。")
+                        .font(.caption).foregroundStyle(.secondary).padding(12)
                 }
                 .background(.background.tertiary,
                             in: RoundedRectangle(cornerRadius: Theme.radiusS))
             } else {
-                Label("設定ファイルがありません", systemImage: "doc.badge.questionmark")
+                Label(state.readFailed ? "設定を読み込めませんでした" : "設定ファイルがありません", systemImage: "doc.badge.questionmark")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .padding(10)
@@ -1433,14 +1476,27 @@ struct AgentConfigView: View {
 
     // MARK: - 1 エントリ行
 
-    @ViewBuilder
-    private func entryRow(entry: Entry, state: FileState) -> some View {
-        let pickerOptions = agent.configPickerHints[entry.key]
-        HStack(spacing: 10) {
-            Text(verbatim: entry.key)
+    private func matchesSearch(_ key: String) -> Bool {
+        searchText.isEmpty || key.localizedCaseInsensitiveContains(searchText)
+    }
+
+    private func fieldLabel(key: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(verbatim: key)
                 .font(.system(.callout, design: .monospaced))
                 .textSelection(.enabled)
-                .foregroundStyle(.primary)
+            if let field = agent.configFields.first(where: { $0.key == key }) {
+                Text(verbatim: field.detail)
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func entryRow(entry: Entry, state: FileState) -> some View {
+        let pickerOptions = agent.configFields.first(where: { $0.key == entry.key })?.options
+        HStack(spacing: 10) {
+            fieldLabel(key: entry.key)
             Spacer()
             valueControl(entry: entry, pickerOptions: pickerOptions, state: state)
             Button(role: .destructive) {
@@ -1454,6 +1510,7 @@ struct AgentConfigView: View {
             }
             .buttonStyle(.plain)
             .help("削除")
+            .accessibilityLabel(Text(verbatim: String(localized: "削除") + " " + entry.key))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -1476,9 +1533,10 @@ struct AgentConfigView: View {
                 set: { writeValue(.bool($0), key: key, fileIndex: state.id) }
             ))
             .labelsHidden()
+            .accessibilityLabel(Text(verbatim: key))
 
         case .string(let current):
-            if let options = pickerOptions {
+            if let options = pickerOptions, !options.isEmpty {
                 Picker("", selection: Binding(
                     get: {
                         fileStates.first(where: { $0.id == state.id })?
@@ -1488,26 +1546,60 @@ struct AgentConfigView: View {
                     },
                     set: { writeValue(.string($0), key: key, fileIndex: state.id) }
                 )) {
-                    ForEach(options, id: \.self) { Text(verbatim: $0).tag($0) }
+                    ForEach(options.contains(current) ? options : [current] + options, id: \.self) {
+                        Text(verbatim: $0).tag($0)
+                    }
                 }
                 .pickerStyle(.menu)
                 .labelsHidden()
                 .fixedSize()
+                .accessibilityLabel(Text(verbatim: key))
             } else {
+                textValueControl(entry: entry, state: state, current: current)
+            }
+        case .integer(let current):
+            textValueControl(entry: entry, state: state, current: String(current))
+        case .decimal(let current):
+            textValueControl(entry: entry, state: state, current: current)
+        }
+    }
+
+    private func textValueControl(entry: Entry, state: FileState, current: String) -> some View {
+        let draftKey = "\(state.id):\(entry.key)"
+        return HStack {
                 TextField("", text: Binding(
-                    get: { pendingText[key] ?? current },
-                    set: { pendingText[key] = $0 }
+                    get: { pendingText[draftKey] ?? current },
+                    set: { pendingText[draftKey] = $0 }
                 ))
                 .textFieldStyle(.roundedBorder)
                 .frame(minWidth: 120, maxWidth: 280)
                 .onSubmit {
-                    if let text = pendingText[key] {
-                        writeValue(.string(text), key: key, fileIndex: state.id)
-                        pendingText.removeValue(forKey: key)
-                    }
+                    saveText(entry: entry, state: state, draftKey: draftKey)
+                }
+                .accessibilityLabel(Text(verbatim: entry.key))
+                Button("保存") {
+                    saveText(entry: entry, state: state, draftKey: draftKey)
+                }
+                .disabled(pendingText[draftKey] == nil || pendingText[draftKey] == current)
+        }
+    }
+
+    private func saveText(entry: Entry, state: FileState, draftKey: String) {
+        guard let text = pendingText[draftKey] else { return }
+        do {
+            let value: ConfigWriter.Value
+            if case .string = entry.value {
+                value = .string(text)
+            } else {
+                value = try ConfigWriter.numberValue(text)
+                guard entry.value.sameType(as: value) else {
+                    throw ConfigWriter.Failure.parseError(String(localized: "整数・小数の型を変えずに入力してください。"))
                 }
             }
-        }
+            if writeValue(value, key: entry.key, fileIndex: state.id) {
+                pendingText.removeValue(forKey: draftKey)
+            }
+        } catch { writeError = error.localizedDescription }
     }
 
     // MARK: - 追加フォーム
@@ -1524,18 +1616,35 @@ struct AgentConfigView: View {
                         TextField(keyPlaceholder, text: $addKey)
                             .textFieldStyle(.roundedBorder)
                             .frame(maxWidth: 220)
-                        Picker("型", selection: $addValueIsString) {
-                            Text("文字列").tag(true)
-                            Text(verbatim: "true / false").tag(false)
+                            .onChange(of: addKey) { _, key in
+                                if let field = agent.configFields.first(where: { $0.key == key }) {
+                                    addType = field.isBool ? .bool : .string
+                                    addValueString = field.options.first ?? ""
+                                }
+                            }
+                        Picker("型", selection: $addType) {
+                            Text("文字列").tag(InputType.string)
+                            Text(verbatim: "true / false").tag(InputType.bool)
+                            if state.format == .toml { Text("数値").tag(InputType.number) }
                         }
                         .pickerStyle(.segmented)
-                        .frame(maxWidth: 140)
+                        .frame(maxWidth: 240)
+                        .disabled(agent.configFields.contains(where: { $0.key == addKey }))
                     }
                     HStack(spacing: 8) {
-                        if addValueIsString {
+                        if addType != .bool {
+                            let options = agent.configFields.first(where: { $0.key == addKey })?.options ?? []
+                            if !options.isEmpty {
+                                Picker("値", selection: $addValueString) {
+                                    ForEach(options.contains(addValueString) ? options : [addValueString] + options, id: \.self) {
+                                        Text(verbatim: $0).tag($0)
+                                    }
+                                }.frame(maxWidth: 260)
+                            } else {
                             TextField("値", text: $addValueString)
                                 .textFieldStyle(.roundedBorder)
                                 .frame(maxWidth: 260)
+                            }
                         } else {
                             Toggle(addValueBool ? "true" : "false", isOn: $addValueBool)
                                 .toggleStyle(.switch)
@@ -1571,37 +1680,35 @@ struct AgentConfigView: View {
     // MARK: - バリデーション
 
     /// TOML キー形式のエラーメッセージ。nil なら問題なし。
-    /// 許容: "key"（top-level）/ "section.key"（ドット 1 つ）。
-    /// 拒否: ドット 2 つ以上、空セグメント。
+    /// 読み書きと同じパス解析で、ドット付き・引用符付きキーを検査する。
     private func tomlKeyError(for state: FileState) -> String? {
         guard state.format == .toml, !addKey.isEmpty else { return nil }
-        let parts = addKey.components(separatedBy: ".")
-        if parts.count > 2 {
-            return String(localized: "TOML キーは key または section.key の形式で入力してください")
-        }
-        if parts.contains(where: { $0.isEmpty }) {
-            return String(localized: "TOML キーは key または section.key の形式で入力してください")
+        if !ConfigWriter.isValidTOMLKey(addKey) {
+            return String(localized: "TOML キーの構文を確認してください。ドットで階層を区切り、ドットを含む名前は引用符で囲みます。")
         }
         return nil
     }
 
     // MARK: - 操作
 
-    private func writeValue(_ value: ConfigWriter.Value, key: String, fileIndex: Int) {
+    @discardableResult
+    private func writeValue(_ value: ConfigWriter.Value, key: String, fileIndex: Int) -> Bool {
         guard let state = fileStates.first(where: { $0.id == fileIndex }),
-              let rawData = state.rawData else { return }
+              let rawData = state.rawData else { return false }
         do {
             try ConfigWriter.write(key: key, value: value,
                                    to: state.url, format: state.format,
                                    originalData: rawData)
             writeError = nil
             load()
+            return true
         } catch ConfigWriter.Failure.concurrentModification {
             writeError = String(localized: "別のプロセスが設定を変更したため保存できませんでした。再読み込みしてください。")
             load()
         } catch {
             writeError = error.localizedDescription
         }
+        return false
     }
 
     private func deleteValue(key: String, fileIndex: Int) {
@@ -1621,11 +1728,15 @@ struct AgentConfigView: View {
     }
 
     private func submitAdd(fileIndex: Int, state: FileState) {
-        let value: ConfigWriter.Value = addValueIsString
-            ? .string(addValueString)
-            : .bool(addValueBool)
-        writeValue(value, key: addKey, fileIndex: fileIndex)
-        resetAdd(fileIndex: fileIndex)
+        do {
+            let value: ConfigWriter.Value
+            switch addType {
+            case .string: value = .string(addValueString)
+            case .bool: value = .bool(addValueBool)
+            case .number: value = try ConfigWriter.numberValue(addValueString)
+            }
+            if writeValue(value, key: addKey, fileIndex: fileIndex) { resetAdd(fileIndex: fileIndex) }
+        } catch { writeError = error.localizedDescription }
     }
 
     private func resetAdd(fileIndex: Int) {
@@ -1633,7 +1744,7 @@ struct AgentConfigView: View {
         addKey = ""
         addValueString = ""
         addValueBool = false
-        addValueIsString = true
+        addType = .string
     }
 
     private func load() {
@@ -1641,12 +1752,18 @@ struct AgentConfigView: View {
         fileStates = agent.configFiles.enumerated().map { (i, item) in
             let url = home.appending(path: item.path)
             let format: ConfigWriter.Format = item.path.hasSuffix(".toml") ? .toml : .json
-            if let result = try? ConfigWriter.read(from: url, format: format) {
+            do {
+                let result = try ConfigWriter.read(from: url, format: format)
                 return FileState(id: i, url: url, format: format,
                                  rawData: result.raw,
                                  entries: result.entries.map { Entry(key: $0.key, value: $0.value) })
+            } catch {
+                if FileManager.default.fileExists(atPath: url.path) {
+                    writeError = error.localizedDescription
+                }
             }
-            return FileState(id: i, url: url, format: format)
+            return FileState(id: i, url: url, format: format,
+                             readFailed: FileManager.default.fileExists(atPath: url.path))
         }
     }
 }

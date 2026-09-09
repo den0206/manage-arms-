@@ -22,6 +22,9 @@ The design document is [DESIGN.md](DESIGN.md) (Japanese).
 | **Usage** | Last-used dates from Claude Code, Codex and Cursor session logs. MCP processes checked every 3 seconds while a window is visible; this does not indicate an active tool call |
 | **Browser detection** | On by default. Opening a skill, plugin or subagent page while a browser is frontmost turns the menu bar icon green and offers to add it; leaving the page turns it back — no URL to copy, and no system notifications. The page is confirmed against `raw.githubusercontent.com` first, and the URL is never stored |
 | **Appearance** | Switch between light, dark and following the system in Settings (system by default) |
+| **Config editor** | Search settings by their original keys. TOML supports dotted/quoted paths and integer/decimal values, preserving types and surrounding text with validation before saving. Unsupported syntax requires an external editor |
+
+The config editor hides `hooks` entries without removing them from the configuration file.
 
 ## Requirements
 
@@ -42,7 +45,7 @@ The project is a Swift Package — there is no `.xcodeproj` (open `Package.swift
 directly).
 
 ```bash
-swift test                  # 375 tests in 52 suites (MANUAL=1 adds live-CLI checks)
+swift test                  # 396 tests in 55 suites (MANUAL=1 adds live-CLI checks)
 swift build                 # compile check
 
 # The distributable form is a hand-assembled .app bundle.
@@ -95,7 +98,7 @@ docs/signing.md         Developer ID signing and notarization setup (Japanese)
   files out of a scan)
 - **What may be deleted or moved is limited**, not what may not be. Any path that bypasses
   `WriteGuard` fails CI
-- Configuration is written back in only two places. Adding and removing MCP servers and
+- Configuration is written back only by Registry, MCPScanner, and the guarded ConfigWriter. Adding and removing MCP servers and
   plugins is delegated to each agent's own CLI — `~/.claude.json` is 98 KB of interleaved
   state, and writing it back would race a running Claude and destroy all of it
 - **No storage of its own beyond one file.** No cache directory; `URLSession` runs

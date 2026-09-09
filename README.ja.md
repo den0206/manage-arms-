@@ -21,6 +21,9 @@ AI コーディングエージェント（Claude Code / Cursor / Codex / Gemini 
 | **使用実績** | Claude Code・Codex・Cursor のセッションログから最終使用日を集計。表示中は3秒ごとにMCPプロセスを確認。実際のTool呼び出し中とは区別 |
 | **ブラウザ検知** | 既定 ON。ブラウザで Skill・Plugin・Subagent のページを開くと、メニューバーアイコンを緑にして追加を提案する（ページから離れれば元に戻る）（URL を貼らずに済み、システム通知は使わない）。出す前に `raw.githubusercontent.com` で実在を確かめ、URL は保存しない |
 | **外観** | 設定でライト・ダーク・システム追従を切り替える（既定はシステム追従） |
+| **設定編集** | key 名をそのまま検索。TOML のドット付き・引用符付きパスと整数・小数に対応し、型と周囲のテキストを保持して保存前に検証。未対応構文は外部エディタで編集 |
+
+設定編集画面では `hooks` 配下を非表示にします。設定ファイル内の内容は保持します。
 
 ## 必要環境
 
@@ -39,7 +42,7 @@ DMG から直接起動した場合は、起動時にアプリケーションフ�
 Swift Package として構成されている（`.xcodeproj` は無い。Xcode で `Package.swift` を直接開ける）。
 
 ```bash
-swift test                  # 単体テスト（375 件 / 52 スイート。MANUAL=1 で実CLI確認が加わる）
+swift test                  # 単体テスト（396 件 / 55 スイート。MANUAL=1 で実CLI確認が加わる）
 swift build                 # コンパイル確認
 
 # 配布形態は「手組みの .app バンドル」。build-app.sh が組み立て + 署名まで行う。
@@ -86,7 +89,7 @@ docs/signing.md         Developer ID 署名と公証のセットアップ
 - **走査対象はホワイトリスト**。列挙にないパスは存在しても読まない
   （`~/.claude/projects` の 129 MB や `logs_*.sqlite` を踏まないため）
 - **削除・移動してよい対象を限定**する。`WriteGuard` を通らない経路は CI が止める
-- 設定ファイルの書き戻しは 2 か所のみ。MCP と Plugin の追加・削除は各 CLI に委譲する
+- 設定の書き戻しは Registry・MCPScanner・ガード付き ConfigWriter のみ。MCP と Plugin の追加・削除は各 CLI に委譲する
   （`~/.claude.json` は 98 KB あり、直接書き戻すと実行中の Claude と競合して全状態を壊す）
 - **自分の永続ファイルは 1 つだけ。** キャッシュディレクトリを持たず、`URLSession` は
   `.ephemeral`、一時展開は OS の一時領域で完結させる
