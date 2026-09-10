@@ -65,6 +65,7 @@ CLI は1コマンドごとに終了する。キャッシュと削除 Undo 情報
 | `MIGRATION_CONFLICT` | 移行先に既存データがあり上書きできない |
 | `OUTPUT_TOO_LARGE` | 応答が2 MBの上限を超えた |
 | `LEGACY_APP_RUNNING` | ManageArms が実行中のため破壊的操作を拒否した |
+| `OPERATION_FAILED` | WriteGuard 以外の理由で操作が失敗した |
 
 ---
 
