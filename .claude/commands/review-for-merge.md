@@ -20,7 +20,7 @@ allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(swift
 まず走らせる:
 
 ```bash
-./Scripts/check-invariants.sh
+./scripts/check-invariants.sh
 ```
 
 緑でも、**検査の許可リストを広げていないか**を目で確認する。

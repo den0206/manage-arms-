@@ -27,7 +27,8 @@ Agent Tool が守る対象:
 
 ## 2. WriteGuard 不変条件（現行と同等を維持）
 
-`writeGuard.ts` モジュールがすべての書き込み・削除操作の前に通過させる。`writeGuard.ts` 以外のコードがファイルを操作しない。
+Skill / Subagent の実体とリンクに対する書き込み・削除は、すべて `writeGuard.ts` を通す。
+`registry.json` は `registry.ts`、`mcp.json` は `mcpScanner.ts` が扱う（§3）。この 3 ファイル以外は `node:fs` の書き込み系 API を呼ばない。
 
 ### 2.1 名前検証（`assertValidName`）
 
@@ -48,14 +49,16 @@ Agent Tool が守る対象:
 
 許可条件（どちらか一方を満たすこと）:
 
-1. **自分が張った symlink** — リンク先が `managedRoots` の配下である
+1. **自分が張ったリンク** — リンク先が `managedRoots` の配下である
+   （macOS / Linux は symlink、Windows は junction / hardlink。hardlink は
+   `fs.stat` の `ino` がストア内実体と一致することで判定する）
 2. **registry.json に記録された実体** — `managedRoots` または退避ディレクトリの配下にある
 
 二重ガード: ホワイトリストを通過しても `deniedNames` / `deniedExtensions` で拒否する。
 
 ### 2.3 作成ガード（`assertSafeCreation`）
 
-作成先の親ディレクトリに含まれる symlink が管理ルート外を指していないか検査する。
+作成先の親ディレクトリに含まれる symlink / junction が管理ルート外を指していないか検査する。
 `~/.claude -> /outside` のような付け替えで管理外への書き込みを防ぐ。
 
 ### 2.4 拒否リスト（変更なし）

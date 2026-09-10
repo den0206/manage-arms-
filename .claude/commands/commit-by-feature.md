@@ -28,7 +28,7 @@ allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git a
 | `i18n` | `l10n/` |
 | `build` | `Package.swift`・`package.json`・`scripts/`・`.vscode/` |
 | `release` | `.github/workflows/`・リリーススクリプト・`CHANGELOG.md` |
-| `ci` | `.github/workflows/`・`Scripts/check-invariants.sh` |
+| `ci` | `.github/workflows/`・`scripts/check-invariants.sh` |
 | `docs` | `README.md`・`README.ja.md`・`DESIGN.md`・`CLAUDE.md`・`docs/` |
 
 - 同じ機能の「新規ファイル」「既存ファイルの修正」「対応するテスト」は**同じグループ**に含める。

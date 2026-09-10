@@ -12,6 +12,8 @@ Phase 1: プロトタイプ
     ↓
 Phase 2: alpha / beta（GitHub Releases）
     ↓
+Phase 2.5: TypeScript 統一・クロスプラットフォーム化
+    ↓
 Phase 3: 安定版（Open VSX + GitHub Releases）
 ```
 
@@ -89,16 +91,16 @@ Phase 3: 安定版（Open VSX + GitHub Releases）
 
 - [x] 管理対象のSkill / Subagentを有効化・無効化するCLIとDashboard操作を追加
 - [x] Dashboardの一覧キャッシュを非表示時に破棄
-- [ ] MCP稼働状態をDashboard表示中だけポーリングして表示
+- [x] MCP稼働状態をDashboard表示中だけポーリングして表示
 - [x] MCP追加・削除の構造化CLI境界を追加
 - [x] 公開GitHub URLからユーザー全体のSkillを追加するCLI境界を追加
 - [x] Dashboardから公開GitHub URLを入力してSkillを追加する導線を追加
-- [x] 管理対象Skill / Subagentの削除と30秒Undoを追加
+- [x] 管理対象Skill / Subagentの削除を追加（30秒UndoはD-5で廃止し、確認ダイアログに一本化）
 - [x] 更新の差分プレビューと、再取得・検証後の適用を追加
 - [x] Cursor向けMCP追加・削除のDashboard操作を追加
 - [x] 旧ManageArmsのregistryと無効化中実体を確認後に移行する初回フローを追加
-- [ ] Workspace Trust・Remote・旧Mac App起動中の操作拒否を全コマンドに適用
-- [ ] Universal CLI、リソース計測、GitHub Releases配布を追加
+- [x] Workspace Trust・Remote・旧Mac App起動中の操作拒否を全コマンドに適用
+- [ ] リソース計測とGitHub Releases配布を追加（Universal CLI同梱はPhase 2.5で廃止）
 
 | 機能     | 詳細                                                                                     |
 | -------- | ---------------------------------------------------------------------------------------- |
@@ -106,7 +108,7 @@ Phase 3: 安定版（Open VSX + GitHub Releases）
 | 初回移行 | 旧 `registry.json` を確認後に `globalStorageUri` へ移行                                  |
 | 安全性   | WriteGuard、プロセス間ロック、Workspace Trust、Remote拒否、旧Mac App起動中の書き込み拒否 |
 | 資源管理 | 上限・破棄条件の単体テスト、View非表示時の解放、RSS・保存容量計測                        |
-| 配布物   | arm64とx86_64を結合した未署名Universal CLIをVSIXへ同梱                                   |
+| 配布物   | VSIX単体（Universal CLI同梱はPhase 2.5で廃止）                                           |
 
 ### 配布
 
@@ -119,8 +121,48 @@ Phase 3: 安定版（Open VSX + GitHub Releases）
 ### 完了条件
 
 - [product-requirements.md](product-requirements.md) のβ版条件を満たす
-- Cursor Stableで実CLIを使うE2Eが通る
-- 最初の公開前と、CLI・VSIX組み立て・配布経路の変更時に、GitHubから取得したVSIXの初回CLI起動を実機確認する
+- Cursor Stableで実モジュールを使うE2Eが通る
+- 最初の公開前と、VSIX組み立て・配布経路の変更時に、GitHubから取得したVSIXの初回起動を実機確認する
+
+## Phase 2.5 — TypeScript統一・クロスプラットフォーム化
+
+**目的**: Swift CoreとCLIをTypeScriptへ移し、macOS / Linux / Windowsで全機能を提供する（設計決定 D-1〜D-10）。
+
+**規模**: Swift実装 約4,900行、Swiftテスト 約5,300行。動作中のPhase 2機能を止めないため、
+D-10の「TypeScript先行実装 → Swift削除」の順で進め、5が終わるまでSwiftを消さない。
+
+### 進捗
+
+- [x] 1. 基盤 — `writeGuard.ts`、`registry.ts`（O_EXCLロック）、走査ホワイトリスト（`source.ts`）とテスト
+  （`agent.ts`・`env.ts`・`errors.ts`・`projectScan.ts`の純粋部分を含む。`check-invariants.sh`のD-9検査も先行して追加した。`assertUserArtifact`は`projectScan`が要るので2で入れる）
+- [x] 2. 走査 — frontmatter、Skill / Subagent / MCP / Plugin スキャナ、`inventory`
+  （`inventory`は仕様の`InventoryItem`だけを組み立てる。旧`ResourceRow`の容量・削除コマンド・使用実績はMac App向けなので移さない）
+- [x] 3. 取得・適用 — `fetcher.ts`（`fetch` + zip展開）、`installer.ts`、`updater.ts`、`skillManager.ts`
+  （`github.ts`を含む。実書き込みは`writeGuard.ts`の関数だけに置き、`fetcher.ts`は`./env`を読み込まないことでOS一時領域から出られないようにした）
+- [x] 4. 周辺 — `processScanner.ts`（`ps` / `Get-CimInstance`）、PATH検知、貼り付け解析、`migrate`
+  （使用実績の走査は移さない。新しい`InventoryItem`に最終使用日が無く、読む相手がいないため）
+- [x] 5. 拡張の呼び出し口を`child_process.spawn`から直接のモジュール呼び出しへ差し替え
+  （`agentTool.ts`が仕様のモジュールAPIの入口。`src/cli.ts`は削除）
+- [x] 6. Windowsのリンク層（junction / hardlink）を実装し、3 OSのCIを整える
+- [x] 7. Swift一式・`Package.swift`・CLI依存スクリプトを削除し、`check-invariants.sh`をTS版へ書き換え
+- [x] 8. `CLAUDE.md`の完了の定義・不変条件をTypeScript版へ差し替え
+
+| 作業           | 詳細                                                                                     |
+| -------------- | ---------------------------------------------------------------------------------------- |
+| 削除           | `Sources/`、`Tests/`、`Package.swift`、`scripts/build-cli.sh`、`scripts/test-vsix-cli.sh` |
+| リンク方式     | macOS / Linuxはsymlink、WindowsはjunctionとhardlinkでD-4を実装                            |
+| MCP稼働判定    | 全プロセスを1回取得し、登録済みMCP定義と親PIDで突き合わせる（D-8）                        |
+| 書き込み経路   | `writeGuard.ts` / `registry.ts` / `mcpScanner.ts`の3経路に限定し、静的検査で守る（D-9）   |
+| Undo           | ゴミ箱移動と30秒Undoを削除し、確認ダイアログへ一本化（D-5）                               |
+| CI             | Ubuntu・macOS・Windowsで同じテストを回す。Cursor E2EはmacOSのみ                           |
+
+### 完了条件
+
+- [x] Swift、`Package.swift`、CLI同梱処理がmainに残っていない
+- [x] `npm run check`（型検査・テスト・不変条件検査）がローカルで通る
+- [ ] 3 OSのCIが緑になる（Windowsランナーでの初回実行を待つ）
+- [ ] Windows実機でjunction / hardlinkによる追加・有効化・更新・削除が動く
+- [x] VSIXにバイナリを同梱しない状態でCursor E2Eが通る（112 KB / 上限20 MB）
 
 ## Phase 3 — 安定版
 
@@ -128,7 +170,7 @@ Phase 3: 安定版（Open VSX + GitHub Releases）
 
 ### 公開順序
 
-1. Node・Swiftの全検査、Cursor E2E、Universal Binary、資源上限を検証する
+1. 3 OSでのNodeの全検査、Cursor E2E、資源上限を検証する
 2. VSIXを一度だけ組み立て、SHA-256を記録する
 3. `ovsx publish`でOpen VSXへ公開する
 4. 同じVSIXをGitHub Releaseへ添付する
@@ -140,7 +182,7 @@ Phase 3: 安定版（Open VSX + GitHub Releases）
 ## CI・依存管理
 
 - Node 20、npm、`package-lock.json`、Node標準 `node:test` を使う
-- UbuntuでTypeScriptの型検査・単体テスト、macOSでSwift・Universal CLI・VSIX・Cursor E2Eを全PRで実行する
+- Ubuntu・Windowsで型検査と単体テスト、macOSで単体テスト・VSIX・Cursor E2Eを全PRで実行する
 - 定期canaryは設けない
 - 依存は必要最小限かつ正確な版に固定し、`ignore-scripts=true`を使う
 - 第三者GitHub Actionsはcommit SHAへ固定し、Dependabotで更新する
@@ -153,7 +195,7 @@ Phase 3: 安定版（Open VSX + GitHub Releases）
 | 一覧表示                 | キャッシュヒット時300 ms未満 |
 | View非表示時のメモリ増分 | 65 MB未満                    |
 | VSIX                     | 20 MB未満                    |
-| CLI stdout / stderr      | 各2 MB                       |
+| 外部コマンドのstdout / stderr | 各2 MB                  |
 | ダウンロード             | 50 MB                        |
 | 展開後                   | 200 MB                       |
 | 単一ファイル             | 20 MB                        |
