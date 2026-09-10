@@ -64,21 +64,21 @@ Phase 3: 安定版（Open VSX + GitHub Releases）
 - [x] Cursor E2E実行入口を追加（`CURSOR_PATH`指定時）
 - [x] 拡張のCLI出力上限（stdout / stderr 各2 MB）と180秒タイムアウトを実装
 - [x] Cursor CLIで隔離ディレクトリにVSIXをインストールし、拡張IDの認識を確認
-- [x] Tree ViewをScope → Agent → 種別 → Toolへ再構成し、一覧キャッシュを180秒で破棄
-- [x] Toolをユーザー追加とエージェント同梱に分けて表示
-- [x] Cursor Stable実機で初回起動とTree View表示を確認
+- [x] DashboardをCurrent Project / User Global・種別で絞り込み、一覧キャッシュを180秒で破棄
+- [x] DashboardでToolをYour toolsとBundledに分けて表示し、カードから操作を開始できるようにした
+- [x] Cursor Stable実機で初回起動とDashboard表示を確認
 
 | 機能               | 詳細                                                       |
 | ------------------ | ---------------------------------------------------------- |
 | `AgentToolCoreCLI` | `version`、`scan-path`、`inventory` を実装                 |
-| TS 拡張            | Activity Bar、Tree View、PATH 検知結果を表示               |
+| TS 拡張            | Activity Bar、Dashboard、PATH 検知結果を表示               |
 | CLI 境界           | `child_process.spawn` と JSON stdin/stdout で接続          |
 | テスト             | Swift Testing、Node `node:test`、固定 Cursor Stable の E2E |
 
 ### 完了条件
 
 - CLI の3コマンドが偽ホームで動く
-- Cursor の Activity Bar に Current Project と User Global が表示される
+- Cursor の Activity Bar にDashboardが表示され、Current Project と User Globalで絞り込める
 - Ubuntu のTypeScript検査とmacOSのSwift・Cursor E2Eが通る
 
 ## Phase 2 — alpha / beta
@@ -87,14 +87,15 @@ Phase 3: 安定版（Open VSX + GitHub Releases）
 
 ### 進捗
 
-- [x] 管理対象のSkill / Subagentを有効化・無効化するCLIとTree View操作を追加
-- [x] MCP稼働状態をView表示中だけ3秒ポーリングし、非表示時に破棄
+- [x] 管理対象のSkill / Subagentを有効化・無効化するCLIとDashboard操作を追加
+- [x] Dashboardの一覧キャッシュを非表示時に破棄
+- [ ] MCP稼働状態をDashboard表示中だけポーリングして表示
 - [x] MCP追加・削除の構造化CLI境界を追加
 - [x] 公開GitHub URLからユーザー全体のSkillを追加するCLI境界を追加
-- [x] Tree Viewから公開GitHub URLを入力してSkillを追加する導線を追加
+- [x] Dashboardから公開GitHub URLを入力してSkillを追加する導線を追加
 - [x] 管理対象Skill / Subagentの削除と30秒Undoを追加
 - [x] 更新の差分プレビューと、再取得・検証後の適用を追加
-- [x] Cursor向けMCP追加・削除のTree View操作を追加
+- [x] Cursor向けMCP追加・削除のDashboard操作を追加
 - [x] 旧ManageArmsのregistryと無効化中実体を確認後に移行する初回フローを追加
 - [ ] Workspace Trust・Remote・旧Mac App起動中の操作拒否を全コマンドに適用
 - [ ] Universal CLI、リソース計測、GitHub Releases配布を追加
