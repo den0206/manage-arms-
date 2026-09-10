@@ -27,7 +27,7 @@ Agent Tool が守る対象:
 
 ## 2. WriteGuard 不変条件（現行と同等を維持）
 
-AgentToolCore CLI がすべての書き込み・削除操作の前に通過させる。TypeScript 拡張は直接ファイルを操作しない。
+`writeGuard.ts` モジュールがすべての書き込み・削除操作の前に通過させる。`writeGuard.ts` 以外のコードがファイルを操作しない。
 
 ### 2.1 名前検証（`assertValidName`）
 
@@ -76,12 +76,12 @@ AgentToolCore CLI がすべての書き込み・削除操作の前に通過さ�
 
 | 操作 | 書き込み主体 | 禁止事項 |
 |---|---|---|
-| Skill / Subagent の追加・削除・更新 | AgentToolCore CLI のみ | TS 拡張から直接 `fs.writeFile` しない |
-| MCP 設定の追加・削除 | `MCPManager`（CLI 内）のみ | `mcp.json` の直接上書き禁止 |
-| `registry.json` の書き込み | AgentToolCore CLI のみ | TS 拡張は読み取り専用（globalStorageUri 経由） |
-| 一時ファイル | CLI プロセス内の `defer` で管理 | 残骸を残さない |
+| Skill / Subagent の追加・削除・更新 | `writeGuard.ts` 経由のみ | `writeGuard.ts` の外から `fs.writeFile` / `fs.rename` しない |
+| MCP 設定の追加・削除 | `mcpScanner.ts` の専用パスのみ | `mcp.json` の直接上書き禁止 |
+| `registry.json` の書き込み | `registry.ts` のみ | 他モジュールは `registry.ts` の API 経由で読み書きする |
+| 一時ファイル | `try/finally` で確実に削除 | 残骸を残さない |
 
-全コマンドの `storagePath` は絶対パスとして検証する。破壊的操作では `selector.sourcePath` を
+全操作の `storagePath` は絶対パスとして検証する。破壊的操作では `selector.sourcePath` を
 直接信用せず、最新インベントリと照合して1件に確定してから WriteGuard を通す。
 
 ---
@@ -111,36 +111,63 @@ VS Code の `workspace.isTrusted` が `false` の場合:
 
 複数 Cursor ウィンドウの同時書き込みを防ぐ:
 
-- **方式**: POSIX `flock()` を `registry.lock` に適用
-- **タイムアウト**: 10 秒。超過したら `LOCK_TIMEOUT` エラーを返してユーザーに通知する
-- **自動解放**: CLI プロセス終了・クラッシュ時に OS がロックを解放する（ゾンビロックが残らない）
+- **方式**: `fs.openSync(lockPath, 'wx')` の `O_EXCL` フラグで原子的にロックファイルを生成する
+- **タイムアウト**: 10 秒。50 ms ポーリングで再試行し、超過したら `LOCK_TIMEOUT` エラーを返す
+- **解放**: 正常終了時は `fs.unlinkSync(lockPath)`。クラッシュで残った stale ロックは mtime が 30 秒超なら削除して再試行する
+- **npm `proper-lockfile` は使わない**（Windows でのプロセス死活確認の挙動差を避けるため）
+
+```typescript
+// registry.ts 内の実装イメージ
+async function withRegistryLock<T>(storagePath: string, fn: () => Promise<T>): Promise<T> {
+  const lockPath = path.join(storagePath, 'registry.lock');
+  const deadline = Date.now() + 10_000;
+  while (true) {
+    try {
+      const fd = fs.openSync(lockPath, 'wx');
+      fs.closeSync(fd);
+      break;
+    } catch (e: any) {
+      if (e.code !== 'EEXIST') throw e;
+      // stale ロック判定（30秒超）
+      try {
+        const stat = fs.statSync(lockPath);
+        if (Date.now() - stat.mtimeMs > 30_000) { fs.unlinkSync(lockPath); continue; }
+      } catch {}
+      if (Date.now() >= deadline) throw new AgentToolError('LOCK_TIMEOUT', 'Registry lock timeout');
+      await new Promise(r => setTimeout(r, 50));
+    }
+  }
+  try { return await fn(); }
+  finally { try { fs.unlinkSync(lockPath); } catch {} }
+}
+```
 
 ---
 
-## 7. CLI 出力のシークレットマスク
+## 7. HTTP 応答のシークレットマスク
 
-`Exec` 経由の CLI 呼び出しでは stdout / stderr を各2 MBに制限し、以下のパターンを置換する:
+`fetch()` の応答テキストは 2 MB で打ち切り、ユーザーへ表示する前に以下のパターンを置換する:
 
 ```
 --token <value>       → --token [REDACTED]
--H Authorization: ... → -H Authorization: [REDACTED]
+Authorization: ...    → Authorization: [REDACTED]
 Bearer <value>        → Bearer [REDACTED]
 ```
 
-- raw 出力はプロセス終了直後に破棄し、マスク済みの要約だけを通知が閉じるまで保持する
+- raw レスポンスボディはメモリ上でのみ処理し、ディスクに書かない
+- エラー通知が閉じたらマスク済み要約も破棄する
 - 永続ログは作らない
-- 生の出力はプロセス終了時に破棄する（ディスクに書かない）
 
 ---
 
 ## 8. ダウンロード・取得
 
 - **公開リポジトリのみ・未認証**（初版スコープ）
-- `URLSession.ephemeral` を使う（HTTP キャッシュファイルを生やさない）
-- ダウンロード先は `FileManager.temporaryDirectory`（`defer` で削除）
-- zip 展開後、`assertValidName` を各エントリに適用してから移動する
-- GitHub API 応答は2 MB、アーカイブは50 MB、展開後は200 MB、単一ファイルは20 MBで打ち切る
-- アーカイブはメモリへ全量保持せず、一時ファイルへ流す
+- `fetch()` に `cache: 'no-store'` を指定する（HTTP キャッシュファイルを生やさない）
+- ダウンロード先は `path.join(os.tmpdir(), 'agent-tool-fetch-<uuid>')` とし `try/finally` で削除する
+- zip 展開は npm パッケージ（`yauzl` 等）を使い、各エントリに `assertValidName` を適用してから移動する
+- GitHub API 応答は 2 MB、アーカイブは 50 MB、展開後は 200 MB、単一ファイルは 20 MB で打ち切る
+- アーカイブはメモリへ全量保持せず、`ReadableStream` で一時ファイルへ流す
 
 ---
 
@@ -167,11 +194,9 @@ Bearer <value>        → Bearer [REDACTED]
 
 ---
 
-## 10. 既存 Mac App との競合防止
+## 10. 既存データとの競合防止
 
-- 旧 `registry.json`（`~/Library/Application Support/ManageArms/`）は **読み取りのみ**参照する
+- 旧 `registry.json`（`~/Library/Application Support/ManageArms/`）は移行時に **読み取りのみ**参照する
 - 移行完了まで旧ファイルへの書き込みは行わない
 - 移行後、旧ファイルの削除はユーザーに委ねる（自動削除しない）
-- Mac App の追加リリースや移行告知は行わない
-- `add` / `remove` / `toggle` / `update-apply` / `mcp-add` / `mcp-remove` / `migrate` の直前に ManageArms の実行中プロセスを確認する
-- 実行中なら `LEGACY_APP_RUNNING` で拒否し、終了後の再実行を求める
+- `LEGACY_APP_RUNNING` エラーコードは廃止（Mac App は main ブランチから削除済み）

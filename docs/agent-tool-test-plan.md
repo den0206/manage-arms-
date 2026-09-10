@@ -7,122 +7,135 @@
 
 ## 1. 方針
 
+Swift CLI は廃止。全テストを TypeScript（Node.js）に統一する。
+
 | 層 | ツール | 実行タイミング |
 |---|---|---|
-| AgentToolCore の純粋関数・ロジック | Swift Testing（既存全件） | 全 PR |
-| AgentToolCore CLI コマンド（偽ホーム） | Swift Testing（偽環境） | 全 PR |
-| TS 拡張 ↔ CLI 境界 | Node.js `node:test` | 全 PR |
-| E2E（Cursor Stable + 実 CLI） | `@vscode/test-electron` | 全 PR |
+| WriteGuard / Registry / Installer 純粋ロジック（偽ホーム） | Node.js `node:test` | 全 PR |
+| DashboardProvider・拡張コマンド（VS Code API モック） | Node.js `node:test` | 全 PR |
+| E2E（Cursor Stable + 実モジュール） | `@vscode/test-electron` | 全 PR |
 | 手動確認（実機） | — | リリース前 |
 
 **書かないテスト**: UI スナップショット、モックを検証するだけのテスト。
 
 ---
 
-## 2. AgentToolCore Swift テスト（既存を維持）
+## 2. TypeScript モジュールテスト
 
-現行 Swift テストを `AgentToolCore` へ改名して維持する。件数は完了条件にせず、
-新規 CLI コマンドの追加に伴い以下を追加する。
+Node.js `node:test` を使う。実ユーザーのホームに到達しないよう、
+すべてのテストで偽ホームを使う。
 
-### 2.1 新規追加テスト
+### 2.1 偽ホームのセットアップ
 
-#### `version` コマンド
+```typescript
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-```swift
-@Test func versionOutputsProtocolVersion() throws {
-    let out = try runCLI("version", input: "")
-    #expect(out["protocolVersion"] as? String == "1")
-    #expect(out["ok"] as? Bool == true)
+function withFakeHome(fn: (home: string) => Promise<void>): Promise<void> {
+  const home = mkdtempSync(join(tmpdir(), 'agent-tool-test-'));
+  return fn(home).finally(() => rmSync(home, { recursive: true }));
 }
 ```
 
-#### `scan-path` コマンド
+### 2.2 優先テスト項目
 
-```swift
-@Test func scanPathReturnsMockedAgents() throws {
-    let env = Environment.test(home: fakeHome, run: { command in
-        command.contains("claude") ? "1.2.3" : ""
-    })
-    let result = try ScanPath.run(env: env)
-    #expect(result.agents.first(where: { $0.id == "claude" })?.found == true)
-    #expect(result.agents.first(where: { $0.id == "codex" })?.found == false)
-}
+#### WriteGuard — 名前検証
+
+```typescript
+test('パストラバーサル名を拒否する', () => {
+  assert.throws(() => assertValidName('../evil'), /INVALID_NAME/);
+  assert.throws(() => assertValidName('.hidden'), /INVALID_NAME/);
+  assert.throws(() => assertValidName('a/b'), /INVALID_NAME/);
+});
 ```
 
-#### `inventory` コマンド
+#### WriteGuard — 作成ガード
 
-```swift
-@Test func inventoryReturnsProjectAndUserItems() throws {
-    // 偽ホームに skill を配置して inventory を呼ぶ
-}
+```typescript
+test('管理ルート外を指す親 symlink を拒否する', async () => {
+  await withFakeHome(async home => {
+    // ~/.claude -> /outside のような symlink を作ってから assertSafeCreation を呼ぶ
+    await assert.rejects(() => assertSafeCreation(dest, managedRoots), /SYMLINK_OUTSIDE_STORE/);
+  });
+});
 ```
 
-#### `toggle` / `remove` / `rollback`
+#### Registry — プロセス間ロック
 
-```swift
-@Test func removeMovesToTrashAndRollbackRestores() throws {
-    // 別プロセス相当で remove → undo のパスを rollback へ渡し、元パスに戻ることを確認
-}
+```typescript
+test('並行書き込みが直列化される', async () => {
+  await withFakeHome(async home => {
+    const storagePath = join(home, 'storage');
+    fs.mkdirSync(storagePath, { recursive: true });
+    // 2 つの withRegistryLock を同時に実行し、後発が待機することを確認
+    const results: number[] = [];
+    await Promise.all([
+      withRegistryLock(storagePath, async () => { results.push(1); await delay(50); results.push(2); }),
+      withRegistryLock(storagePath, async () => { results.push(3); }),
+    ]);
+    assert.deepEqual(results, [1, 2, 3]);
+  });
+});
 ```
 
-#### WriteGuard の新規検査（CLI エントリポイント経由）
+#### Installer — `add` の往復
 
-```swift
-@Test func addRejectsPathTraversalName() throws {
-    #expect(throws: WriteGuard.Denial.invalidName("../evil")) {
-        try runCLI("add", input: #"{"url":"...","name":"../evil",...}"#)
-    }
-}
+```typescript
+test('Skill を追加して inventory に現れる', async () => {
+  await withFakeHome(async home => {
+    // 偽 GitHub レスポンスを注入して add → inventory の往復を確認
+  });
+});
 ```
 
-#### プロセス間ロック
+#### Installer — `migrate`
 
-```swift
-@Test func concurrentWritesSerialize() async throws {
-    // 2 プロセスが同時に registry.json を書こうとしたとき、後発が待機することを確認
-}
+```typescript
+test('旧フィールドを除去して schemaVersion を付ける', async () => {
+  await withFakeHome(async home => {
+    // browserDetection / menuBar / appearance が消え、schemaVersion: "1" が付くこと
+    // resources / repos が保持されること
+  });
+});
 ```
 
-#### `migrate` コマンド
+#### Windows 分岐 — 直接配置（symlink なし）
 
-```swift
-@Test func migrateStripsDeprecatedFields() throws {
-    // browserDetection / menuBar / appearance が消えること
-    // schemaVersion: "1" が付くこと
-    // resources が保持されること
-}
+```typescript
+test('Windows では symlink の代わりにファイルをコピーする', async () => {
+  // platform を 'win32' にモックして Installer の挙動を確認
+});
 ```
 
-### 2.2 走査範囲テスト（設計の生命線）
+### 2.3 走査範囲テスト（設計の生命線）
 
-既存のホワイトリストテストを引き継ぐ。
-CLI が `projectPath` の外を走査しないことを確認する。
+走査ホワイトリスト（`Source` 列挙相当）の外を読まないことを確認する。
+`projectPath` の外を走査しないことをテストする。
 
 ---
 
-## 3. TypeScript 拡張ユニットテスト
+## 3. 拡張コマンド・DashboardProvider ユニットテスト
 
-Node.js 標準の `node:test` を使い、CLI 起動関数を差し替えて拡張のロジックを検証する。
+Node.js `node:test` を使い、VS Code API をモックして拡張ロジックを検証する。
 
 | テスト対象 | 内容 |
 |---|---|
-| `protocolVersion` チェック | 不一致時に操作を停止すること |
-| `globalStorageUri` の受け渡し | 各コマンド入力に `storagePath` が含まれること |
-| 削除 Undo の保持 | 元パスとゴミ箱パスを30秒だけ保持し、非表示時に破棄すること |
-| ファイル監視トリガー | 監視パターンが変化したとき `inventory` が再実行されること |
-| Remote 環境ガード | `vscode.env.remoteName` が非 null のとき CLI を起動しないこと |
-| 未信頼ワークスペースガード | `workspace.isTrusted === false` のとき書き込みコマンドを呼ばないこと |
+| `globalStorageUri` の受け渡し | 各操作に `storagePath` が含まれること |
+| Remote 環境ガード | `vscode.env.remoteName` が非 null のとき書き込みを拒否すること |
+| 未信頼ワークスペースガード | `workspace.isTrusted === false` のとき書き込みを拒否すること |
 | MCP ポーリング | View 表示中のみ 3 秒タイマーが動くこと |
-| メモリ解放 | View 非表示時に watcher、タイマー、キャッシュ、Undo、差分を破棄すること |
-| 出力上限 | stdout / stderr が各2 MBで打ち切られること |
+| メモリ解放 | View 非表示時に watcher、タイマー、キャッシュを破棄すること |
+| HTTP 応答上限 | レスポンスボディが 2 MB で打ち切られること |
 
 ---
 
-## 4. E2E テスト（Cursor Stable + 実 CLI）
+## 4. E2E テスト（Cursor Stable + 実モジュール）
 
 `@vscode/test-electron` の `runTests` に固定バージョンの Cursor Stable 実行ファイルを
 `vscodeExecutablePath` として渡す。ツールの既定ダウンロード先である VS Code は使わない。
 Cursor の取得 URL と SHA-256 は CI 設定に固定し、macOS の全 PR で回す。
+（Swift CLI は廃止のため「実 CLI」ではなく実モジュールで動作する）
 
 ### 4.1 必須シナリオ
 
@@ -131,8 +144,7 @@ Cursor の取得 URL と SHA-256 は CI 設定に固定し、macOS の全 PR で
 | Tree View の表示 | Current Project と User Global の両セクションが表示される |
 | PATH 検知 | `claude` が見つかりバージョンが表示される |
 | ツール追加 | GitHub URL から Skill を追加し Tree View に現れる |
-| ツール削除 | 削除後に Tree View から消え、ゴミ箱に移動している |
-| ロールバック | 削除後に「元に戻す」で復元できる |
+| ツール削除 | 確認後に削除され、Dashboard から消える |
 | 有効化/無効化 | トグル後に ✓ / ✗ が切り替わる |
 | 更新プレビュー | Diff Editor が開く |
 | 更新適用 | 更新後に SHA が変わる |
@@ -144,12 +156,12 @@ Cursor の取得 URL と SHA-256 は CI 設定に固定し、macOS の全 PR で
 
 ```bash
 # 偽ホームを使って実ユーザーのファイルに触れない
-export AGENT_TOOL_HOME=/tmp/agent-tool-e2e-home
-mkdir -p $AGENT_TOOL_HOME/.claude/commands
+export AGENT_TOOL_HOME=$(mktemp -d)
+mkdir -p "$AGENT_TOOL_HOME/.claude/commands"
 ```
 
-CLI は `AGENT_TOOL_HOME` をテスト時の `Environment.home` として扱う。
-このフックは E2E と CLI テストだけで設定し、通常起動では `NSHomeDirectory()` を使う。
+TypeScript モジュールは `AGENT_TOOL_HOME` を `os.homedir()` の代わりに使う。
+このフックは E2E とモジュールテストだけで設定し、通常起動では `os.homedir()` を使う。
 
 ---
 
@@ -177,26 +189,29 @@ CLI は `AGENT_TOOL_HOME` をテスト時の `Environment.home` として扱う�
 
 ## 7. CI 構成
 
+Swift テストは廃止。TypeScript テストと E2E を 2 ジョブで回す。
+
 ```yaml
 # .github/workflows/ci.yml
 
 jobs:
-  swift-tests:
-    runs-on: macos-latest
-    steps:
-      - swift build
-      - swift test
-      - # arm64 + x86_64 Universal CLI、VSIX 20 MB上限
-      - # 固定 URL と SHA-256 で Cursor Stable を取得
-      - npm run test:e2e
-
   ts-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest   # Linux ランナーで全 TypeScript テストを実行
     steps:
-      - # Node 20
-      - npm ci
-      - npm run typecheck
-      - npm test
+      - uses: actions/setup-node@<sha>
+        with: { node-version: '20' }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test          # node:test — WriteGuard / Registry / Installer / 拡張コマンド
+
+  e2e-tests:
+    runs-on: macos-latest    # Cursor Stable は macOS でのみ実行
+    steps:
+      - uses: actions/setup-node@<sha>
+        with: { node-version: '20' }
+      - run: npm ci
+      - run: npm run test:e2e  # 固定 URL と SHA-256 で Cursor Stable を取得
+      - # VSIX 20 MB 上限チェック
 ```
 
-両ジョブをPRゲートにする。定期canaryは設けない。
+両ジョブを PR ゲートにする。定期 canary は設けない。
