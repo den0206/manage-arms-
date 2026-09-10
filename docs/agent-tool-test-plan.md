@@ -9,10 +9,10 @@
 
 | 層 | ツール | 実行タイミング |
 |---|---|---|
-| AgentToolCore の純粋関数・ロジック | Swift Testing（既存 375 件） | 全 PR |
+| AgentToolCore の純粋関数・ロジック | Swift Testing（既存全件） | 全 PR |
 | AgentToolCore CLI コマンド（偽ホーム） | Swift Testing（偽環境） | 全 PR |
-| TS 拡張 ↔ CLI 統合（モック CLI） | Jest / Vitest | 全 PR |
-| E2E（Cursor Stable + 実 CLI） | `@vscode/test-electron` | 日次 CI |
+| TS 拡張 ↔ CLI 境界 | Node.js `node:test` | 全 PR |
+| E2E（Cursor Stable + 実 CLI） | `@vscode/test-electron` | 全 PR |
 | 手動確認（実機） | — | リリース前 |
 
 **書かないテスト**: UI スナップショット、モックを検証するだけのテスト。
@@ -21,7 +21,8 @@
 
 ## 2. AgentToolCore Swift テスト（既存を維持）
 
-現行 375 件のテストを `AgentToolCore` として維持する。新規 CLI コマンドの追加に伴い以下を追加する。
+現行 Swift テストを `AgentToolCore` へ改名して維持する。件数は完了条件にせず、
+新規 CLI コマンドの追加に伴い以下を追加する。
 
 ### 2.1 新規追加テスト
 
@@ -39,8 +40,8 @@
 
 ```swift
 @Test func scanPathReturnsMockedAgents() throws {
-    let env = Environment.test(home: fakeHome, which: { name in
-        name == "claude" ? "/fake/bin/claude" : nil
+    let env = Environment.test(home: fakeHome, run: { command in
+        command.contains("claude") ? "1.2.3" : ""
     })
     let result = try ScanPath.run(env: env)
     #expect(result.agents.first(where: { $0.id == "claude" })?.found == true)
@@ -60,7 +61,7 @@
 
 ```swift
 @Test func removeMovesToTrashAndRollbackRestores() throws {
-    // remove → trashedPath を確認 → rollback → 元パスに戻ることを確認
+    // 別プロセス相当で remove → undo のパスを rollback へ渡し、元パスに戻ることを確認
 }
 ```
 
@@ -99,25 +100,29 @@ CLI が `projectPath` の外を走査しないことを確認する。
 
 ---
 
-## 3. TypeScript 拡張ユニットテスト（Jest / Vitest）
+## 3. TypeScript 拡張ユニットテスト
 
-CLI をモック（`jest.mock`）し、TS 拡張のロジックを単体でテストする。
+Node.js 標準の `node:test` を使い、CLI 起動関数を差し替えて拡張のロジックを検証する。
 
 | テスト対象 | 内容 |
 |---|---|
 | `protocolVersion` チェック | 不一致時に操作を停止すること |
 | `globalStorageUri` の受け渡し | 各コマンド入力に `storagePath` が含まれること |
-| ロールバックトークンの保持 | `remove` 後の通知に `rollbackToken` が渡されること |
+| 削除 Undo の保持 | 元パスとゴミ箱パスを30秒だけ保持し、非表示時に破棄すること |
 | ファイル監視トリガー | 監視パターンが変化したとき `inventory` が再実行されること |
 | Remote 環境ガード | `vscode.env.remoteName` が非 null のとき CLI を起動しないこと |
 | 未信頼ワークスペースガード | `workspace.isTrusted === false` のとき書き込みコマンドを呼ばないこと |
 | MCP ポーリング | View 表示中のみ 3 秒タイマーが動くこと |
+| メモリ解放 | View 非表示時に watcher、タイマー、キャッシュ、Undo、差分を破棄すること |
+| 出力上限 | stdout / stderr が各2 MBで打ち切られること |
 
 ---
 
 ## 4. E2E テスト（Cursor Stable + 実 CLI）
 
-`@vscode/test-electron` を使って Cursor Stable 上で実行する。日次 CI で回す。
+`@vscode/test-electron` の `runTests` に固定バージョンの Cursor Stable 実行ファイルを
+`vscodeExecutablePath` として渡す。ツールの既定ダウンロード先である VS Code は使わない。
+Cursor の取得 URL と SHA-256 は CI 設定に固定し、macOS の全 PR で回す。
 
 ### 4.1 必須シナリオ
 
@@ -143,16 +148,19 @@ export AGENT_TOOL_HOME=/tmp/agent-tool-e2e-home
 mkdir -p $AGENT_TOOL_HOME/.claude/commands
 ```
 
+CLI は `AGENT_TOOL_HOME` をテスト時の `Environment.home` として扱う。
+このフックは E2E と CLI テストだけで設定し、通常起動では `NSHomeDirectory()` を使う。
+
 ---
 
 ## 5. 互換性テスト
 
-| 対象 | PR | 日次 |
-|---|---|---|
-| モック CLI でのコマンド動作 | ✓ | — |
-| 実 AgentToolCore CLI での統合 | — | ✓ |
-| `protocolVersion` 不一致の検出 | ✓ | — |
-| 旧 `registry.json` スキーマの読み込み | ✓ | — |
+| 対象 | PR |
+|---|---|
+| モック CLI でのコマンド動作 | ✓ |
+| 実 AgentToolCore CLI での統合 | ✓ |
+| `protocolVersion` 不一致の検出 | ✓ |
+| 旧 `registry.json` スキーマの読み込み | ✓ |
 
 ---
 
@@ -160,39 +168,35 @@ mkdir -p $AGENT_TOOL_HOME/.claude/commands
 
 | 項目 | 理由 |
 |---|---|
-| `.app` を Finder から起動したときの PATH 解決 | GUI の PATH はターミナルと異なる |
 | ダークモード / ライトモードでの Tree View 表示 | 実機でしか確認できない |
 | 複数 Cursor ウィンドウ同時操作でのロック動作 | プロセス間制御は実機で確認 |
-| 公証済みバイナリの初回実行（Gatekeeper） | `spctl -a -vv` が `accepted` になること |
-| ManageArms との同時インストール期間の動作 | 移行期間の実動作確認 |
+| 配布VSIX内の未署名CLI初回起動 | 最初の公開前と、CLI・VSIX組み立て・配布経路を変えた場合にCursorからインストールして確認 |
+| RSS・保存容量 | リリース前に閾値内であることを実測 |
 
 ---
 
 ## 7. CI 構成
 
 ```yaml
-# .github/workflows/ci.yml（既存に追記）
+# .github/workflows/ci.yml
 
 jobs:
   swift-tests:
     runs-on: macos-latest
     steps:
       - swift build
-      - swift test                        # 375 件 + 新規 CLI テスト
+      - swift test
+      - # arm64 + x86_64 Universal CLI、VSIX 20 MB上限
+      - # 固定 URL と SHA-256 で Cursor Stable を取得
+      - npm run test:e2e
 
   ts-tests:
     runs-on: ubuntu-latest
     steps:
+      - # Node 20
       - npm ci
-      - npm test                          # Jest / Vitest
-
-  e2e-daily:
-    if: github.event_name == 'schedule'
-    runs-on: macos-latest
-    steps:
-      - # Cursor Stable をインストール
-      - npm run test:e2e
+      - npm run typecheck
+      - npm test
 ```
 
-**PR ゲート**: `swift-tests` + `ts-tests`
-**日次**: `e2e-daily`（実 CLI 使用）
+両ジョブをPRゲートにする。定期canaryは設けない。

@@ -7,18 +7,20 @@
 
 ## 1. ストレージ構成
 
-### 1.1 永続ファイル
+### 1.1 永続データ
 
 | ファイル | パス | 役割 |
 |---|---|---|
-| `registry.json` | `<globalStorageUri>/registry.json` | 唯一の永続ファイル。全管理リソースの出所・状態 |
-| `registry.lock` | `<globalStorageUri>/registry.lock` | プロセス間排他ロックファイル |
+| `registry.json` | `<globalStorageUri>/registry.json` | 唯一の可変メタデータ。全管理リソースの出所・状態 |
+| `registry.lock` | `<globalStorageUri>/registry.lock` | 内容を持たないプロセス間ロック inode |
+| `agents/` | `<globalStorageUri>/agents/` | 管理対象 Subagent の実体 |
+| `disabled-skills/` / `disabled-agents/` | `<globalStorageUri>/` | 無効化した管理対象実体の退避先 |
 
 **`globalStorageUri`** の実パスは Cursor が管理する。
 macOS の場合:
 
 ```
-~/Library/Application Support/Cursor/User/globalStorage/agent-tool.agent-tool/
+~/Library/Application Support/Cursor/User/globalStorage/yuuki-sakai.agent-tool/
 ```
 
 - VS Code の場合は `Cursor` が `Code` に変わる
@@ -29,9 +31,10 @@ macOS の場合:
 | 用途 | 場所 | 生存期間 |
 |---|---|---|
 | ダウンロード・zip 展開 | `FileManager.temporaryDirectory` | CLI プロセス内で `defer` 削除 |
-| ロールバックスナップショット | プロセスのメモリのみ | CLI プロセスが生きている間のみ |
+| 削除 Undo 情報 | TypeScript 拡張のメモリ | 通知の30秒間だけ |
 
-永続キャッシュディレクトリは持たない。
+永続キャッシュ、ログ、診断履歴、Undo スナップショットは持たない。Skill / Subagent の実体は
+管理対象データであり、キャッシュには数えない。
 
 ---
 
@@ -152,7 +155,7 @@ func withRegistryLock<T>(storagePath: URL, _ body: () throws -> T) throws -> T {
 | `add` | **必要** | read-modify-write + ファイル作成 |
 | `update-apply` | **必要** | read-modify-write + ファイル上書き |
 | `mcp-add/remove` | **必要** | MCP 設定ファイルの read-modify-write |
-| `scan-path` | 不要 | registry を触らない |
+| `scan-path` | 不要 | 読み取りだけ |
 | `migrate` | **必要** | 新規書き込み |
 
 ---
@@ -191,17 +194,19 @@ remove / toggle
 
 ### 4.3 管理ルートの定義（Agent Tool 版）
 
-Mac App が持つ `env.appSupport`（Application Support）は廃止。
-`env.managedRoots` は以下のまま維持する:
+Mac App の Application Support の代わりに `globalStorageUri` を `env.appSupport` として渡す。
+現行 Core の配置を保った `env.managedRoots` は以下とする:
 
 | ルート | 説明 |
 |---|---|
-| `~/.claude/commands/` | Claude Code のスキル実体 |
-| `~/.claude/agents/` | Claude Code のサブエージェント実体 |
-| `~/.claude/commands/.disabled/` | 無効化されたスキルの退避先 |
-| `~/.cursor/commands/` | Cursor のスキル実体 |
-| `<project>/.claude/skills/` | プロジェクトローカルのスキル |
-| `<project>/.claude/agents/` | プロジェクトローカルのサブエージェント |
+| `~/.agents/skills/` | 管理対象 Skill の実体。Cursor / Codex が直接読む |
+| `<globalStorageUri>/disabled-skills/` | 無効化した Skill の退避先 |
+| `<globalStorageUri>/agents/` | 管理対象 Subagent の実体 |
+| `<globalStorageUri>/disabled-agents/` | 無効化した Subagent の退避先 |
+
+`~/.claude/skills/`、`~/.claude/agents/`、`~/.cursor/agents/` には上記実体への symlink だけを置く。
+プロジェクト内の `.claude/skills/` と `.claude/agents/` は管理ストアではなくユーザー資産なので、
+操作直前に `assertUserArtifact` で検証する。
 
 `globalStorageUri/registry.json` は WriteGuard の管理対象外。CLI が直接管理する。
 
@@ -235,21 +240,27 @@ if (fs.existsSync(legacyPath) && !migrated) {
 2. [移行する] を選択したら migrate コマンドを実行
    Input:
    {
-     "sourcePath": "~/Library/Application Support/ManageArms/registry.json",
-     "targetPath": "<globalStorageUri>/registry.json"
+     "storagePath": "<globalStorageUri>",
+     "sourcePath": "~/Library/Application Support/ManageArms"
    }
 
 3. migrate コマンドの処理（AgentToolCore CLI）
-   a. sourcePath の JSON を読む
+   a. sourcePath 配下の registry.json を読む
    b. browserDetection / menuBar / appearance を削除
    c. schemaVersion: "1" を追加
    d. resources / repos / usage / projects / agents / excludedProjects をコピー
-   e. targetPath へアトミック書き込み
-   f. sourcePath は削除しない（ユーザーが手動で削除）
+   e. 旧 agents / disabled-skills / disabled-agents の存在と移行先の競合を先に検査する
+   f. registry または実体の移行先が既に存在したら `MIGRATION_CONFLICT` で停止し、上書き・自動マージしない
+   g. 管理対象実体を一時ディレクトリへコピーし、検証後に新しい globalStorageUri へ移す
+   h. registry.json を最後にアトミック書き込みする
+   i. 失敗時は今回作成した移行先だけを除去する。sourcePath は常に残す
 
 4. TS 拡張が context.globalState.set("migrationDone", true) を記録
 5. 完了通知を表示し、ManageArms の手動削除を案内する
 ```
+
+`[後で]` は状態を変えず次回起動時に再表示する。`[移行しない]` は
+`migrationDeclined: true` を `globalState` に保存し、自動表示を止める。手動移行コマンドは残す。
 
 ### 5.3 移行失敗時の扱い
 
@@ -272,7 +283,7 @@ if (fs.existsSync(legacyPath) && !migrated) {
 
 ```
 CLI が registry.json を読んだとき:
-  schemaVersion が自分より新しい → PROTOCOL_MISMATCH エラー（拡張の更新を促す）
+  schemaVersion が自分より新しい → SCHEMA_UNSUPPORTED エラー（拡張の更新を促す）
   schemaVersion が自分より古い → 自動アップグレードして書き直す（後方互換）
   schemaVersion が存在しない    → ManageArms 形式とみなし、移行を促す
 ```
@@ -285,9 +296,17 @@ CLI が registry.json を読んだとき:
 
 | 規律 | Agent Tool 版での実装 |
 |---|---|
-| 永続ファイルは 1 つだけ | `registry.json` のみ。ログ・スナップショット・キャッシュファイルを作らない |
-| キャッシュディレクトリを持たない | CLIScan キャッシュはメモリのみ（約 180 秒、ウィンドウを閉じたら破棄） |
+| 可変メタデータは 1 つだけ | `registry.json` のみ。管理対象実体以外のログ・スナップショットを作らない |
+| キャッシュディレクトリを持たない | CLI 結果は TypeScript のメモリだけに約180秒保持し、View 非表示で破棄 |
 | 一時展開は OS に回収させる | `FileManager.temporaryDirectory` + `defer` 削除 |
 | URLSession は `.ephemeral` | HTTP キャッシュファイルを生やさない |
 | 全部読まない | frontmatter は先頭 4 KB のみ読む |
 | アトミックに書く | `Data.write(to:options:.atomic)` |
+
+### メモリとライフサイクル
+
+- CLI は1コマンドごとに終了し、プロセス間のキャッシュや Undo 状態を持たない
+- Tree View は表示用 DTO だけを保持する。ファイル本文と Swift の `Inventory` は保持しない
+- MCP の3秒ポーリングとファイル監視は View 表示中だけ動かす
+- stdout / stderr は各2 MB、HTTP API 応答は2 MBで打ち切る
+- アーカイブはメモリに載せず一時ファイルへ流し、50 MBで打ち切る

@@ -7,13 +7,14 @@ ManageArms の機能を Cursor 拡張（Agent Tool）へ移行するにあたり
 
 ## 追加要件（グリリングセッションで確定）
 
-- **製品名を「Agent Tool」にリネーム**（コード・リポジトリ・ドキュメントすべて含む）
-  - `ManageArmsCore` → `AgentToolCore`
+- **移行後の製品名を「Agent Tool」に統一**
+  - Phase 0 で既存リポジトリとローカルディレクトリを `agent-tool` へ変更する。新規リポジトリは作らない
+  - Mac App を main から削除し、`ManageArmsCore` を `AgentToolCore` へ変更する
 - **拡張内の PATH を検知して使用中の Tool/Skill を前面表示**
   - ログインシェルの PATH から AI エージェント CLI（claude / cursor / codex / gemini）の有無とバージョンを表示
 - **ユーザー全体（`~/.claude/`）と各 PJ（`.claude/`）の Tool を常に参照可能**
   - Tree View をセクション分割し、Current Project と User Global を常時表示
-- **Mac App は機能同等に達した時点で削除**
+- **Mac App は退避済みブランチだけに残し、追加配布や移行告知は行わない**
 
 ## 現時点で分かっている制約
 
@@ -21,7 +22,7 @@ ManageArms の機能を Cursor 拡張（Agent Tool）へ移行するにあたり
 - macOS メニューバー常駐と IDE 終了後のブラウザ検知は廃止する。
 - ローカルのホームディレクトリと CLI を扱うため、`extensionKind: ["ui"]` でローカル限定とする。
 - Remote SSH・Dev Container・Codespaces では非対応として明示的にエラー表示する。
-- 現行の `AgentToolCore`（旧 ManageArmsCore）・WriteGuard・375 件のテストは移行資産として維持する。
+- 現行の Swift Core・WriteGuard・全テストは `AgentToolCore` へ改名して移行資産として維持する。
 
 ---
 
@@ -35,7 +36,7 @@ ManageArms の機能を Cursor 拡張（Agent Tool）へ移行するにあたり
 - B. Mac App と拡張版を恒久的に併用する
 - C. 当初は併用し、十分な機能が揃った後に Mac App 廃止を判断する
 
-**決定:** A — Mac App は拡張版が機能同等に達した時点で削除する
+**決定:** A — Phase 0 で Mac App を main から削除し、退避済みブランチだけに残す
 
 #### Q2. 最初のリリースで対象にするエディタはどれか？
 
@@ -51,7 +52,8 @@ ManageArms の機能を Cursor 拡張（Agent Tool）へ移行するにあたり
 - B. macOS を先行し、後から Windows/Linux を検討する
 - C. 初版から macOS/Windows/Linux に対応する
 
-**決定:** B — 拡張 UI は Cursor が動く OS はすべて対象。AgentToolCore Swift CLI は macOS 先行
+**決定:** B — 初版は拡張 UI と AgentToolCore Swift CLI の両方を macOS のみ対象とする。
+Windows / Linux では非対応メッセージだけを表示し、後続フェーズで対応を検討する
 
 #### Q4. 初版で「移行完了」とみなす機能範囲はどこまでか？
 
@@ -78,7 +80,7 @@ ManageArms の機能を Cursor 拡張（Agent Tool）へ移行するにあたり
 - B. すべて TypeScript へ移植する
 - C. Mac App をローカルサービス化し、拡張から接続する
 
-**決定:** A — `AgentToolCore`（旧 ManageArmsCore）に Swift CLI エントリポイントを新規作成し、TypeScript 拡張から呼ぶ。WriteGuard・375 テストを維持
+**決定:** A — 既存 Core を Phase 0 で `AgentToolCore` へ改名し、`AgentToolCoreCLI` を TypeScript 拡張から呼ぶ。WriteGuard と全テストを維持する
 
 #### Q7. Swift Core CLI を採用する場合、どう配布するか？
 
@@ -144,7 +146,7 @@ ManageArms の機能を Cursor 拡張（Agent Tool）へ移行するにあたり
 
 #### Q14. Mac App と拡張版が同時にインストールされている期間を許可するか？
 
-**決定:** 移行期間は許容するが、書き込みは拡張版のみ。Mac App は機能同等後に削除
+**決定:** Mac App の追加配布は行わない。既存インストールとの競合を避けるため、破壊的操作の直前に ManageArms の起動を検知したら操作を拒否する
 
 #### Q15. 既存ユーザーの設定移行を自動化するか？
 
@@ -167,13 +169,28 @@ ManageArms の機能を Cursor 拡張（Agent Tool）へ移行するにあたり
 ```
 AGENT TOOL
 ▾ 📁 Current Project  (.claude/)
-      Skills
-      Subagents
-      MCP Servers
+    ▾ Claude
+        Skills
+        Subagents
+        MCP Servers
+        Plugins
 ▾ 👤 User Global  (~/.claude/)
-      Skills
-      Subagents
-      MCP Servers
+    ▾ Claude
+        Skills
+        Subagents
+        MCP Servers
+        Plugins
+    ▾ Cursor
+        Skills
+        Subagents
+        MCP Servers
+        Plugins
+    ▾ Codex
+        Skills
+        MCP Servers
+    ▾ Gemini
+        Skills
+        MCP Servers
 ```
 
 #### Q17. 更新差分をどのUIで表示するか？
@@ -229,7 +246,8 @@ AGENT TOOL
 
 #### Q24. CLI の標準出力・標準エラーをどこまで保存するか？
 
-**決定:** B — メモリ上で直近だけ保持。終了時に破棄し、シークレットを必ずマスクする
+**決定:** B — stdout / stderr は各2 MBを上限にプロセス終了までメモリ保持し、直後に破棄する。
+UI にはマスク済みの要約だけを通知が閉じるまで保持する
 
 #### Q25. GitHub 取得時の認証方法はどうするか？
 
@@ -245,7 +263,7 @@ AGENT TOOL
 - B. 操作単位のロールバック ＋ ゴミ箱
 - C. 独自バックアップを持つ
 
-**決定:** B — 操作単位のロールバック ＋ OS ゴミ箱
+**決定:** B — 削除は OS ゴミ箱へ移し、拡張が元パスとゴミ箱パスを30秒だけメモリ保持して復元できるようにする。更新は適用中の失敗復元だけを保証し、適用後 Undo は持たない
 
 ### 6. 更新・監視・パフォーマンス
 
@@ -256,11 +274,11 @@ AGENT TOOL
 - C. 一定間隔で更新する
 - D. A ＋ 限定的なファイル監視
 
-**決定:** D — View を開いた時と手動更新 ＋ 設定ファイル（`~/.claude/`・`.claude/` 配下）のみファイル監視
+**決定:** D — View を開いた時と手動更新 ＋ `Source` ホワイトリスト内だけのファイル監視。監視は View 表示中だけ動かし、非表示時に破棄する
 
 #### Q29. CLI を使う一覧取得のキャッシュ時間はどうするか？
 
-**決定:** B — 約 180 秒。明示的な更新と操作直後は無効化する
+**決定:** B — TypeScript 拡張のメモリで約180秒。1コマンドごとに終了する Swift CLI には持たせない。明示的な更新・操作直後・View 非表示で破棄する
 
 #### Q30. MCP プロセス状態の確認頻度はどうするか？
 
@@ -274,11 +292,11 @@ AGENT TOOL
 
 #### Q32. 拡張をどこで配布するか？
 
-**決定:** GitHub Releases（VSIX）を先行。安定後に Cursor Marketplace へ展開
+**決定:** alpha / beta は GitHub Releases のみ。安定版は同じ VSIX を Open VSX へ公開してから GitHub Release を作成し、途中の失敗時は停止する
 
 #### Q33. 拡張のソースコードを公開するか？
 
-**決定:** A — 全公開（MIT ライセンス）
+**決定:** A — MIT ライセンスで、最初の公開 VSIX より前に既存リポジトリを公開する
 
 #### Q34. 拡張 ID とブランド名はどうするか？
 
@@ -290,21 +308,21 @@ AGENT TOOL
 
 ### 8. 品質保証と移行完了条件
 
-#### Q36. 既存 375 テストをどう扱うか？
+#### Q36. 既存テストをどう扱うか？
 
-**決定:** A — AgentToolCore Swift CLI 方式でそのまま維持する
+**決定:** A — Swift Core の全テストを維持する。件数は増減するため完了条件には固定値を書かない
 
 #### Q37. どの E2E 環境を必須にするか？
 
-**決定:** Cursor Stable を必須。安定後に Cursor Insiders も定期実行
+**決定:** 固定 URL と SHA-256 で取得した Cursor Stable を macOS CI の必須 E2E とする。定期 canary は設けない
 
 #### Q38. 互換性テストで実 CLI をどこまで使うか？
 
-**決定:** B — PR はモック、日次で実 CLI
+**決定:** Ubuntu で TypeScript、macOS で Swift・Universal CLI・VSIX・Cursor E2E を全 PR で検証する
 
 #### Q39. Mac App を廃止できる条件は何か？
 
-**決定:** 拡張版が Mac App の管理機能と同等になった時点で削除
+**決定:** Phase 0 で main から削除する。Mac App の既存配布リポジトリはアーカイブし、追加リリースも移行告知もしない
 
 #### Q40. テレメトリを導入するか？
 
@@ -312,29 +330,43 @@ AGENT TOOL
 
 ---
 
-## リネーム計画
+## Phase 0 のリネーム・整理
 
 | 変更前 | 変更後 |
 |---|---|
-| ManageArms（製品名） | Agent Tool |
-| ManageArmsCore（モジュール名） | AgentToolCore |
-| ManageArmsApp（エントリポイント） | AgentToolApp |
-| manage-arms（リポジトリ名・npm name） | agent-tool |
-| ManageArms（Publisher ID） | agent-tool |
-| README / CHANGELOG / ドキュメント類 | Agent Tool に統一 |
+| 製品名・npm name | Agent Tool / `agent-tool` |
+| 拡張 Publisher ID | `yuuki-sakai` |
+| `ManageArmsCore` | `AgentToolCore` |
+| `ManageArmsApp` | 削除。`AgentToolApp` へは変更しない |
+| `manage-arms` リポジトリ・ローカルディレクトリ | 既存履歴のまま `agent-tool` へ変更 |
+| 現行 Mac App の README / CHANGELOG | 削除し、Agent Tool 向けに新規作成 |
+| `Scripts/` | `scripts/` へ変更し、Mac App 専用スクリプトを削除 |
 
-リネームは Mac App 削除と同時に実施する。コード・ファイル名・ドキュメントすべてを一括で変更する。
+TypeScript はリポジトリ直下の `src/`、`test/`、`media/`、`l10n/` に置く。
+Swift は `Sources/AgentToolCore/`、`Sources/AgentToolCoreCLI/`、`Tests/AgentToolCoreTests/` に置く。
+
+## Secondary Simulator と揃える運用
+
+基本方針は [den0206/secondary-simulator](https://github.com/den0206/secondary-simulator) に揃え、
+Agent Tool 固有のSwift CLI、永続registry、対応IDEの差だけを例外とする。
+
+- Node 20、npm、`package-lock.json`、Node 標準 `node:test` を使う
+- 最小依存・正確な版固定・`ignore-scripts=true`・第三者 Action の commit SHA 固定を守る
+- `release/Ver_X.Y.Z`、英語の `[Unreleased]`、リリース時の版節切り出しを使う
+- 初版は `0.1.0-alpha.1`。ブランチは `release/Ver_<semver>` とし、同版再ビルドはタグだけ `+N` にしてOpen VSXへ再公開しない
+- Universal CLI は Developer ID 署名・公証を行わない。最初の公開前と、CLI・VSIX 組み立て・配布経路の変更時に、Cursor から入れた VSIX の初回起動を実機確認する
+- README は英語・日本語を同期する
 
 ---
 
 ## 次のステップ
 
-以下のドキュメントへ落とし込む（優先順）：
+以下の文書を実装の正本とする：
 
-1. **プロダクト要件** — 対象機能／対象外機能の確定リスト
-2. **AgentToolCore CLI API 仕様** — コマンド一覧・JSON スキーマ・エラーコード
-3. **データ・ロック・移行仕様** — globalStorageUri 構造・ロックファイル方式・初回移行フロー
-4. **UI 情報設計** — Tree View 詳細・Quick Pick フロー・PATH 検出表示
-5. **セキュリティ要件** — WriteGuard 移植仕様・未信頼ワークスペース動作
-6. **テスト計画** — Swift テスト維持方針・E2E Cursor Stable セットアップ
-7. **段階的リリース計画** — Mac App 並走期間・機能同等条件・削除手順
+1. [プロダクト要件](product-requirements.md)
+2. [AgentToolCore CLI API](agent-tool-cli-api.md)
+3. [データ・ロック・移行仕様](agent-tool-data-spec.md)
+4. [UI 情報設計](agent-tool-ui-design.md)
+5. [セキュリティ要件](agent-tool-security.md)
+6. [テスト計画](agent-tool-test-plan.md)
+7. [段階的リリース計画](agent-tool-release-plan.md)

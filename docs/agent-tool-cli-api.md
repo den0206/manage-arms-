@@ -14,6 +14,12 @@ agent-tool-core <command>
 - **終了コード**: 成功 `0`、失敗 `1`（出力 JSON 内に詳細を持つ）
 - TypeScript 拡張は `protocolVersion` を起動直後に確認し、不一致なら操作を停止する
 
+`version` 以外の入力は共通して `storagePath` を持つ。TS 拡張が
+`context.globalStorageUri.fsPath` を絶対パスで渡し、CLI はこれを `Environment.appSupport` として使う。
+`projectPath` が必要なコマンドも絶対パスで渡す。
+
+CLI は1コマンドごとに終了する。キャッシュと削除 Undo 情報は TypeScript 拡張のメモリに置く。
+
 ## 共通レスポンス形式
 
 ### 成功
@@ -46,6 +52,8 @@ agent-tool-core <command>
 | `PROTOCOL_MISMATCH` | CLI と拡張の `protocolVersion` が一致しない |
 | `WRITE_GUARD_DENIED` | WriteGuard がパス・名前を拒否した |
 | `INVALID_NAME` | ツール名に `../` など不正な要素が含まれる |
+| `NOT_IN_REGISTRY` | Agent Tool の管理対象ではない |
+| `SYMLINK_OUTSIDE_STORE` | Agent Tool 管理外を指す symlink である |
 | `LOCK_TIMEOUT` | 排他ロックの取得が 10 秒以内に完了しなかった |
 | `NOT_FOUND` | 指定したツールが見つからない |
 | `ALREADY_EXISTS` | 同名ツールが既にインストール済み |
@@ -53,6 +61,10 @@ agent-tool-core <command>
 | `REMOTE_ENV` | Remote 環境では操作不可 |
 | `UNTRUSTED_WORKSPACE` | 未信頼ワークスペースでは書き込み不可 |
 | `ROLLBACK_FAILED` | ロールバックに失敗した（ゴミ箱の内容は保持） |
+| `SCHEMA_UNSUPPORTED` | registry のスキーマが CLI より新しい |
+| `MIGRATION_CONFLICT` | 移行先に既存データがあり上書きできない |
+| `OUTPUT_TOO_LARGE` | 応答が2 MBの上限を超えた |
+| `LEGACY_APP_RUNNING` | ManageArms が実行中のため破壊的操作を拒否した |
 
 ---
 
@@ -84,7 +96,12 @@ TS 拡張の起動直後に必ず呼ぶ。バージョン不一致なら以降�
 対象 CLI（claude / cursor / codex / gemini）の有無とバージョンを返す。
 既存の `Detector.detectAll` と `ShellPath.resolved` を使用する。
 
-**入力**: なし
+**入力**:
+```json
+{
+  "storagePath": "/path/to/globalStorageUri"
+}
+```
 
 **出力**:
 ```json
@@ -137,6 +154,7 @@ TS 拡張の起動直後に必ず呼ぶ。バージョン不一致なら以降�
 **入力**:
 ```json
 {
+  "storagePath": "/path/to/globalStorageUri",
   "projectPath": "/path/to/project"
 }
 ```
@@ -151,7 +169,7 @@ TS 拡張の起動直後に必ず呼ぶ。バージョン不一致なら以降�
   "data": {
     "items": [
       {
-        "id": "my-skill",
+        "id": "opaque-for-display",
         "name": "my-skill",
         "kind": "skill",
         "scope": "user",
@@ -163,8 +181,7 @@ TS 拡張の起動直後に必ず呼ぶ。バージョン不一致なら以降�
         "hasUpdate": false,
         "lastUsed": "2026-09-01T12:00:00Z"
       }
-    ],
-    "cacheExpiresAt": "2026-09-10T10:03:00Z"
+    ]
   }
 }
 ```
@@ -173,15 +190,28 @@ TS 拡張の起動直後に必ず呼ぶ。バージョン不一致なら以降�
 
 | フィールド | 型 | 説明 |
 |---|---|---|
-| `id` | string | `<scope>/<agent>/<kind>/<name>` 形式の一意 ID |
+| `id` | string | Tree View 内の識別用。操作対象の復元には使わない |
 | `kind` | `"skill"` \| `"subagent"` \| `"mcp"` \| `"plugin"` | ツール種別 |
 | `scope` | `"user"` \| `"project"` | ユーザー全体か PJ ローカルか |
 | `agent` | `"claude"` \| `"cursor"` \| `"codex"` \| `"gemini"` | 対象エージェント |
 | `enabled` | boolean | 有効状態（symlink の有無で判定） |
 | `repoUrl` | string \| null | 取得元リポジトリ URL（registry.json 由来） |
 | `sha` | string \| null | インストール時の Git SHA |
-| `hasUpdate` | boolean | 更新可否（CLIScan キャッシュを利用） |
+| `hasUpdate` | boolean | registry に記録された直近の更新確認結果 |
 | `lastUsed` | ISO 8601 \| null | 最終使用日時（usage ログ由来） |
+
+操作コマンドは区切り文字列の ID ではなく、次の `selector` をそのまま渡す。CLI は毎回
+インベントリを再走査し、`sourcePath` を含む全フィールドが一致する1件だけを操作する。
+
+```json
+{
+  "name": "my-skill",
+  "kind": "skill",
+  "scope": "user",
+  "agent": "claude",
+  "sourcePath": "/Users/yuuki/.claude/skills/my-skill"
+}
+```
 
 ---
 
@@ -193,8 +223,11 @@ WriteGuard を通過する。
 **入力**:
 ```json
 {
-  "id": "user/claude/skill/my-skill",
-  "projectPath": "/path/to/project"
+  "storagePath": "/path/to/globalStorageUri",
+  "selector": {
+    "name": "my-skill", "kind": "skill", "scope": "user",
+    "agent": "claude", "sourcePath": "/Users/yuuki/.claude/skills/my-skill"
+  }
 }
 ```
 
@@ -204,7 +237,6 @@ WriteGuard を通過する。
   "ok": true,
   "protocolVersion": "1",
   "data": {
-    "id": "user/claude/skill/my-skill",
     "enabled": false
   }
 }
@@ -214,13 +246,17 @@ WriteGuard を通過する。
 
 ### `remove` — ツール削除
 
-`Inventory.remove` を経由して WriteGuard・ロールバックスナップショット取得後、OS ゴミ箱へ移動する。
+Skill / Subagent は `Inventory.remove`、Plugin は `Inventory.removeExisting` を経由する。
+ファイル実体は WriteGuard を通して OS ゴミ箱へ移し、Plugin は対象 Agent の CLI に委譲する。
 
 **入力**:
 ```json
 {
-  "id": "user/claude/skill/my-skill",
-  "projectPath": "/path/to/project"
+  "storagePath": "/path/to/globalStorageUri",
+  "selector": {
+    "name": "my-skill", "kind": "skill", "scope": "user",
+    "agent": "claude", "sourcePath": "/Users/yuuki/.claude/skills/my-skill"
+  }
 }
 ```
 
@@ -230,25 +266,51 @@ WriteGuard を通過する。
   "ok": true,
   "protocolVersion": "1",
   "data": {
-    "trashedPath": "/Users/yuuki/.Trash/my-skill.md",
-    "rollbackToken": "550e8400-e29b-41d4"
+    "undo": {
+      "originalPath": "/Users/yuuki/.agents/skills/my-skill",
+      "trashedPath": "/Users/yuuki/.Trash/my-skill",
+      "registryEntry": {
+        "name": "my-skill",
+        "kind": "skill",
+        "repo": "https://github.com/example/my-skill",
+        "branch": "main",
+        "subdir": null,
+        "sha": "abc123def456",
+        "pinned": false,
+        "disabled": false
+      }
+    }
   }
 }
 ```
 
-- `rollbackToken`: `rollback` コマンドで元に戻す際に使用するトークン
+- TS 拡張は `undo` を30秒だけメモリ保持する。ディスクへ保存しない
 
 ---
 
 ### `rollback` — 削除の取り消し
 
-`remove` が返した `rollbackToken` を使って操作を取り消す。
-ゴミ箱から元のパスへ復元する。
+`remove` が返した `undo` をそのまま使って操作を取り消す。
+CLI はパスと registry entry を再検証し、ゴミ箱から実体を戻して symlink と registry を復元する。
 
 **入力**:
 ```json
 {
-  "rollbackToken": "550e8400-e29b-41d4"
+  "storagePath": "/path/to/globalStorageUri",
+  "undo": {
+    "originalPath": "/Users/yuuki/.agents/skills/my-skill",
+    "trashedPath": "/Users/yuuki/.Trash/my-skill",
+    "registryEntry": {
+      "name": "my-skill",
+      "kind": "skill",
+      "repo": "https://github.com/example/my-skill",
+      "branch": "main",
+      "subdir": null,
+      "sha": "abc123def456",
+      "pinned": false,
+      "disabled": false
+    }
+  }
 }
 ```
 
@@ -258,21 +320,22 @@ WriteGuard を通過する。
   "ok": true,
   "protocolVersion": "1",
   "data": {
-    "restoredPath": "/Users/yuuki/.claude/commands/my-skill.md"
+    "restoredPath": "/Users/yuuki/.agents/skills/my-skill"
   }
 }
 ```
 
 ---
 
-### `add` — ツール追加
+### `add` — Skill 追加
 
-URL（GitHub リポジトリまたはファイル直リンク）からツールを取得してインストールする。
+URL（GitHub リポジトリまたはファイル直リンク）から Skill を取得してインストールする。
 `Fetcher` → `Installer` → WriteGuard のパスを通る。
 
 **入力**:
 ```json
 {
+  "storagePath": "/path/to/globalStorageUri",
   "url": "https://github.com/example/my-skill",
   "scope": "user",
   "projectPath": "/path/to/project",
@@ -281,7 +344,7 @@ URL（GitHub リポジトリまたはファイル直リンク）からツール�
 }
 ```
 
-- `kind`: `null` の場合は frontmatter または URL から自動判別
+- `kind`: 候補の判別結果を返すために残すが、初版でインストールできるのは `skill` だけ
 - `scope`: `"project"` の場合は `projectPath` が必須
 
 **出力**:
@@ -290,7 +353,6 @@ URL（GitHub リポジトリまたはファイル直リンク）からツール�
   "ok": true,
   "protocolVersion": "1",
   "data": {
-    "id": "user/claude/skill/my-skill",
     "name": "my-skill",
     "kind": "skill",
     "installedPath": "/Users/yuuki/.claude/commands/my-skill.md",
@@ -303,13 +365,18 @@ URL（GitHub リポジトリまたはファイル直リンク）からツール�
 
 ### `update-preview` — 更新差分プレビュー
 
-`Updater.preview` を呼び、現行バージョンとの unified diff を返す。
-TypeScript 拡張は diff を VS Code Diff Editor に渡す。
+`Updater.preview` を呼び、変更前後の内容を返す。
+TypeScript 拡張は内容をメモリ上の `TextDocumentContentProvider` に渡して Diff Editor で開き、
+Editor を閉じたら破棄する。
 
 **入力**:
 ```json
 {
-  "id": "user/claude/skill/my-skill"
+  "storagePath": "/path/to/globalStorageUri",
+  "selector": {
+    "name": "my-skill", "kind": "skill", "scope": "user",
+    "agent": "claude", "sourcePath": "/Users/yuuki/.claude/skills/my-skill"
+  }
 }
 ```
 
@@ -324,7 +391,8 @@ TypeScript 拡張は diff を VS Code Diff Editor に渡す。
     "files": [
       {
         "path": "my-skill.md",
-        "diff": "--- a/my-skill.md\n+++ b/my-skill.md\n@@ -1,3 +1,4 @@\n..."
+        "before": "current file contents",
+        "after": "updated file contents"
       }
     ]
   }
@@ -335,12 +403,17 @@ TypeScript 拡張は diff を VS Code Diff Editor に渡す。
 
 ### `update-apply` — 更新適用
 
-`Updater.apply` を呼ぶ。WriteGuard・ロールバックスナップショット取得後に上書きする。
+`Updater.apply` を呼ぶ。WriteGuard を通し、適用中に失敗した場合は同じプロセス内で元へ戻す。
+適用完了後の Undo は提供しない。
 
 **入力**:
 ```json
 {
-  "id": "user/claude/skill/my-skill"
+  "storagePath": "/path/to/globalStorageUri",
+  "selector": {
+    "name": "my-skill", "kind": "skill", "scope": "user",
+    "agent": "claude", "sourcePath": "/Users/yuuki/.claude/skills/my-skill"
+  }
 }
 ```
 
@@ -350,8 +423,7 @@ TypeScript 拡張は diff を VS Code Diff Editor に渡す。
   "ok": true,
   "protocolVersion": "1",
   "data": {
-    "appliedSha": "def456",
-    "rollbackToken": "661f9511-f30c-52e5"
+    "appliedSha": "def456"
   }
 }
 ```
@@ -365,6 +437,7 @@ TypeScript 拡張は diff を VS Code Diff Editor に渡す。
 **入力**:
 ```json
 {
+  "storagePath": "/path/to/globalStorageUri",
   "agent": "claude",
   "scope": "user",
   "projectPath": "/path/to/project",
@@ -400,6 +473,7 @@ TypeScript 拡張は diff を VS Code Diff Editor に渡す。
 **入力**:
 ```json
 {
+  "storagePath": "/path/to/globalStorageUri",
   "agent": "claude",
   "name": "my-server",
   "scope": "user",
@@ -428,6 +502,7 @@ View 表示中に 3 秒ポーリングで呼ぶ。
 **入力**:
 ```json
 {
+  "storagePath": "/path/to/globalStorageUri",
   "projectPath": "/path/to/project"
 }
 ```
@@ -459,13 +534,14 @@ View 表示中に 3 秒ポーリングで呼ぶ。
 ### `migrate` — ManageArms からの移行
 
 初回起動時に `~/Library/Application Support/ManageArms/registry.json` を検知したら呼ぶ。
-`globalStorageUri` の `registry.json` へコピーし、スキーマを変換する。
+registry と管理対象の Subagent・無効化中実体を `globalStorageUri` へコピーする。
+移行先が存在する場合は上書きせず `MIGRATION_CONFLICT` を返す。
 
 **入力**:
 ```json
 {
-  "sourcePath": "/Users/yuuki/Library/Application Support/ManageArms/registry.json",
-  "targetPath": "/path/to/globalStorageUri/registry.json"
+  "storagePath": "/path/to/globalStorageUri",
+  "sourcePath": "/Users/yuuki/Library/Application Support/ManageArms"
 }
 ```
 
@@ -499,7 +575,7 @@ interface CliResponse<T> {
 }
 
 interface InventoryItem {
-  id: string;           // "<scope>/<agent>/<kind>/<name>"
+  id: string;           // Tree View 内の表示識別用
   name: string;
   kind: KindId;
   scope: ScopeId;
@@ -511,6 +587,14 @@ interface InventoryItem {
   hasUpdate: boolean;
   lastUsed: string | null;  // ISO 8601
 }
+
+interface ResourceSelector {
+  name: string;
+  kind: KindId;
+  scope: ScopeId;
+  agent: AgentId;
+  sourcePath: string;
+}
 ```
 
 ---
@@ -518,7 +602,7 @@ interface InventoryItem {
 ## 実装メモ
 
 - CLI エントリポイントは `Package.swift` に新規 `.executableTarget(name: "AgentToolCoreCLI")` として追加する
-- `AgentToolCore` ライブラリは変更なしで再利用する
+- Phase 0 で改名した `AgentToolCore` を再利用し、CLI 用 `Environment` と DTO 変換だけを追加する
 - 各サブコマンドは `switch commandName` で振り分け、stdin を `JSONDecoder` でデコードして対応する関数を呼ぶ
-- ロールバックトークンは操作ごとに UUID を生成し、CLI プロセスの生存期間中のみ `[UUID: RollbackSnapshot]` でメモリ保持する（永続化しない）
+- 180秒キャッシュ、削除 Undo、Diff Editor の本文は TypeScript 拡張のメモリだけに保持する
 - `protocolVersion` は `1` から始め、破壊的変更が入るたびに整数インクリメントする
