@@ -1,19 +1,10 @@
-.build/
-.swiftpm/
-*.xcodeproj
-DerivedData/
 .DS_Store
-*.dSYM
 node_modules/
 out/
-bin/
 vsix/
 .vscode-test/
 .env
 .env.*
-
-# リリース成果物（GitHub Release に添付するもの。リポジトリには入れない）
-*.dmg
 
 # ローカル専用のシークレット（GitHub Secrets へ投入するための一時ファイル）
 .secret

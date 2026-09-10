@@ -14,4 +14,5 @@ esac
 compat_dir="$(mktemp -d)"
 trap 'rm -rf "$compat_dir"' EXIT
 npm install --prefix "$compat_dir" --cache "$compat_dir/npm-cache" --no-audit --no-fund "$package@$version"
-COMPAT_AGENT="$agent" PATH="$compat_dir/node_modules/.bin:$PATH" swift test --filter AgentCompatibilityTests
+npm run compile
+COMPAT_AGENT="$agent" PATH="$compat_dir/node_modules/.bin:$PATH" node --test test/compat.test.js

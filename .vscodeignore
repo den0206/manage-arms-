@@ -2,22 +2,25 @@
 .vscode-test/**
 .github/**
 .claude/**
-.build/**
 docs/**
 scripts/**
+Scripts/**
 test/**
 src/**
-Sources/**
-Tests/**
 vsix/**
 .gitignore
 .npmrc
 .vscodeignore
-Package.swift
 tsconfig.json
+package-lock.json
 **/*.map
 **/*.ts
-node_modules/**
+# ローカルの秘密情報は絶対に同梱しない。
+.secret
+.env
+.env.*
+# node_modulesは列挙しない。vsceがpackage.jsonのdependenciesだけを同梱し、
+# devDependenciesを外す（zip展開に使うyauzlは実行時依存として残る必要がある）。
 *.md
 !README.md
 !README.ja.md
