@@ -23,11 +23,11 @@ allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git a
 
 | グループ例 | 対象の目安 |
 |---|---|
-| `core` | `Sources/ManageArmsCore/` の走査・追加・更新・集計・権限 |
-| `ui` | `Sources/ManageArms/` |
-| `i18n` | `Localization/` |
-| `build` | `Package.swift`・`Resources/`・`Scripts/build-app.sh`・`.vscode/` |
-| `release` | `Scripts/make-dmg.sh`・`Scripts/release-changelog.sh`・`CHANGELOG.md` |
+| `core` | `Sources/ManageArmsCore/`（Phase 0 後は `Sources/AgentToolCore/`）の走査・追加・更新・集計・権限 |
+| `extension` | `src/`・`test/` の Cursor UI・CLI 境界・テスト |
+| `i18n` | `l10n/` |
+| `build` | `Package.swift`・`package.json`・`Scripts/`（Phase 0 後は `scripts/`）・`.vscode/` |
+| `release` | `.github/workflows/`・リリーススクリプト・`CHANGELOG.md` |
 | `ci` | `.github/workflows/`・`Scripts/check-invariants.sh` |
 | `docs` | `README.md`・`README.ja.md`・`DESIGN.md`・`CLAUDE.md`・`docs/` |
 
@@ -48,8 +48,8 @@ allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git a
 
 **ストレージ・メモリの規律**（`CLAUDE.md`「ストレージ・メモリの規律」）
 
-- **無駄なファイルを増やしていないか。** 恒久ファイル・キャッシュ・ログを足していないか
-- 作った一時物を `defer` で確実に片付けているか
+- **無駄なファイルを増やしていないか。** 管理対象実体以外の恒久ファイル・キャッシュ・ログを足していないか
+- 作った一時物をSwiftの`defer`またはTypeScriptの`finally`で確実に片付けているか
 - 全部読んでいないか（frontmatter だけで足りるところで本文を読んでいないか）
 - 役割の重なるスクリプト／ドキュメントを新設していないか（既存に足せないか）
 
@@ -65,8 +65,10 @@ allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git a
 swift build && swift test
 ./Scripts/check-invariants.sh
 ./Scripts/release-changelog.sh --check && ./Scripts/test-release-changelog.sh
-CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh
 ```
+
+Phase 0 後は小文字の `scripts/` を使う。`package.json` が存在する場合は、そこに定める
+Nodeテスト・型検査・VSIX組み立ても実行する。
 
 **すべて緑になるまでコミットしない。**
 

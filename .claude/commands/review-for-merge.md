@@ -32,15 +32,15 @@ allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(swift
 | 設定ファイルの書き込み | `PermissionWriter` / `Registry` / `MCPScanner` 以外で書いている。`~/.claude.json` を読んで書き戻している |
 | 削除・移動 | `WriteGuard.assertMutable` を通らずに `removeItem` / `moveItem` している |
 | ホワイトリスト走査 | `Source` の列挙にないパスを読んでいる。`projects` / `sessions` を一覧スキャンから読んでいる |
-| 常駐しない | FSEvents / タイマー / バックグラウンド監視を足している |
+| View 非表示で解放 | watcher / ポーリング / CLI キャッシュが View 非表示後も残る |
 | 破壊的操作の可逆性 | 無効化が「退避」ではなく「削除」になっている。権限削除でバックアップを取っていない |
 
 ## 2. ストレージ・メモリ
 
-- **無駄なファイルを作っていないか。** 恒久ファイルは `registry.json` 1 つだけ。
-  キャッシュディレクトリ・ログファイル・スナップショットを足していないか
+- **無駄なファイルを作っていないか。** 可変メタデータは `registry.json` だけ。
+  管理対象実体以外のキャッシュ・ログ・Undo スナップショットを足していないか
 - `URLSession` が `.ephemeral` のままか
-- ダウンロード・zip 展開・staging が `defer` で確実に消えるか。
+- ダウンロード・zip展開・stagingがSwiftの`defer`またはTypeScriptの`finally`で確実に消えるか。
   **失敗経路とキャンセル経路も**通るか
 - 大きいファイルを `Data` で丸ごとメモリに載せていないか
 - 一覧のために本文まで読んでいないか（frontmatter は先頭 4 KB）
@@ -66,15 +66,14 @@ allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(swift
 
 ## 5. 配布への影響
 
-`Package.swift` / `Resources/Info.plist` / `Scripts/` / `.github/workflows/` を
+`Package.swift` / `package.json` / `scripts/` / `.github/workflows/` を
 触っている場合のみ:
 
-- **最低 OS の 3 か所が揃っているか** — `Package.swift` の `platforms`、
-  `Info.plist` の `LSMinimumSystemVersion`、ワークフローの `runs-on`。
-  ズレると「手元では通るのに配布物が起動しない」
-- 署名まわりのガードを緩めていないか（未署名の DMG が作れる状態になっていないか）
+- `Package.swift` の最低macOS、`package.json`の`engines.vscode`、CIのNode 20が仕様と一致するか
 - CI とローカルで**同じスクリプト**を呼んでいるか（CI 専用ロジックを足していないか）
 - `README.md` と `README.ja.md` の**両方**を更新したか
+- Universal CLI の両arch、VSIX 20 MB上限、Open VSX→GitHubの公開順を壊していないか
+- CLI・VSIX組み立て・配布経路を変えた場合、配布VSIXからの初回CLI起動を実機確認したか
 
 ## 6. 過剰実装
 
@@ -88,8 +87,8 @@ allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(swift
 
 ## 7. ドキュメント
 
-- 仕様が変わったのに `DESIGN.md` が古いままになっていないか
-- テスト件数が変わったのに `DESIGN.md` / `README.md` / `README.ja.md` が古いままでないか
+- 仕様が変わったのに `docs/agent-tool-*.md` が古いままになっていないか
+- READMEの日英版が同期しているか
 - 利用者に見える変更なのに `CHANGELOG.md` の `[Unreleased]` に項目が無いか
   （**英語**で書く。版見出しへは移さない）
 
@@ -99,8 +98,10 @@ allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(swift
 swift build && swift test
 ./Scripts/check-invariants.sh
 ./Scripts/release-changelog.sh --check && ./Scripts/test-release-changelog.sh
-CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh
 ```
+
+Phase 0 後は小文字の `scripts/` を使う。`package.json` が存在する場合は、そこに定める
+Nodeテスト・型検査・VSIX組み立ても実行する。
 
 ## 出力
 
@@ -108,6 +109,5 @@ CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh
 `ファイル:行` ・ 何が問題か ・ どう直すか を 1 項目 1〜2 行で挙げ、
 **重大なもの（不変条件・データ損失）から順に**並べる。
 
-自動テストできない箇所（`.app` 起動時の CLI 解決、稼働中エージェントへの反映、
-DMG の導線、公証済みビルドの初回起動）に触れる変更なら、
+自動テストできない箇所（稼働中エージェントへの反映、配布VSIX内の未署名CLI初回起動）に触れる変更なら、
 **実機で確認すべき項目**を併せて挙げる。
