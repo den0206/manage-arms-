@@ -16,8 +16,9 @@ Node.js `node:test` で TypeScript モジュールと VS Code API モックを�
 ## CI
 
 Linux、macOS、Windows で `npm run typecheck` と `npm test` を実行する。
-Linux で不変条件検査とリリース検査を実行し、macOS で固定 Cursor Stable の E2E と
-VSIX サイズ検査を実行する。
+Linux で不変条件検査とリリース検査を実行する。`CURSOR_URL` と `CURSOR_SHA256` が
+リポジトリ変数に設定されている場合は、macOS で固定 Cursor Stable の E2E と
+VSIX サイズ検査も実行する。
 
 ## リリース前
 

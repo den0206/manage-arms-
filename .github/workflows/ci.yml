@@ -48,6 +48,7 @@ jobs:
 
   # Cursor Stable は macOS でのみ起動する。
   cursor:
+    if: vars.CURSOR_URL != '' && vars.CURSOR_SHA256 != ''
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -57,13 +58,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run package
-      # 取得元とハッシュはリポジトリ変数に固定する。未設定ならスキップせずに落とす。
+      # 取得元とハッシュはリポジトリ変数に固定する。
       - name: Install pinned Cursor Stable
         env:
           CURSOR_URL: ${{ vars.CURSOR_URL }}
           CURSOR_SHA256: ${{ vars.CURSOR_SHA256 }}
         run: |
-          test -n "$CURSOR_URL" && test -n "$CURSOR_SHA256"
           curl -fsSL "$CURSOR_URL" -o cursor.dmg
           echo "$CURSOR_SHA256  cursor.dmg" | shasum -a 256 -c -
           hdiutil attach -quiet -nobrowse -mountpoint /Volumes/Cursor cursor.dmg
