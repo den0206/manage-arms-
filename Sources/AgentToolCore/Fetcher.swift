@@ -100,7 +100,7 @@ public enum Fetcher {
         resolvedSHA: String? = nil
     ) async throws -> Staging {
         let root = URL(filePath: NSTemporaryDirectory())
-            .appending(path: "manage-arms-fetch-\(UUID().uuidString)")
+            .appending(path: "agent-tool-fetch-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 
         do {
