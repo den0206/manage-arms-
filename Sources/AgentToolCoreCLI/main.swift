@@ -118,6 +118,7 @@ case "inventory":
         return ["id": row.id, "name": row.name, "kind": row.kind.rawValue,
                 "scope": row.reach.isUserWide ? "user" : "project",
                 "agent": agent?.rawValue as Any, "agents": agents.map(\.rawValue), "enabled": !row.isDisabled,
+                "summary": row.summary as Any, "detail": row.detail as Any,
                 "sourcePath": row.roots.first as Any,
                 "repoUrl": entry?.repo as Any, "sha": entry?.sha as Any,
                 "origin": origin, "hasUpdate": hasUpdate, "lastUsed": row.lastUsed?.ISO8601Format() as Any]
