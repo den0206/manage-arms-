@@ -1,5 +1,7 @@
-import { readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { Env } from "./env";
+import { readJsonc } from "./mcpScanner";
 
 /** プロジェクト配下を歩く深さ。これ以上は掘らない。 */
 export const SKILL_DEPTH = 3;
@@ -44,3 +46,50 @@ function walk(dir: string, prefix: string, depth: number,
 
 /** Subagent はプロジェクト直下だけ。走査もそこしか見ていない。 */
 export const projectSubagentRoot = (project: string): string => join(project, ".claude", "agents");
+
+/** 中身のあるディレクトリか。隠しファイルだけの置き場は「無い」と扱う。 */
+const hasEntries = (path: string): boolean => {
+  try {
+    return readdirSync(path).some(name => !name.startsWith("."));
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * ドロップダウンに出す価値があるか。プロジェクト直下の既知の置き場を stat するだけで決める。
+ *
+ * ponytail: 深さ 3 の再帰走査（`projectSkillRoots`）はここでは回さない。
+ * 候補全件に掛けると一覧表示の応答目標を超える。モノレポの下位ディレクトリにしか
+ * Skill が無いプロジェクトは候補に出ないが、選んだあとの走査では拾う。
+ */
+const hasTools = (project: string, localMcp: boolean): boolean =>
+  localMcp
+  || existsSync(join(project, ".mcp.json"))
+  || hasEntries(join(project, ".claude", "skills"))
+  || hasEntries(projectSubagentRoot(project));
+
+/**
+ * Claude Code が開いたことのあるプロジェクトのうち、ツールを持つものだけ。
+ * `~/.claude.json` の `projects` キーだけを読み、ホームは走査しない（不変条件 3）。
+ * MCP の local 登録は同じファイルにあるので、追加の読み取りをしない。
+ */
+export function knownProjects(env: Env): string[] {
+  let root: unknown;
+  try {
+    root = readJsonc(join(env.home, ".claude.json"));
+  } catch {
+    return [];   // 未作成も壊れたファイルも、一覧は止めない
+  }
+  const projects = (root as { projects?: unknown } | null)?.projects;
+  if (typeof projects !== "object" || projects === null || Array.isArray(projects)) return [];
+  return Object.entries(projects as Record<string, unknown>)
+    .filter(([path, node]) => {
+      const servers = (node as { mcpServers?: unknown } | null)?.mcpServers;
+      const localMcp = typeof servers === "object" && servers !== null
+        && Object.keys(servers).length > 0;
+      return isDirectory(path) && hasTools(path, localMcp);
+    })
+    .map(([path]) => path)
+    .sort();
+}

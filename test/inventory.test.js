@@ -114,6 +114,35 @@ test("プロジェクトの MCP はスコープ付きで返す", async () => {
   assert.match(item.summary, /^project /);
 });
 
+test("user: false はユーザー資産を走査しない", async () => {
+  const env = fakeEnv();
+  const project = makeDir(join(env.home, "proj"));
+  skill(skillStore(env), "mine");
+  skill(join(project, ".claude/skills"), "theirs");
+  writeFileIn(join(env.home, ".cursor/mcp.json"), "{ not json");
+  const { items, issues } = await inventory({ env, projectPath: project, user: false });
+  assert.equal(find(items, "mine"), undefined);
+  assert.ok(find(items, "theirs"));
+  assert.deepEqual(issues, []);
+});
+
+test("他プロジェクトの Plugin は今見ているプロジェクトに混ぜない", async () => {
+  const env = fakeEnv();
+  const project = makeDir(join(env.home, "proj"));
+  const run = async (command) => {
+    if (!command.includes("plugin")) throw new Error(command.join(" "));
+    const plugins = [
+      { id: "ours@here", scope: "project", projectPath: project, enabled: true },
+      { id: "theirs@there", scope: "project", projectPath: "/other/proj", enabled: true },
+      { id: "global@user", scope: "user", enabled: true },
+    ];
+    return command[0] === "claude" ? JSON.stringify(plugins) : JSON.stringify({ installed: [] });
+  };
+  const { items } = await inventory({ env, projectPath: project, run });
+  assert.deepEqual(items.filter(item => item.kind === "plugin").map(item => item.name).sort(),
+    ["global@user", "ours@here"]);
+});
+
 // --- 更新判定 ---
 
 test("最新 SHA が登録済みと違えば更新あり", () => {

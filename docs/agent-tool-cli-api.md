@@ -119,14 +119,30 @@ export type UpdateDiff = {
 export function inventory(params: {
   storagePath: string;
   projectPath: string | null;
+  user?: boolean;            // 省略時は true。false ならユーザー全体を走査しない
 }): Promise<{ items: InventoryItem[]; issues: string[] }>;
 ```
 
 - `projectPath` が `null` の場合はユーザー全体のみ返す
+- `user: false` は他プロジェクト欄向け。Skill / Subagent / MCP の user 走査をせず、Plugin も `projectPath` 一致だけを返す
+- Plugin は CLI が全プロジェクト分を返すので、`projectPath` と一致しない project スコープは一覧に載せない
 - `issues` は走査に失敗したエージェントの理由。1 つのエージェントの失敗で一覧全体を落とさない
 - プロジェクトのサブディレクトリにあるスキルは `apps/web:deploy` の修飾名で返す（名前で畳むため）
 - 走査は 180 秒キャッシュ。手動更新・書き込み直後・View 非表示で破棄する
 - frontmatter は先頭 4 KB だけ読む。本文は詳細表示中のみ保持する
+
+---
+
+### `projects` — 他プロジェクト欄の候補
+
+```typescript
+export function projects(params: {
+  storagePath: string;
+}): string[];
+```
+
+- `~/.claude.json` の `projects` キーだけを読む。ホームは走査しない
+- 実在し、直下に Skill / Subagent / `.mcp.json` / local MCP のいずれかがあるパスだけを返す
 
 ---
 

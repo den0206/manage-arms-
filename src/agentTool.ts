@@ -12,6 +12,7 @@ import { inventory as buildInventory, InventoryItem } from "./inventory";
 import * as mcp from "./mcpScanner";
 import { MCPScope, MCPServer } from "./mcpServer";
 import { mcpStatus as pollMcpStatus } from "./processScanner";
+import { knownProjects } from "./projectScan";
 import { cliOverrides, load, read, Registry, save, update } from "./registry";
 import { disable, enable, remove as removeManaged, removeUnmanaged } from "./skillManager";
 import { updateApply as applyUpdate, updatePreview as previewUpdate, UpdateDiff } from "./updater";
@@ -62,10 +63,18 @@ async function mutate(storagePath: string,
   await update(env, async registry => { await change(registry, env); });
 }
 
-export async function inventory(params: { storagePath: string; projectPath: string | null }):
-  Promise<{ items: InventoryItem[]; issues: string[] }> {
+export async function inventory(params: {
+  storagePath: string; projectPath: string | null; user?: boolean;
+}): Promise<{ items: InventoryItem[]; issues: string[] }> {
   const env = envOf(params.storagePath);
-  return buildInventory({ env, projectPath: params.projectPath, run: runnerFor(env) });
+  return buildInventory({
+    env, projectPath: params.projectPath, run: runnerFor(env), user: params.user,
+  });
+}
+
+/** 他プロジェクトの一覧を出すための候補。`~/.claude.json` の既知パスだけを返す。 */
+export function projects(params: { storagePath: string }): string[] {
+  return knownProjects(envOf(params.storagePath));
 }
 
 export function scanPath(params: { storagePath: string }): Promise<AgentInfo[]> {

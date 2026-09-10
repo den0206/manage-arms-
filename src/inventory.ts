@@ -101,32 +101,41 @@ function projectItems(project: string, registry: Registry): InventoryItem[] {
   ];
 }
 
-export async function inventory(params: { env: Env; projectPath: string | null; run?: Run }):
-  Promise<{ items: InventoryItem[]; issues: string[] }> {
+export async function inventory(params: {
+  env: Env; projectPath: string | null; run?: Run; user?: boolean;
+}): Promise<{ items: InventoryItem[]; issues: string[] }> {
   const { env, projectPath, run } = params;
+  const includeUser = params.user !== false;
   const registry = load(env);
   const issues: string[] = [];
 
-  const servers = await mcp.scan(env, run);
-  issues.push(...servers.issues);
-  const mcpItems: InventoryItem[] = AGENT_IDS.flatMap(agent =>
-    (servers.servers[agent] ?? []).map(server => ({
-      name: server.name, kind: "mcp" as const, scope: "user" as const, agents: [agent],
-      enabled: server.enabled,
-      origin: server.isProtected ? "bundled" as const : "user" as const,
-      hasUpdate: false, summary: mcpSummary(server), mcpScope: "user" as const,
-    }))).sort(byName);
+  let mcpItems: InventoryItem[] = [];
+  if (includeUser) {
+    const servers = await mcp.scan(env, run);
+    issues.push(...servers.issues);
+    mcpItems = AGENT_IDS.flatMap(agent =>
+      (servers.servers[agent] ?? []).map(server => ({
+        name: server.name, kind: "mcp" as const, scope: "user" as const, agents: [agent],
+        enabled: server.enabled,
+        origin: server.isProtected ? "bundled" as const : "user" as const,
+        hasUpdate: false, summary: mcpSummary(server), mcpScope: "user" as const,
+      }))).sort(byName);
+  }
 
   const installed = await plugins.scan(env, run);
   issues.push(...installed.issues);
-  const pluginItems: InventoryItem[] = installed.plugins.map((plugin): InventoryItem => ({
-    name: plugin.id, kind: "plugin", scope: plugin.projectPath ? "project" : "user",
-    agents: [plugin.agent], enabled: plugin.enabled,
-    origin: plugin.isBundled ? "bundled" : "user",
-    sourcePath: plugin.projectPath, hasUpdate: false,
-    pluginScope: plugin.scope,
-    summary: plugin.version === undefined ? undefined : `v${plugin.version}`,
-  })).sort(byName);
+  // CLI は全プロジェクトの Plugin を返す。今見ている projectPath 以外は載せない。
+  const pluginItems: InventoryItem[] = installed.plugins
+    .filter(plugin => plugin.projectPath === projectPath
+      || (includeUser && plugin.projectPath === undefined))
+    .map((plugin): InventoryItem => ({
+      name: plugin.id, kind: "plugin", scope: plugin.projectPath ? "project" : "user",
+      agents: [plugin.agent], enabled: plugin.enabled,
+      origin: plugin.isBundled ? "bundled" : "user",
+      sourcePath: plugin.projectPath, hasUpdate: false,
+      pluginScope: plugin.scope,
+      summary: plugin.version === undefined ? undefined : `v${plugin.version}`,
+    })).sort(byName);
 
   const projectItemList = projectPath === null ? [] : projectItems(projectPath, registry);
   const projectMcp: InventoryItem[] = projectPath === null ? []
@@ -138,8 +147,8 @@ export async function inventory(params: { env: Env; projectPath: string | null; 
 
   return {
     items: [
-      ...userSkills(env, registry), ...userSubagents(env, registry), ...mcpItems, ...pluginItems,
-      ...projectItemList, ...projectMcp,
+      ...(includeUser ? [...userSkills(env, registry), ...userSubagents(env, registry), ...mcpItems] : []),
+      ...pluginItems, ...projectItemList, ...projectMcp,
     ],
     issues,
   };

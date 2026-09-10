@@ -6,7 +6,7 @@ const { parse, read, HEAD_BYTES } = require("../out/frontmatter.js");
 const { scanSkillRoot, scanSubagentRoot, isLoadable } = require("../out/skillScanner.js");
 const { stripComments } = require("../out/mcpScanner.js");
 const { parseAll, redact, summary, floatingPackage } = require("../out/mcpServer.js");
-const { projectSkillRoots } = require("../out/projectScan.js");
+const { projectSkillRoots, knownProjects } = require("../out/projectScan.js");
 const { fakeEnv, makeDir, writeFileIn } = require("./helpers.js");
 
 const skill = (root, name, body) => writeFileIn(join(root, name, "SKILL.md"), body);
@@ -156,4 +156,33 @@ test("プロジェクトの .claude/skills を深さ 3 まで探す", () => {
   skill(join(project, "a/b/c/d/.claude/skills"), "too-deep", "---\nname: c\n---\n");
   skill(join(project, "node_modules/pkg/.claude/skills"), "vendored", "---\nname: d\n---\n");
   assert.deepEqual(projectSkillRoots(project).map(found => found.prefix).sort(), ["", "apps/web"]);
+});
+
+test("既知プロジェクトはツールを持つ実在ディレクトリだけ返す", () => {
+  const env = fakeEnv();
+  const withSkill = makeDir(join(env.home, "with-skill"));
+  skill(join(withSkill, ".claude/skills"), "theirs", "---\nname: a\n---\n");
+  const withSubagent = makeDir(join(env.home, "with-subagent"));
+  writeFileIn(join(withSubagent, ".claude/agents/theirs.md"), "---\nname: b\n---\n");
+  const withProjectMcp = makeDir(join(env.home, "with-project-mcp"));
+  writeFileIn(join(withProjectMcp, ".mcp.json"), "{}");
+  const withLocalMcp = makeDir(join(env.home, "with-local-mcp"));
+  const empty = makeDir(join(env.home, "empty"));
+  makeDir(join(empty, ".claude/skills"));            // 空の置き場は「無い」と扱う
+  writeFileIn(join(env.home, ".claude.json"), JSON.stringify({
+    projects: {
+      [withSkill]: {}, [withSubagent]: {}, [withProjectMcp]: {},
+      [withLocalMcp]: { mcpServers: { one: {} } },
+      [empty]: {}, [join(env.home, "gone")]: {},
+    },
+  }));
+  assert.deepEqual(knownProjects(env),
+    [withSkill, withSubagent, withProjectMcp, withLocalMcp].sort());
+});
+
+test("~/.claude.json が無い・壊れていても既知プロジェクトは空で返す", () => {
+  const env = fakeEnv();
+  assert.deepEqual(knownProjects(env), []);
+  writeFileIn(join(env.home, ".claude.json"), "{ broken");
+  assert.deepEqual(knownProjects(env), []);
 });
