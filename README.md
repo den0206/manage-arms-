@@ -42,7 +42,7 @@ The project is a Swift Package — there is no `.xcodeproj` (open `Package.swift
 directly).
 
 ```bash
-swift test                  # 375 tests in 52 suites (MANUAL=1 adds live-CLI checks)
+swift test                  # all unit tests (MANUAL=1 adds live-CLI checks)
 swift build                 # compile check
 
 # The distributable form is a hand-assembled .app bundle.
@@ -82,7 +82,7 @@ Sources/
 Localization/           ja / en. Keys are the Japanese strings themselves
 Resources/              Info.plist / entitlements / app icon
 Scripts/                .app assembly, DMG, CHANGELOG cutting, invariant checks
-docs/signing.md         Developer ID signing and notarization setup (Japanese)
+docs/                   Agent Tool migration and implementation specifications
 ```
 
 ## Security
@@ -112,8 +112,7 @@ docs/signing.md         Developer ID signing and notarization setup (Japanese)
 ## Releases
 
 Push a `release/Ver_X.Y.Z` branch off `main` and CI runs tests → signed build →
-notarization → DMG → GitHub Release. Setup and procedure are in
-[docs/signing.md](docs/signing.md) (Japanese).
+notarization → DMG → GitHub Release. The release workflow contains the remaining Mac App procedure.
 
 **Releases are published to a separate public repository**,
 [den0206/manage-arms-releases](https://github.com/den0206/manage-arms-releases) — the source
