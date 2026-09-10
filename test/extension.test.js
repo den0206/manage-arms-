@@ -334,3 +334,29 @@ test("カードのタップで説明を開き、もう一度で閉じる", () =>
   context.toggleDetail(tool);
   assert.equal(context.rowsHtml([tool]).includes("what it does"), false);
 });
+
+/** 「導入しています…」を元に戻せるのは結果の通知だけ。成否を Webview へ返す。 */
+test("導入の結果を Webview に返す", async () => {
+  const { stub, state } = stubVscode();
+  const { context } = activateWith(stub, fakeEnv().appSupport, {
+    inventory: async () => ({ items: [], issues: [] }), mcpStatus: async () => ({}),
+    projects: () => [],
+  });
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  const request = { type: "installTool", url: "https://github.com/o/r", kind: "skill", name: "x" };
+  const lastDone = () => state.posted.filter(message => message.type === "installDone").at(-1);
+  try {
+    showView(state);
+    stub.commands.executeCommand = () => Promise.resolve(true);
+    state.onMessage(request);
+    await settle();
+    assert.deepEqual(lastDone(), { type: "installDone", ok: true });
+
+    stub.commands.executeCommand = () => Promise.resolve(false);
+    state.onMessage(request);
+    await settle();
+    assert.deepEqual(lastDone(), { type: "installDone", ok: false });
+  } finally {
+    for (const entry of context.subscriptions) entry.dispose?.();
+  }
+});

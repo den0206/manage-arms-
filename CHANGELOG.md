@@ -23,6 +23,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- The install button in the URL preview no longer stays on "Installing…" after the install finishes; the panel closes on success and the button returns on failure or cancellation.
 - The plugin list no longer mixes in project-scoped plugins that belong to other projects; only the plugins of the project being viewed are shown.
 - Scan failures in the Other projects list are reported instead of showing what looks like an empty project.
 - Plugin installation now registers a supplied Marketplace before installing it; Claude no longer receives its unsupported `--marketplace` option. Plugin installation and removal show their commands for confirmation, and removal preserves the installed scope.

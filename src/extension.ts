@@ -98,22 +98,23 @@ export function activate(context: vscode.ExtensionContext): void {
     if (result.ok) void dashboard.refresh(true);
   });
 
+  // 成否を返す。Webview の「導入しています…」は、この結果でしか元に戻せない。
   command("agent-tool.installPreview", async (input: {
     url?: string; kind?: string; name?: string; selector?: string;
-  }) => {
-    if (!input?.url || !input.kind || !input.name || !await canWrite()) return;
+  }): Promise<boolean> => {
+    if (!input?.url || !input.kind || !input.name || !await canWrite()) return false;
     let agent: AgentId | undefined;
     if (input.kind === "plugin") {
       const pluginAgents = { "Claude Code": "claude", Codex: "codex" } as const;
       const picked = await vscode.window.showQuickPick(Object.keys(pluginAgents),
         { placeHolder: vscode.l10n.t("Choose an AI agent") });
-      if (!picked) return;
+      if (!picked) return false;
       agent = pluginAgents[picked as keyof typeof pluginAgents];
       const commands = agentTool.pluginAddCommands(agent, input.selector ?? input.name, input.url);
       const choice = await vscode.window.showWarningMessage(
         vscode.l10n.t("Install {0}?", input.selector ?? input.name),
         { modal: true, detail: commands.map(argv => argv.join(" ")).join("\n") }, vscode.l10n.t("Install"));
-      if (choice !== vscode.l10n.t("Install")) return;
+      if (choice !== vscode.l10n.t("Install")) return false;
     }
     const result = await withProgress(vscode.l10n.t("Agent Tool: Installing Tool"), () =>
       input.kind === "plugin"
@@ -123,6 +124,7 @@ export function activate(context: vscode.ExtensionContext): void {
           kind: input.kind as "skill" | "subagent" | "plugin", name: input.name,
         }));
     if (result.ok) void dashboard.refresh(true);
+    return result.ok;
   });
 
   command("agent-tool.removeTool", async (node: ToolNode) => {
