@@ -73,7 +73,7 @@ test("activate は CLI を起動せずに全コマンドを登録する", () => 
   for (const name of [
     "agent-tool.toggleTool", "agent-tool.addSkill", "agent-tool.addMcp", "agent-tool.removeTool",
     "agent-tool.previewUpdate", "agent-tool.applyUpdate", "agent-tool.refreshInventory",
-    "agent-tool.openToolActions", "agent-tool.migrateFromManageArms",
+    "agent-tool.openToolActions",
   ]) {
     assert.ok(state.commands.has(name), name);
   }

@@ -34,7 +34,7 @@ if grep -qE 'from "\./env"' src/fetcher.ts; then
 elif ! grep -q 'mkdtempSync(join(tmpdir()' src/writeGuard.ts; then
     fail "一時領域がOSの一時ディレクトリから作られていません"
 else
-    echo "✓ 取得と移行の作業領域はOSの一時領域に限定されています"
+    echo "✓ 取得と更新の作業領域はOSの一時領域に限定されています"
 fi
 
 for file in skillManager installer updater; do

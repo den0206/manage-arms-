@@ -3,8 +3,7 @@
 > 設計の前提は [vscode-cursor-extension-design-questions.md](vscode-cursor-extension-design-questions.md) を参照。
 > プロダクト要件は [product-requirements.md](product-requirements.md) を参照。
 
-> **移行注記（2026-09-10）**: Swift CLI サブプロセスを廃止し、拡張内の TypeScript だけで完結する設計に変更した（設計決定 D-2）。
-> 実装の入口は `src/agentTool.ts`。
+実装の入口は `src/agentTool.ts`。
 
 ---
 
@@ -36,7 +35,6 @@ export type ErrorCode =
   | 'REMOTE_ENV'            // Remote 環境では操作不可
   | 'UNTRUSTED_WORKSPACE'   // 未信頼ワークスペースでは書き込み不可
   | 'SCHEMA_UNSUPPORTED'    // registry のスキーマがモジュールより新しい
-  | 'MIGRATION_CONFLICT'    // 移行先に既存データがあり上書きできない
   | 'OPERATION_FAILED';     // WriteGuard 以外の理由で操作が失敗した
 
 export class AgentToolError extends Error {
@@ -298,20 +296,6 @@ export function pluginRemove(params: {
 ```
 
 Claude の削除には一覧から取得した `scope` をそのまま渡す。Marketplace は他の Plugin と共有できるため削除しない。
-
----
-
-### `migrate` — ManageArms からの移行
-
-```typescript
-export function migrate(params: {
-  storagePath: string;
-  sourcePath: string;
-}): Promise<{ migratedEntries: number; skipped: number }>;
-```
-
-- `sourcePath` は旧 ManageArms の Application Support ディレクトリを渡す
-- 移行先に既存データがある場合は `MIGRATION_CONFLICT` を throw する
 
 ---
 

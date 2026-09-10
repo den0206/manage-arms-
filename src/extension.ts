@@ -1,17 +1,9 @@
 import * as vscode from "vscode";
-import { execFile } from "node:child_process";
 import * as agentTool from "./agentTool";
 import { AgentId, KindId } from "./agent";
 import { AgentToolError } from "./errors";
-import { hasLegacyData, legacyPath } from "./migration";
 import { mcpServers } from "./pasteInput";
 import { DashboardItem, DashboardProvider } from "./dashboard";
-
-/** 旧 Mac App は macOS 専用。他の OS では検知そのものを行わない。 */
-function isMacAppRunning(): Promise<boolean> {
-  if (process.platform !== "darwin") return Promise.resolve(false);
-  return new Promise(resolve => execFile("pgrep", ["-x", "ManageArms"], error => resolve(!error)));
-}
 
 type ToolNode = { tool: DashboardItem; scope: DashboardItem["scope"]; agent?: string };
 
@@ -29,7 +21,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider("agent-tool.inventory", dashboard), dashboard);
 
-  /** 書き込みの共通ガード。未信頼・Remote・旧 Mac App 起動中は操作しない。 */
+  /** 書き込みの共通ガード。未信頼・Remote では操作しない。 */
   async function canWrite(): Promise<boolean> {
     if (!vscode.workspace.isTrusted) {
       void vscode.window.showWarningMessage(vscode.l10n.t("Agent Tool: trust this workspace before changing tools."));
@@ -37,10 +29,6 @@ export function activate(context: vscode.ExtensionContext): void {
     }
     if (vscode.env.remoteName) {
       void vscode.window.showWarningMessage(vscode.l10n.t("Agent Tool: tool changes are available only in the local window."));
-      return false;
-    }
-    if (await isMacAppRunning()) {
-      void vscode.window.showWarningMessage(vscode.l10n.t("Agent Tool: ManageArms is running. Quit it before making changes."));
       return false;
     }
     return true;
@@ -233,35 +221,6 @@ export function activate(context: vscode.ExtensionContext): void {
     if (choice) await vscode.commands.executeCommand(choice.value, node);
   });
 
-  command("agent-tool.migrateFromManageArms", () => void offerMigration(true));
-
-  async function offerMigration(manual: boolean): Promise<void> {
-    const source = legacyPath();
-    if (source === null || !hasLegacyData()) {
-      if (manual) {
-        void vscode.window.showInformationMessage(vscode.l10n.t("Agent Tool: no ManageArms data was found."));
-      }
-      return;
-    }
-    if (!manual && (context.globalState.get("migrationDone") || context.globalState.get("migrationDeclined"))) {
-      return;
-    }
-    const choice = await vscode.window.showInformationMessage(
-      vscode.l10n.t("Migrate ManageArms data to Agent Tool?"),
-      vscode.l10n.t("Migrate"), vscode.l10n.t("Later"), vscode.l10n.t("Don't migrate"));
-    if (choice === vscode.l10n.t("Don't migrate")) {
-      await context.globalState.update("migrationDeclined", true);
-      return;
-    }
-    if (choice !== vscode.l10n.t("Migrate")) return;
-    const result = await withProgress(vscode.l10n.t("Agent Tool: Migrating ManageArms data"),
-      () => agentTool.migrate({ storagePath, sourcePath: source }));
-    if (!result.ok) return;
-    await context.globalState.update("migrationDone", true);
-    void dashboard.refresh(true);
-  }
-
-  void offerMigration(false);
 }
 
 export function deactivate(): void {}

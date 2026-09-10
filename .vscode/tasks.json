@@ -9,9 +9,9 @@
       "group": { "kind": "build", "isDefault": true }
     },
     {
-      "label": "Test Agent Tool Core",
-      "type": "shell",
-      "command": "swift test",
+      "label": "Test Agent Tool",
+      "type": "npm",
+      "script": "test",
       "problemMatcher": [],
       "group": { "kind": "test", "isDefault": true }
     }

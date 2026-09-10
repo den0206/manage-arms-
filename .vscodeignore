@@ -4,7 +4,6 @@
 .claude/**
 docs/**
 scripts/**
-Scripts/**
 test/**
 src/**
 vsix/**

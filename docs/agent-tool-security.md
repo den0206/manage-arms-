@@ -196,10 +196,3 @@ Bearer <value>        → Bearer [REDACTED]
 - テレメトリ: 一切収集しない
 
 ---
-
-## 10. 既存データとの競合防止
-
-- 旧 `registry.json`（`~/Library/Application Support/ManageArms/`）は移行時に **読み取りのみ**参照する
-- 移行完了まで旧ファイルへの書き込みは行わない
-- 移行後、旧ファイルの削除はユーザーに委ねる（自動削除しない）
-- `LEGACY_APP_RUNNING` エラーコードは廃止（Mac App は main ブランチから削除済み）
