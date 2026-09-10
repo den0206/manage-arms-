@@ -41,59 +41,6 @@ class InventoryNode extends vscode.TreeItem {
   }
 }
 
-class InventoryProvider implements vscode.TreeDataProvider<InventoryNode>, vscode.Disposable {
-  private readonly change = new vscode.EventEmitter<InventoryNode | undefined>();
-  readonly onDidChangeTreeData = this.change.event;
-  private snapshot?: { at: number; items: InventoryItem[] };
-  private status = new Map<string, boolean>();
-  private timer?: NodeJS.Timeout;
-  constructor(private readonly storagePath: string) {}
-  dispose(): void { this.change.dispose(); this.snapshot = undefined; if (this.timer) clearInterval(this.timer); }
-  getTreeItem(node: InventoryNode): vscode.TreeItem { return node; }
-  refresh(): void { this.snapshot = undefined; this.change.fire(undefined); }
-  setVisible(visible: boolean): void {
-    if (this.timer) clearInterval(this.timer);
-    this.timer = undefined;
-    if (!visible) { this.snapshot = undefined; this.status.clear(); return; }
-    void this.refreshMcpStatus();
-    this.timer = setInterval(() => void this.refreshMcpStatus(), 3_000);
-  }
-  async getChildren(node?: InventoryNode): Promise<InventoryNode[]> {
-    if (!node) return [new InventoryNode("scope", "project"), new InventoryNode("scope", "user")];
-    const items = await this.items();
-    if (node.type === "scope") {
-      const agents = [...new Set(items.filter(item => item.scope === node.scope).flatMap(item => item.agents))];
-      return agents.length ? agents.map(agent => new InventoryNode("agent", node.scope, agent)) : [new InventoryNode("empty", node.scope)];
-    }
-    if (node.type === "agent") {
-      const kinds = [...new Set(items.filter(item => item.scope === node.scope && item.agents.includes(node.agent!)).map(item => item.kind))];
-      return kinds.map(kind => new InventoryNode("kind", node.scope, node.agent, kind));
-    }
-    if (node.type === "kind") {
-      const origins = [...new Set(items.filter(item => item.scope === node.scope && item.agents.includes(node.agent!) && item.kind === node.kind).map(item => item.origin === "bundled" ? "bundled" : "user" as Origin))];
-      return origins.map(origin => new InventoryNode("origin", node.scope, node.agent, node.kind, origin));
-    }
-    if (node.type === "origin") return items.filter(item => item.scope === node.scope && item.agents.includes(node.agent!) && item.kind === node.kind && (node.origin === "bundled" ? item.origin === "bundled" : item.origin !== "bundled")).sort((a, b) => a.name.localeCompare(b.name)).map(item => new InventoryNode("tool", node.scope, node.agent, node.kind, node.origin, item, this.status.get(`${node.agent}:${item.name}`)));
-    return [];
-  }
-  private async items(): Promise<InventoryItem[]> {
-    if (this.snapshot && Date.now() - this.snapshot.at < 180_000) return this.snapshot.items;
-    try {
-      const result = await runCli("inventory", { storagePath: this.storagePath });
-      const items = (result.data as { items?: InventoryItem[] } | undefined)?.items ?? [];
-      this.snapshot = { at: Date.now(), items };
-      return items;
-    } catch { return []; }
-  }
-  private async refreshMcpStatus(): Promise<void> {
-    try {
-      const result = await runCli("mcp-status", { storagePath: this.storagePath });
-      const servers = (result.data as { servers?: Array<{ agent: string; name: string; running: boolean }> } | undefined)?.servers ?? [];
-      this.status = new Map(servers.map(server => [`${server.agent}:${server.name}`, server.running]));
-      this.change.fire(undefined);
-    } catch { /* Keep the previous in-memory status until the next visible poll. */ }
-  }
-}
 
 export function activate(context: vscode.ExtensionContext): void {
   setCliPath(process.env.AGENT_TOOL_CORE_CLI ?? vscode.Uri.joinPath(context.extensionUri, "bin", "agent-tool-core").fsPath);
