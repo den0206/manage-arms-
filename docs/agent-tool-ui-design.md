@@ -100,6 +100,9 @@ SHA: abc123
 最終使用: 2026-09-09
 ```
 
+説明・使い方・場所・取得元は、カードそのものをクリックするとカードの直下に開き、
+もう一度クリックすると閉じる（Enter / Space も同じ）。`•••` は管理操作だけを出す。
+
 ### 3.2 MCP Server アイテム
 
 ```
@@ -109,6 +112,30 @@ SHA: abc123
 
 MCP Server の起動状態は View 表示中のみ 3 秒ポーリング（`mcp-status` コマンド）で更新する。
 View を閉じるとポーリングを停止する。
+
+### 3.3 他のプロジェクト
+
+User Global の一覧の下にドロップダウンを置き、現在のワークスペース以外のプロジェクトを 1 件選んで
+その project スコープのツールを見せる。
+
+```
+▾ Other projects
+    [ プロジェクトを選択 ▾ ]
+    /path/to/other-project
+    ✓ their-skill              ← クリックで説明・場所を開く（再クリックで閉じる）
+```
+
+- 候補は `~/.claude.json` の `projects` キーのうち、実在してツールを持つプロジェクトだけ（`knownProjects`）。
+  ホームは走査しない（不変条件 3）。
+- ツールの有無は直下の `.claude/skills`・`.claude/agents`・`.mcp.json` と、
+  `~/.claude.json` の `projects[path].mcpServers` だけで決める。候補全件に深さ 3 の走査は掛けない。
+- 走査するのは選ばれた 1 件だけ（`inventory` の `user: false`）。Webview から届くパスは信頼せず、候補に載っているものだけ受け付ける。
+- Plugin は `projectPath` が選んだパスと一致するものだけ。他プロジェクト分は載せない。
+- 走査失敗は空一覧にせず、理由を出す（メイン一覧の `issues` と同じ）。
+- 表示は読み取り専用。project スコープの実体はプロジェクトのファイルが持ち、
+  `isManageable` が user スコープの Skill / Subagent しか許さないので、削除・有効化は出さない。
+- MCP の起動状態は出さない。ポーリングは user スコープの登録だけを見ている。
+- 結果は Webview 側にだけ置き、View を閉じたら捨てる。
 
 ---
 

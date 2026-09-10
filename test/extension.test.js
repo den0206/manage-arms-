@@ -152,7 +152,7 @@ function showView(state) {
   state.provider.resolveWebviewView({
     webview: {
       options: {}, cspSource: "vscode-resource:", html: "",
-      onDidReceiveMessage: () => ({ dispose() {} }),
+      onDidReceiveMessage: handler => { state.onMessage = handler; return { dispose() {} }; },
       postMessage: message => { state.posted.push(message); return Promise.resolve(true); },
     },
     visible: true,
@@ -221,4 +221,116 @@ test("同梱プラグインには削除を出さない", async () => {
     agents: ["codex"], origin: "bundled", enabled: true, hasUpdate: false,
   });
   assert.deepEqual(state.picks, []);
+});
+
+/** Webview から届くパスは信頼境界の外。既知プロジェクト以外は走査しない。 */
+test("他プロジェクトの一覧は既知パスだけを走査する", async () => {
+  const { stub, state } = stubVscode();
+  const scanned = [];
+  const item = (name, scope) => ({
+    name, kind: "skill", scope, agents: ["claude"], origin: "user", enabled: true, hasUpdate: false,
+  });
+  const plugin = (name, sourcePath) => ({
+    name, kind: "plugin", scope: "project", agents: ["claude"], origin: "user",
+    enabled: true, hasUpdate: false, sourcePath,
+  });
+  const { context } = activateWith(stub, fakeEnv().appSupport, {
+    inventory: async ({ projectPath, user }) => {
+      scanned.push(projectPath);
+      assert.equal(user, false);
+      return {
+        items: [
+          item("theirs", "project"), item("mine", "user"),
+          plugin("ours@here", "/known/project"), plugin("theirs@there", "/other/proj"),
+        ],
+        issues: ["claude Plugin: boom"],
+      };
+    },
+    mcpStatus: async () => ({}),
+    projects: () => ["/known/project"],
+  });
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  try {
+    showView(state);
+    await settle();
+    state.onMessage({ type: "selectProject", path: "/unknown/project" });
+    await settle();
+    assert.equal(scanned.includes("/unknown/project"), false);
+
+    state.onMessage({ type: "selectProject", path: "/known/project" });
+    await settle();
+    const posted = state.posted.filter(message => message.type === "projectInventory").at(-1);
+    assert.equal(posted.path, "/known/project");
+    assert.deepEqual(posted.items.map(x => x.name), ["theirs", "ours@here"]);
+    assert.deepEqual(posted.issues, ["claude Plugin: boom"]);
+  } finally {
+    for (const entry of context.subscriptions) entry.dispose?.();
+  }
+});
+
+/**
+ * Webview のスクリプトは vm でしか動かせない。DOM は使う分だけスタブして、
+ * カードのタップで説明が開き、もう一度で閉じることを確かめる。
+ */
+function runWebviewScript() {
+  const vm = require("node:vm");
+  const { readFileSync } = require("node:fs");
+  const bundle = JSON.parse(readFileSync(require.resolve("../l10n/bundle.l10n.json"), "utf8"));
+  const { stub } = stubVscode({
+    env: { remoteName: undefined, language: "en" },
+    l10n: { t: text => bundle[text] ?? text },
+  });
+  const { DashboardProvider } = loadExtension(stub) && require("../out/dashboard.js");
+  const provider = new DashboardProvider(fakeEnv().appSupport);
+  let html = "";
+  provider.resolveWebviewView({
+    webview: {
+      options: {}, cspSource: "vscode-resource:",
+      set html(value) { html = value; }, get html() { return html; },
+      onDidReceiveMessage: () => ({ dispose() {} }),
+      postMessage: () => Promise.resolve(true),
+    },
+    visible: false,
+    onDidChangeVisibility: () => ({ dispose() {} }),
+  });
+  provider.dispose();
+
+  const script = html.slice(html.lastIndexOf("<script"), html.lastIndexOf("</script>"));
+  const body = script.slice(script.indexOf(">") + 1);
+  const element = () => ({
+    innerHTML: "", textContent: "", value: "", dataset: {},
+    classList: { add() {}, remove() {} },
+    querySelectorAll: () => [], scrollIntoView() {},
+  });
+  const listeners = [];
+  const context = {
+    acquireVsCodeApi: () => ({ postMessage() {} }),
+    document: { querySelector: element, querySelectorAll: () => [] },
+    window: { addEventListener: (_type, handler) => listeners.push(handler) },
+  };
+  vm.createContext(context);
+  new vm.Script(body).runInContext(context);
+  return { context, send: message => listeners.forEach(handler => handler({ data: message })) };
+}
+
+test("カードのタップで説明を開き、もう一度で閉じる", () => {
+  const { context, send } = runWebviewScript();
+  const tool = {
+    name: "my-skill", kind: "skill", scope: "user", agents: ["claude"], origin: "user",
+    enabled: true, hasUpdate: false, summary: "what it does", detail: "/home/me/.agents/skills/my-skill",
+  };
+  send({ type: "inventory", items: [tool], projects: [], issues: [] });
+
+  const closed = context.rowsHtml([tool]);
+  assert.match(closed, /role="button"/);
+  assert.equal(closed.includes("what it does"), false);
+
+  context.toggleDetail(tool);
+  const open = context.rowsHtml([tool]);
+  assert.match(open, /aria-expanded="true"/);
+  assert.match(open, /what it does/);
+  assert.match(open, /\/home\/me\/\.agents\/skills\/my-skill/);
+
+  context.toggleDetail(tool);
+  assert.equal(context.rowsHtml([tool]).includes("what it does"), false);
 });
