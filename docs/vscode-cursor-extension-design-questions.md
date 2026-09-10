@@ -359,6 +359,138 @@ Agent Tool 固有のSwift CLI、永続registry、対応IDEの差だけを例外�
 
 ---
 
+## D. クロスプラットフォーム移行（グリリングセッション 2026-09-10）
+
+### 背景と目標
+
+macOS 専用だった Agent Tool を macOS / Linux / Windows の 3 OS で全機能を提供できるよう設計を変更する。
+
+---
+
+### D-1. 対象プラットフォーム
+
+**決定:** macOS + Linux + Windows すべてで全機能を提供。
+
+---
+
+### D-2. アーキテクチャ変更 — Swift CLI を廃止し TypeScript に統一
+
+**決定:** Swift CLI（サブプロセス）を廃止し、VS Code 拡張内の TypeScript だけで完結させる。
+
+**理由:**
+
+- Swift の主要な macOS 固有依存（`ditto`・`FileManager.trashItem`・`import Darwin`）を除去するコストより、TypeScript に統一する方が工数が小さい
+- TypeScript は Node.js で動くため、別途バイナリを OS 別にビルドして VSIX に同梱する必要がなくなり、20 MB 制限に余裕ができる
+- `os.homedir()`・`path.join()`・`fs/promises` など Node.js 標準 API は 3 OS で同一動作する
+
+**移行後のモジュール構成:**
+
+| 役割 | 現状（Swift） | 移行後（TypeScript） |
+|---|---|---|
+| WriteGuard・名前検証 | `WriteGuard.swift` | `src/writeGuard.ts` |
+| Registry 読み書き | `Registry.swift` | `src/registry.ts` |
+| Installer | `Installer.swift` | `src/installer.ts` |
+| MCP スキャン | `MCPScanner.swift` | `src/mcpScanner.ts` |
+| CLI エントリポイント | `AgentToolCoreCLI/` | 廃止（拡張が直接呼ぶ） |
+
+---
+
+### D-3. ファイルパス
+
+`path.join(os.homedir(), ...)` で全 OS 統一。`~` のハードコードは不要。
+
+| パス | macOS | Linux | Windows |
+|---|---|---|---|
+| `mcp.json` | `~/.cursor/mcp.json` | 同左 | `%USERPROFILE%\.cursor\mcp.json` |
+| Skill ストア | `~/.agents/skills/` | 同左 | `%USERPROFILE%\.agents\skills\` |
+| Subagent リンク | `~/.claude/agents/`、`~/.cursor/agents/` | 同左 | 同左 |
+| CLI ストレージ | `~/Library/Application Support/AgentTool/` | `~/.local/share/AgentTool/` | `%APPDATA%\AgentTool\` |
+
+`globalStorageUri`（拡張のストレージ）は VS Code API が OS 別パスを自動解決するため、拡張コード側の分岐は不要。
+
+---
+
+### D-4. symlink 方針
+
+**決定:** macOS / Linux は symlink を維持し、Windows では直接配置に切り替える。
+
+**理由:** Windows では symlink の作成に Developer Mode または管理者権限が必要なため、通常ユーザーが使えない。
+
+| OS | Skill / Subagent 配置 |
+|---|---|
+| macOS / Linux | symlink で共有（`~/.agents/skills/` → `~/.claude/skills/` 等） |
+| Windows | 各 Agent ディレクトリへ直接コピー。`~/.agents/skills/` は使用しない |
+
+---
+
+### D-5. 削除とゴミ箱
+
+**決定:** `FileManager.trashItem()` を廃止し、削除前に確認ダイアログを表示するのみにする。Undo 機能は削除する。
+
+**理由:**
+
+- Linux の swift-corelibs-foundation で `trashItem` が未実装
+- `trash` npm パッケージを追加すると依存が増える
+- 確認ダイアログで誤削除を防げれば実用上十分
+
+---
+
+### D-6. zip 展開
+
+**決定:** `ditto` を廃止し、npm zip パッケージ（`yauzl` など）に置き換える。exact バージョン固定・`ignore-scripts=true` を維持する。
+
+**理由:** `ditto` は macOS 専用コマンド。`yauzl` は streaming 解析で大容量ファイルもメモリに載せない。
+
+---
+
+### D-7. Registry ロック
+
+**決定:** `fs.open(path, 'wx')`（O_EXCL フラグ）で原子的にロックファイルを生成する自前実装を使う。npm `proper-lockfile` は追加しない。
+
+**理由:**
+
+- `O_EXCL` による原子的生成は 3 OS すべてで同一動作する
+- `proper-lockfile` は stale ロック判定にプロセス死活確認を使うため、Windows での動作が変わる懸念がある
+- 現 Swift 設計でもロックファイルの内容は空（inode だけが意味を持つ）なので、自前実装で十分
+
+---
+
+### D-8. MCP ステータス監視
+
+**決定:** 3 秒ポーリングを維持する。コマンドは OS ごとに分岐する。
+
+| OS | コマンド |
+|---|---|
+| macOS / Linux | `pgrep -x <name>` |
+| Windows | `tasklist /FI "IMAGENAME eq <name>.exe"` |
+
+---
+
+### D-9. 新しい不変条件
+
+現在の「TypeScript から Agent 設定や管理リソースを直接書かない」は TypeScript 統一後に意味をなくす。以下に置き換える。
+
+> **すべての書き込みは `writeGuard.ts` を通す。** `registry.json`・`mcp.json`・Skill/Subagent ファイルへの書き込みは `writeGuard.ts` が提供する関数だけが行う。
+
+WriteGuard が担う検証は Swift 版と同等：
+- `assertValidName`：名前にパス区切り・制御文字が含まれないことを確認
+- `assertSafeCreation`：作成先が走査ホワイトリスト内かつ親 symlink を経由しないことを確認
+- プロセス間ロックは Registry 書き込み時に必ず取得する
+
+---
+
+### D-10. 移行方式・CI
+
+**移行:** 一気置き換えを基本とする（難しければ TypeScript 先行実装 → Swift 削除の順）。
+
+**削除対象:**
+- `Sources/AgentToolCore/`・`Sources/AgentToolCoreCLI/`・`Tests/ManageArmsCoreTests/`
+- `Package.swift`
+
+**CI:** GitHub Actions に Linux ランナーを追加する。Windows ランナーは追加しない（symlink を使わない設計のため OS 差が小さい）。
+
+---
+
 ## 次のステップ
 
 以下の文書を実装の正本とする：
