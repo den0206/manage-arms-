@@ -1,6 +1,6 @@
 ---
 description: 未コミット変更をレビューし、機能・役割ごとに分けて Conventional Commit する
-allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git add:*), Bash(git commit:*), Bash(swift build:*), Bash(swift test:*), Bash(./Scripts/check-invariants.sh), Bash(./Scripts/release-changelog.sh:*), Bash(./Scripts/test-release-changelog.sh), Bash(./Scripts/build-app.sh)
+allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git add:*), Bash(git commit:*), Bash(swift build:*), Bash(swift test:*), Bash(npm run:*), Bash(./scripts/check-invariants.sh), Bash(./scripts/release-changelog.sh:*), Bash(./scripts/test-release-changelog.sh)
 ---
 
 # 機能別に Conventional Commit でコミットする
@@ -23,10 +23,10 @@ allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git a
 
 | グループ例 | 対象の目安 |
 |---|---|
-| `core` | `Sources/ManageArmsCore/`（Phase 0 後は `Sources/AgentToolCore/`）の走査・追加・更新・集計・権限 |
+| `core` | `Sources/AgentToolCore/`の走査・追加・更新・集計・権限 |
 | `extension` | `src/`・`test/` の Cursor UI・CLI 境界・テスト |
 | `i18n` | `l10n/` |
-| `build` | `Package.swift`・`package.json`・`Scripts/`（Phase 0 後は `scripts/`）・`.vscode/` |
+| `build` | `Package.swift`・`package.json`・`scripts/`・`.vscode/` |
 | `release` | `.github/workflows/`・リリーススクリプト・`CHANGELOG.md` |
 | `ci` | `.github/workflows/`・`Scripts/check-invariants.sh` |
 | `docs` | `README.md`・`README.ja.md`・`DESIGN.md`・`CLAUDE.md`・`docs/` |
@@ -63,12 +63,11 @@ allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git a
 
 ```bash
 swift build && swift test
-./Scripts/check-invariants.sh
-./Scripts/release-changelog.sh --check && ./Scripts/test-release-changelog.sh
+./scripts/check-invariants.sh
+./scripts/release-changelog.sh --check && ./scripts/test-release-changelog.sh
 ```
 
-Phase 0 後は小文字の `scripts/` を使う。`package.json` が存在する場合は、そこに定める
-Nodeテスト・型検査・VSIX組み立ても実行する。
+`package.json`が定めるNodeテスト・型検査・VSIX組み立ても実行する。
 
 **すべて緑になるまでコミットしない。**
 

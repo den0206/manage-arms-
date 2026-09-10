@@ -4,6 +4,13 @@
 DerivedData/
 .DS_Store
 *.dSYM
+node_modules/
+out/
+bin/
+vsix/
+.vscode-test/
+.env
+.env.*
 
 # リリース成果物（GitHub Release に添付するもの。リポジトリには入れない）
 *.dmg

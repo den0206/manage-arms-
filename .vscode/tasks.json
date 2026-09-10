@@ -2,23 +2,14 @@
   "version": "2.0.0",
   "tasks": [
     {
-      // F5 のデバッグ起動が使う。バンドルを組み立てるだけ（起動はデバッガが行う）。
-      "label": "Build ManageArms Debug.app",
-      "type": "shell",
-      "command": "CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh",
-      "problemMatcher": [],
-      "group": "build"
-    },
-    {
-      // デバッガ拡張が無くても Cmd+Shift+B で「ビルドして起動」できるフォールバック。
-      "label": "Build & Run ManageArms Debug.app",
-      "type": "shell",
-      "command": "CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh && open \".build/debug/ManageArms Debug.app\"",
-      "problemMatcher": [],
+      "label": "Compile Agent Tool",
+      "type": "npm",
+      "script": "compile",
+      "problemMatcher": "$tsc",
       "group": { "kind": "build", "isDefault": true }
     },
     {
-      "label": "Test",
+      "label": "Test Agent Tool Core",
       "type": "shell",
       "command": "swift test",
       "problemMatcher": [],

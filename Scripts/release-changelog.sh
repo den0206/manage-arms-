@@ -4,9 +4,9 @@
 #
 # 依存ゼロ・通信ゼロ（awk / perl / POSIX テキストツールのみ）。
 #
-#   Scripts/release-changelog.sh 0.0.6 [YYYY-MM-DD]   切り出して書き戻す（省略時は UTC の今日）
-#   Scripts/release-changelog.sh --section 0.0.6      その版の節だけ標準出力へ（Release 本文用）
-#   Scripts/release-changelog.sh --check              英語のみ・見出し語彙・[Unreleased] の検査
+#   scripts/release-changelog.sh 0.1.0-alpha.1 [YYYY-MM-DD]
+#   scripts/release-changelog.sh --section 0.1.0-alpha.1
+#   scripts/release-changelog.sh --check
 #
 # リリース（`release/Ver_X.Y.Z` の push）で release.yml が呼ぶ。**Release を作る前に**走らせること。
 # 何度呼んでも安全（その版の見出しが既にあれば何もしない）。
@@ -49,12 +49,13 @@ fi
 
 VERSION="${1:-}"
 [[ -n "$VERSION" ]] || die "バージョンを X.Y.Z 形式で指定してください"
-[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "バージョンは X.Y.Z 形式です（受領: $VERSION）"
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] \
+    || die "バージョンはSemVer形式です（受領: $VERSION）"
 
 # --- --section: 指定版の本文だけ取り出す（gh release --notes-file 用）-------
 if [[ "$MODE" == section ]]; then
   body="$(awk -v ver="$VERSION" '
-    $0 ~ "^##[ \t]+\\[?" ver "\\]?([ \t]|$)" { inside = 1; next }
+    index($0, "## [" ver "]") == 1 { inside = 1; next }
     inside && (/^## / || /^\[[^]]+\]:[ \t]+[^ \t]/) { inside = 0 }
     inside                                       { n++; body[n] = $0; if ($0 ~ /[^ \t]/) { if (!first) first = n; last = n } }
     END { for (i = first; i <= last; i++) print body[i] }
@@ -74,9 +75,9 @@ trap 'rm -f "$OUT"' EXIT
 set +e
 awk -v ver="$VERSION" -v date="$DATE" '
   function versionOf(s,   t) {
-    if (s !~ /^##[ \t]+\[?[0-9]+\.[0-9]+\.[0-9]+/) return ""
+    if (s !~ /^##[ \t]+\[?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?/) return ""
     t = s; sub(/^##[ \t]+\[?/, "", t)
-    return (match(t, /^[0-9]+\.[0-9]+\.[0-9]+/)) ? substr(t, 1, RLENGTH) : ""
+    return (match(t, /^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?/)) ? substr(t, 1, RLENGTH) : ""
   }
   { line[NR] = $0 }
   END {

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# release-changelog.sh の自己テスト。依存ゼロ。`Scripts/test-release-changelog.sh` で実行する。
+# release-changelog.sh の自己テスト。依存ゼロ。`scripts/test-release-changelog.sh` で実行する。
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -68,6 +68,12 @@ check "節を取り出す" "### Added
 - A thing" "$(run --section 0.0.2)"
 run --section 9.9.9 >/dev/null 2>&1
 check "存在しない版は失敗" 1 "$?"
+
+echo "prerelease"
+fixture
+out="$(run 0.1.0-alpha.1 2026-09-10)"; rc=$?
+check "SemVer prereleaseを切り出せる" 0 "$rc"
+contains "prerelease見出し" "$(cat "$TMP/CHANGELOG.md")" "## [0.1.0-alpha.1] — 2026-09-10"
 
 echo "--check"
 fixture

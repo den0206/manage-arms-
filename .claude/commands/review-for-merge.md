@@ -1,6 +1,6 @@
 ---
 description: main へ入れる前に、変更一式をこのリポジトリ固有の観点でレビューする
-allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(swift build:*), Bash(swift test:*), Bash(./Scripts/check-invariants.sh), Bash(./Scripts/release-changelog.sh:*), Bash(./Scripts/test-release-changelog.sh), Bash(./Scripts/build-app.sh)
+allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(swift build:*), Bash(swift test:*), Bash(npm run:*), Bash(./scripts/check-invariants.sh), Bash(./scripts/release-changelog.sh:*), Bash(./scripts/test-release-changelog.sh)
 ---
 
 # マージ前レビュー
@@ -96,12 +96,11 @@ allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(swift
 
 ```bash
 swift build && swift test
-./Scripts/check-invariants.sh
-./Scripts/release-changelog.sh --check && ./Scripts/test-release-changelog.sh
+./scripts/check-invariants.sh
+./scripts/release-changelog.sh --check && ./scripts/test-release-changelog.sh
 ```
 
-Phase 0 後は小文字の `scripts/` を使う。`package.json` が存在する場合は、そこに定める
-Nodeテスト・型検査・VSIX組み立ても実行する。
+`package.json`が定めるNodeテスト・型検査・VSIX組み立ても実行する。
 
 ## 出力
 

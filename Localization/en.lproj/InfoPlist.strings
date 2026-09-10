@@ -1,2 +1,0 @@
-/* Shown in the automation permission dialog (browser detection, DESIGN.md 6). */
-"NSAppleEventsUsageDescription" = "Reads the URL of the page open in your browser so it can offer to add skills and plugins. URLs are never stored.";

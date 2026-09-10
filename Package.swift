@@ -2,11 +2,11 @@
 import PackageDescription
 
 let package = Package(
-    name: "ManageArms",
+    name: "AgentTool",
     platforms: [.macOS(.v26)],
     targets: [
-        .target(name: "ManageArmsCore"),
-        .executableTarget(name: "ManageArms", dependencies: ["ManageArmsCore"]),
-        .testTarget(name: "ManageArmsCoreTests", dependencies: ["ManageArmsCore"]),
+        .target(name: "AgentToolCore"),
+        .executableTarget(name: "AgentToolCoreCLI", dependencies: ["AgentToolCore"]),
+        .testTarget(name: "AgentToolCoreTests", dependencies: ["AgentToolCore"]),
     ]
 )

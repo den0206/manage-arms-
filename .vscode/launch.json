@@ -2,24 +2,12 @@
   "version": "0.2.0",
   "configurations": [
     {
-      // F5 で起動。組み立てた .app 内のバイナリを直接起動する（素の実行バイナリだと
-      // Info.plist / アイコン / ローカライズが解決されないため）。要 CodeLLDB 拡張。
-      "type": "lldb",
+      "type": "extensionHost",
       "request": "launch",
-      "name": "Run ManageArms Debug.app",
-      "program": "${workspaceFolder}/.build/debug/ManageArms Debug.app/Contents/MacOS/ManageArms",
-      "cwd": "${workspaceFolder}",
-      "preLaunchTask": "Build ManageArms Debug.app"
-    },
-    {
-      // 英語 UI で起動して en.lproj を確認する（`-AppleLanguages` は macOS 標準の引数）。
-      "type": "lldb",
-      "request": "launch",
-      "name": "Run ManageArms Debug.app (English)",
-      "program": "${workspaceFolder}/.build/debug/ManageArms Debug.app/Contents/MacOS/ManageArms",
-      "args": ["-AppleLanguages", "(en)"],
-      "cwd": "${workspaceFolder}",
-      "preLaunchTask": "Build ManageArms Debug.app"
+      "name": "Run Agent Tool",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
+      "outFiles": ["${workspaceFolder}/out/**/*.js"],
+      "preLaunchTask": "Compile Agent Tool"
     }
   ]
 }

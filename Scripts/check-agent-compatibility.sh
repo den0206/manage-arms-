@@ -1,6 +1,6 @@
 #!/bin/bash
 # Install the requested CLI into a disposable prefix, then exercise it in a separate fake home.
-# Usage: ./Scripts/check-agent-compatibility.sh claude|codex|gemini [version]
+# Usage: ./scripts/check-agent-compatibility.sh claude|codex|gemini [version]
 set -euo pipefail
 cd "$(dirname "$0")/.."
 agent="${1:?Specify claude, codex or gemini}"

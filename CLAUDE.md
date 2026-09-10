@@ -16,16 +16,15 @@ Swift 6 / TypeScript。Swift Core は外部依存ゼロを維持する。
 | `docs/agent-tool-security.md` | WriteGuard・権限・信頼境界 |
 | `docs/agent-tool-test-plan.md` | Swift / TypeScript / Cursor の検証 |
 | `docs/agent-tool-release-plan.md` | Phase 0 の改名・撤去と開発・配布順序 |
-| `DESIGN.md` | Phase 0 で削除する現行 Mac App の実装確認用 |
 
 Agent Tool の判断では `docs/agent-tool-*.md` を優先する。仕様を複製せず、該当する正本を更新する。
 
 ## 移行中の境界
 
 - 製品・拡張名は **Agent Tool**、拡張 ID は `agent-tool`。
-- Phase 0 で既存リポジトリとローカルディレクトリを `agent-tool`、Coreを `AgentToolCore` へ変更する。
-- Mac App、旧CHANGELOG、配布・署名・公証資産はmainから削除する。旧データの移行元パスだけ残す。
-- TypeScript はルートの `src/` と `test/` に置き、`Scripts/` は `scripts/` へ変更する。
+- リポジトリとローカルディレクトリは`agent-tool`、Coreは`AgentToolCore`とする。
+- Mac App、旧CHANGELOG、配布・署名・公証資産はmainに置かない。旧データの移行元パスだけ残す。
+- TypeScriptはルートの`src/`と`test/`、スクリプトは`scripts/`に置く。
 - Swift CLI は1コマンド1プロセス。プロセスをまたぐ状態を CLI メモリに置かない。
 - TypeScript は Cursor API と表示、Swift CLI は走査・判定・書き込み・WriteGuard を担当する。
 - TypeScript から Agent 設定や管理リソースを直接書かない。
@@ -33,16 +32,15 @@ Agent Tool の判断では `docs/agent-tool-*.md` を優先する。仕様を複
 
 ## 完了の定義
 
-Phase 0 完了まではSwift変更時に:
+Swift変更時に:
 
 ```bash
 swift build && swift test
-./Scripts/check-invariants.sh
-./Scripts/release-changelog.sh --check && ./Scripts/test-release-changelog.sh
+./scripts/check-invariants.sh
+./scripts/release-changelog.sh --check && ./scripts/test-release-changelog.sh
 ```
 
-Phase 0 後は `scripts/` の同等コマンドを使う。`package.json` 追加後はNode 20で
-テスト・型検査・VSIX組み立て・固定Cursor StableのE2Eも通す。
+Node 20でテスト・型検査・VSIX組み立てを通す。Cursor E2E追加後は固定Cursor Stableでも検証する。
 CI はローカルと同じスクリプトを呼び、別ロジックを持たせない。
 
 ## 絶対に守る不変条件
