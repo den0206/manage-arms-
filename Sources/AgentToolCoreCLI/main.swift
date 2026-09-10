@@ -213,7 +213,7 @@ case "mcp-remove":
         exit(1)
     } catch {
         response(["ok": false, "protocolVersion": protocolVersion,
-                  "error": ["code": "NOT_FOUND", "message": error.localizedDescription]])
+                  "error": ["code": "OPERATION_FAILED", "message": error.localizedDescription]])
         exit(1)
     }
 case "add":
@@ -269,7 +269,7 @@ case "preview":
         response(["ok": true, "protocolVersion": protocolVersion, "data": ["candidates": candidates]])
     } catch {
         response(["ok": false, "protocolVersion": protocolVersion,
-                  "error": ["code": "NOT_FOUND", "message": error.localizedDescription]])
+                  "error": ["code": "FETCH_FAILED", "message": error.localizedDescription]])
         exit(1)
     }
 case "plugin-add":
@@ -282,9 +282,13 @@ case "plugin-add":
     do {
         try PluginManager.add(name, source: request.url ?? "", to: agent, env: environment(for: request))
         response(["ok": true, "protocolVersion": protocolVersion, "data": ["name": name]])
+    } catch let denial as WriteGuard.Denial {
+        response(["ok": false, "protocolVersion": protocolVersion,
+                  "error": ["code": "WRITE_GUARD_DENIED", "message": denial.localizedDescription]])
+        exit(1)
     } catch {
         response(["ok": false, "protocolVersion": protocolVersion,
-                  "error": ["code": "PLUGIN_ADD_FAILED", "message": String(describing: error)]])
+                  "error": ["code": "OPERATION_FAILED", "message": error.localizedDescription]])
         exit(1)
     }
 case "remove":
