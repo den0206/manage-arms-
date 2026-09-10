@@ -124,7 +124,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }
     void dashboard.refresh(true);
   }));
-  context.subscriptions.push(vscode.commands.registerCommand("agent-tool.addSkill", async () => {
+  context.subscriptions.push(vscode.commands.registerCommand("agent-tool.addSkill", async (providedUrl?: string) => {
     if (!vscode.workspace.isTrusted || vscode.env.remoteName) {
       void vscode.window.showWarningMessage("Agent Tool: add tools only from a trusted local Cursor window.");
       return;
@@ -133,7 +133,7 @@ export function activate(context: vscode.ExtensionContext): void {
       void vscode.window.showWarningMessage("Agent Tool: ManageArms is running. Quit it before making changes.");
       return;
     }
-    const url = await vscode.window.showInputBox({ prompt: "Public GitHub Skill URL", placeHolder: "https://github.com/owner/repository", ignoreFocusOut: true });
+    const url = providedUrl ?? await vscode.window.showInputBox({ prompt: "Public GitHub Skill URL", placeHolder: "https://github.com/owner/repository", ignoreFocusOut: true });
     if (!url) return;
     await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Agent Tool: Adding Skill" }, async () => {
       const result = await runCli("add", { storagePath: context.globalStorageUri.fsPath, url, scope: "user", kind: "skill" });
