@@ -7,7 +7,6 @@ const {
 } = require("../out/processScanner.js");
 const { classify, commandWords, mcpServers, parseCommand } = require("../out/pasteInput.js");
 const { parseUrl, skillHint } = require("../out/github.js");
-const { migrate } = require("../out/migration.js");
 const { parseAll } = require("../out/mcpServer.js");
 const { fakeEnv, makeDir, writeFileIn } = require("./helpers.js");
 
@@ -175,25 +174,4 @@ test("MCP の 3 形式を受ける", () => {
   assert.deepEqual(mcpServers('npx -y "my server"', "a")[0].transport.args, ["-y", "my server"]);
   assert.equal(mcpServers('{"mcpServers":{"b":{"command":"node"}}}', "a")[0].name, "b");
   assert.throws(() => mcpServers("何かの文章", "a"), code("OPERATION_FAILED"));
-});
-
-// --- 移行 ---
-
-const legacy = () => join(require("node:os").homedir(), "Library/Application Support/ManageArms");
-
-test("移行元が違えば受け付けない", async t => {
-  if (process.platform !== "darwin") return t.skip("旧 ManageArms は macOS 専用");
-  const env = fakeEnv();
-  await assert.rejects(migrate(join(env.home, "elsewhere"), env), code("NOT_FOUND"));
-});
-
-test("移行先に既存データがあれば上書きしない", async t => {
-  if (process.platform !== "darwin") return t.skip("旧 ManageArms は macOS 専用");
-  const env = fakeEnv();
-  const source = legacy();
-  if (!require("node:fs").existsSync(join(source, "registry.json"))) {
-    return t.skip("この環境に旧 ManageArms のデータが無い");
-  }
-  writeFileIn(join(env.appSupport, "registry.json"), "{}");
-  await assert.rejects(migrate(source, env), code("MIGRATION_CONFLICT"));
 });

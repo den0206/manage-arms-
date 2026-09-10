@@ -10,7 +10,6 @@ export type ErrorCode =
   | "REMOTE_ENV"
   | "UNTRUSTED_WORKSPACE"
   | "SCHEMA_UNSUPPORTED"
-  | "MIGRATION_CONFLICT"
   | "OPERATION_FAILED";
 
 export class AgentToolError extends Error {

@@ -1,8 +1,7 @@
 # CLAUDE.md — Agent Tool 作業ガイド
 
 AI エージェントの周辺リソース（MCP / Skills / Subagents / Plugins）を管理する
-Cursor 拡張 **Agent Tool** へ、ManageArms macOS アプリから段階的に移行する。
-実装は TypeScript に統一し、macOS / Linux / Windows で全機能を提供する（設計決定 D-1〜D-10）。
+Cursor 拡張 **Agent Tool**。実装は TypeScript に統一し、macOS / Linux / Windows で全機能を提供する。
 
 ## 設計の正本
 
@@ -11,7 +10,7 @@ Cursor 拡張 **Agent Tool** へ、ManageArms macOS アプリから段階的に�
 | `docs/product-requirements.md` | 移行後の対象機能・完了条件 |
 | `docs/vscode-cursor-extension-design-questions.md` | 設計決定と理由 |
 | `docs/agent-tool-cli-api.md` | 管理ロジックの TypeScript モジュール API |
-| `docs/agent-tool-data-spec.md` | ストレージ・ロック・移行 |
+| `docs/agent-tool-data-spec.md` | ストレージ・ロック |
 | `docs/agent-tool-ui-design.md` | Tree View と操作フロー |
 | `docs/agent-tool-security.md` | WriteGuard・権限・信頼境界 |
 | `docs/agent-tool-test-plan.md` | TypeScript と Cursor の検証 |
@@ -19,16 +18,15 @@ Cursor 拡張 **Agent Tool** へ、ManageArms macOS アプリから段階的に�
 
 Agent Tool の判断では `docs/agent-tool-*.md` を優先する。仕様を複製せず、該当する正本を更新する。
 
-## 移行中の境界
+## 実装境界
 
 - 製品・拡張名は **Agent Tool**、拡張 ID は `agent-tool`。
 - リポジトリとローカルディレクトリは`agent-tool`とする。
-- Mac App、旧CHANGELOG、配布・署名・公証資産はmainに置かない。旧データの移行元パスだけ残す。
+- macOSアプリ、旧CHANGELOG、配布・署名・公証資産は置かない。
 - TypeScriptはルートの`src/`と`test/`、スクリプトは`scripts/`に置く。
 - サブプロセスの CLI は持たない。外部コマンドはプロセス一覧取得と PATH 解決だけに限る。
 - 走査・判定・書き込み・WriteGuard は `src/` のモジュールが担当する。
 - OS 分岐は `process.platform` で行い、リンクは macOS / Linux が symlink、Windows が junction / hardlink。
-- macOS で ManageArms が実行中なら破壊的操作を拒否する。
 
 ## 完了の定義
 

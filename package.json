@@ -85,11 +85,6 @@
         "category": "Agent Tool"
       },
       {
-        "command": "agent-tool.migrateFromManageArms",
-        "title": "%command.migrate%",
-        "category": "Agent Tool"
-      },
-      {
         "command": "agent-tool.openToolActions",
         "title": "%command.openToolActions%",
         "category": "Agent Tool"

@@ -1,6 +1,6 @@
 ---
 description: main へ入れる前に、変更一式をこのリポジトリ固有の観点でレビューする
-allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(swift build:*), Bash(swift test:*), Bash(npm run:*), Bash(./scripts/check-invariants.sh), Bash(./scripts/release-changelog.sh:*), Bash(./scripts/test-release-changelog.sh)
+allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(npm run:*), Bash(./scripts/check-invariants.sh), Bash(./scripts/release-changelog.sh:*), Bash(./scripts/test-release-changelog.sh)
 ---
 
 # マージ前レビュー
@@ -40,7 +40,7 @@ allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(swift
 - **無駄なファイルを作っていないか。** 可変メタデータは `registry.json` だけ。
   管理対象実体以外のキャッシュ・ログ・Undo スナップショットを足していないか
 - `URLSession` が `.ephemeral` のままか
-- ダウンロード・zip展開・stagingがSwiftの`defer`またはTypeScriptの`finally`で確実に消えるか。
+- ダウンロード・zip展開・stagingがTypeScriptの`finally`で確実に消えるか。
   **失敗経路とキャンセル経路も**通るか
 - 大きいファイルを `Data` で丸ごとメモリに載せていないか
 - 一覧のために本文まで読んでいないか（frontmatter は先頭 4 KB）
@@ -66,10 +66,10 @@ allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(swift
 
 ## 5. 配布への影響
 
-`Package.swift` / `package.json` / `scripts/` / `.github/workflows/` を
+`package.json` / `scripts/` / `.github/workflows/` を
 触っている場合のみ:
 
-- `Package.swift` の最低macOS、`package.json`の`engines.vscode`、CIのNode 20が仕様と一致するか
+- `package.json`の`engines.vscode`とCIのNode 20が仕様と一致するか
 - CI とローカルで**同じスクリプト**を呼んでいるか（CI 専用ロジックを足していないか）
 - `README.md` と `README.ja.md` の**両方**を更新したか
 - Universal CLI の両arch、VSIX 20 MB上限、Open VSX→GitHubの公開順を壊していないか
@@ -95,7 +95,7 @@ allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(swift
 ## 8. 完了の定義
 
 ```bash
-swift build && swift test
+npm run typecheck && npm test
 ./scripts/check-invariants.sh
 ./scripts/release-changelog.sh --check && ./scripts/test-release-changelog.sh
 ```

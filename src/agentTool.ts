@@ -11,7 +11,6 @@ import { install } from "./installer";
 import { inventory as buildInventory, InventoryItem } from "./inventory";
 import * as mcp from "./mcpScanner";
 import { MCPScope, MCPServer } from "./mcpServer";
-import { migrate as runMigration } from "./migration";
 import { mcpStatus as pollMcpStatus } from "./processScanner";
 import { cliOverrides, load, read, Registry, save, update } from "./registry";
 import { disable, enable, remove as removeManaged, removeUnmanaged } from "./skillManager";
@@ -147,7 +146,7 @@ export async function remove(params: { storagePath: string; selector: Selector }
   const { name, kind } = params.selector;
   return mutate(params.storagePath, (registry, env) => {
     // registry に載っていれば管理下の実体。載っていないものは他のツールが入れた資産で、
-    // 既知ルート直下にある限り消せる（Mac App と同じ扱い）。
+    // 既知ルート直下にあるものだけを削除する。
     const managed = registry.resources.some(item => item.name === name && item.kind === kind);
     if (managed) removeManaged(name, kind, env, registry);
     else removeUnmanaged(name, kind, env);
@@ -247,11 +246,6 @@ export async function pluginAdd(params: {
   }
   const env = envOf(params.storagePath);
   for (const argv of pluginAddCommands(params.agent, params.name, params.url)) await runnerFor(env)(argv);
-}
-
-export async function migrate(params: { storagePath: string; sourcePath: string }):
-  Promise<{ migratedEntries: number; skipped: number }> {
-  return runMigration(params.sourcePath, envOf(params.storagePath));
 }
 
 export { save, load };

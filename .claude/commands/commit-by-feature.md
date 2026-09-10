@@ -1,6 +1,6 @@
 ---
 description: 未コミット変更をレビューし、機能・役割ごとに分けて Conventional Commit する
-allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git add:*), Bash(git commit:*), Bash(swift build:*), Bash(swift test:*), Bash(npm run:*), Bash(./scripts/check-invariants.sh), Bash(./scripts/release-changelog.sh:*), Bash(./scripts/test-release-changelog.sh)
+allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git add:*), Bash(git commit:*), Bash(npm run:*), Bash(./scripts/check-invariants.sh), Bash(./scripts/release-changelog.sh:*), Bash(./scripts/test-release-changelog.sh)
 ---
 
 # 機能別に Conventional Commit でコミットする
@@ -23,10 +23,10 @@ allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git a
 
 | グループ例 | 対象の目安 |
 |---|---|
-| `core` | `Sources/AgentToolCore/`の走査・追加・更新・集計・権限 |
+| `core` | `src/`の走査・追加・更新・集計・権限 |
 | `extension` | `src/`・`test/` の Cursor UI・CLI 境界・テスト |
 | `i18n` | `l10n/` |
-| `build` | `Package.swift`・`package.json`・`scripts/`・`.vscode/` |
+| `build` | `package.json`・`scripts/`・`.vscode/` |
 | `release` | `.github/workflows/`・リリーススクリプト・`CHANGELOG.md` |
 | `ci` | `.github/workflows/`・`scripts/check-invariants.sh` |
 | `docs` | `README.md`・`README.ja.md`・`DESIGN.md`・`CLAUDE.md`・`docs/` |
@@ -49,7 +49,7 @@ allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git a
 **ストレージ・メモリの規律**（`CLAUDE.md`「ストレージ・メモリの規律」）
 
 - **無駄なファイルを増やしていないか。** 管理対象実体以外の恒久ファイル・キャッシュ・ログを足していないか
-- 作った一時物をSwiftの`defer`またはTypeScriptの`finally`で確実に片付けているか
+- 作った一時物をTypeScriptの`finally`で確実に片付けているか
 - 全部読んでいないか（frontmatter だけで足りるところで本文を読んでいないか）
 - 役割の重なるスクリプト／ドキュメントを新設していないか（既存に足せないか）
 
@@ -62,7 +62,7 @@ allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git a
 ### 3. 「完了の定義」を通す
 
 ```bash
-swift build && swift test
+npm run typecheck && npm test
 ./scripts/check-invariants.sh
 ./scripts/release-changelog.sh --check && ./scripts/test-release-changelog.sh
 ```
@@ -80,9 +80,8 @@ git commit
 
 - **日本語・Conventional Commits**。`feat(scope):` `fix:` `docs:` `test:` `ci:` `chore:`
 - 件名は 1 行で「何をしたか」。本文には**なぜそうしたか**を書く（何をしたかは diff が語る）
-- **各コミット単体で `swift build` が通る状態に保つ。**
-  `Package.swift` がターゲットを宣言している以上、`Sources/` や `Tests/` を
-  途中まで欠いた状態はビルドできない。分割できないものは無理に割らない
+- **各コミット単体で `npm run typecheck && npm test` が通る状態に保つ。**
+  依存する実装とテストは同じコミットに含め、分割できないものは無理に割らない
 - 依存関係のある順に積む（例: Core → UI → i18n → docs）
 
 ### 5. 報告

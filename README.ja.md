@@ -2,11 +2,11 @@
 
 Agent Toolは、AIコーディングエージェントのSkill、Subagent、MCPサーバー、Pluginを横断管理するCursor拡張です。
 
-ManageArms（macOSアプリ）で検証済みの管理Coreを、ローカルで動作するエディタ拡張へ移行しています。macOS / Linux / Windowsで動作します。
+AIエージェント用リソースを管理するローカルのエディタ拡張です。macOS / Linux / Windowsで動作します。
 
 ## 状態
 
-管理CoreはTypeScriptに統一済みです。Swift Coreと同梱CLIを撤去し、すべての操作を拡張内で実行します。進捗は[リリース計画](docs/agent-tool-release-plan.md)を参照してください。
+すべての操作をTypeScript拡張内で実行します。進捗は[リリース計画](docs/agent-tool-release-plan.md)を参照してください。
 
 ## 開発
 

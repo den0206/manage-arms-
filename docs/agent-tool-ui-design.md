@@ -246,7 +246,6 @@ Tree View 上部に候補カードを表示する:
 | `agent-tool.previewUpdate` | 更新をプレビュー | Diff Editor を開く |
 | `agent-tool.applyUpdate` | 更新を適用 | 選択中アイテムを更新（確認あり） |
 | `agent-tool.showMcpStatus` | MCP ステータスを表示 | 選択サーバーのプロセス情報 |
-| `agent-tool.migrateFromManageArms` | ManageArms から移行 | 手動で移行フローを開始 |
 | `agent-tool.openDocs` | ドキュメントを開く | GitHub リポジトリを開く |
 
 ---
@@ -301,9 +300,6 @@ Tree View 全体を無効化し、上部にバナーを表示する:
 | `NOT_IN_REGISTRY` | `<name> は他のツールが管理しています` |
 | `SYMLINK_OUTSIDE_STORE` | `<path> は Agent Tool が張ったリンクではありません` |
 | `LOCK_TIMEOUT` | `書き込みロックを取得できませんでした（他のウィンドウが操作中の可能性があります）` |
-
-macOS で ManageArms の起動を検知した場合は、モジュールを呼ぶ前に拡張が
-`ManageArms を終了してから再実行してください` と警告して操作を中止する。
 
 ### 8.4 CLI 未検出（`scanPath()` が何も返さない）
 
