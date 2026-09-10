@@ -100,13 +100,19 @@ test('旧フィールドを除去して schemaVersion を付ける', async () =>
 });
 ```
 
-#### Windows 分岐 — 直接配置（symlink なし）
+#### Windows 分岐 — junction / hardlink
 
 ```typescript
-test('Windows では symlink の代わりにファイルをコピーする', async () => {
-  // platform を 'win32' にモックして Installer の挙動を確認
+test('Windows では Skill を junction、Subagent を hardlink で張る', async () => {
+  // platform を 'win32' にモックしてリンク種別の選択を確認する
+});
+
+test('別ボリュームへの hardlink 失敗を OPERATION_FAILED にする', async () => {
+  // コピーへフォールバックしないことを確認する
 });
 ```
+
+実際に junction / hardlink を作れるかは Windows ランナーで検証する（設計決定 D-10）。
 
 ### 2.3 走査範囲テスト（設計の生命線）
 
@@ -182,36 +188,37 @@ TypeScript モジュールは `AGENT_TOOL_HOME` を `os.homedir()` の代わり�
 |---|---|
 | ダークモード / ライトモードでの Tree View 表示 | 実機でしか確認できない |
 | 複数 Cursor ウィンドウ同時操作でのロック動作 | プロセス間制御は実機で確認 |
-| 配布VSIX内の未署名CLI初回起動 | 最初の公開前と、CLI・VSIX組み立て・配布経路を変えた場合にCursorからインストールして確認 |
+| 配布VSIXの初回起動 | 最初の公開前と、VSIX組み立て・配布経路を変えた場合にCursorからインストールして確認 |
 | RSS・保存容量 | リリース前に閾値内であることを実測 |
 
 ---
 
 ## 7. CI 構成
 
-Swift テストは廃止。TypeScript テストと E2E を 2 ジョブで回す。
+Swift テストは廃止。3 OS の単体テスト・不変条件検査・Cursor E2E の 3 ジョブで回す。
+Windows は junction / hardlink が実機でしか検証できないため必須にする（設計決定 D-10）。
 
 ```yaml
 # .github/workflows/ci.yml
 
 jobs:
-  ts-tests:
-    runs-on: ubuntu-latest   # Linux ランナーで全 TypeScript テストを実行
+  test:                      # ubuntu / windows / macos の matrix
     steps:
-      - uses: actions/setup-node@<sha>
-        with: { node-version: '20' }
       - run: npm ci
       - run: npm run typecheck
-      - run: npm test          # node:test — WriteGuard / Registry / Installer / 拡張コマンド
+      - run: npm test        # node:test — WriteGuard / Registry / 走査 / 取得 / 拡張コマンド
 
-  e2e-tests:
-    runs-on: macos-latest    # Cursor Stable は macOS でのみ実行
+  invariants:                # ubuntu
     steps:
-      - uses: actions/setup-node@<sha>
-        with: { node-version: '20' }
-      - run: npm ci
-      - run: npm run test:e2e  # 固定 URL と SHA-256 で Cursor Stable を取得
+      - run: ./scripts/check-invariants.sh
+      - run: ./scripts/release-changelog.sh --check
+      - run: ./scripts/test-release-changelog.sh
+
+  cursor:                    # macos。Cursor Stable は macOS でのみ起動する
+    steps:
+      - run: npm run package
+      - run: npm run test:cursor
       - # VSIX 20 MB 上限チェック
 ```
 
-両ジョブを PR ゲートにする。定期 canary は設けない。
+全ジョブを PR ゲートにする。定期 canary は設けない。

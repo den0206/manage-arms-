@@ -73,7 +73,7 @@
     }
   ],
   "repos": {
-    "https://github.com/example/my-skill@main": {
+    "https://github.com/example/my-skill#main": {
       "etag": "\"33a64df5\"",
       "latestSha": "def456abc123",
       "checkedAt": "2026-09-10T10:00:00Z"
@@ -169,7 +169,8 @@ async function withRegistryLock<T>(storagePath: string, fn: () => Promise<T>): P
 
 ## 4. WriteGuard の維持
 
-WriteGuard の全不変条件を `writeGuard.ts` モジュール内に維持する。`writeGuard.ts` の外からファイルを操作しない。
+WriteGuard の全不変条件を `writeGuard.ts` モジュール内に維持する。
+Skill / Subagent の実体とリンクは `writeGuard.ts` の外から操作しない（`registry.json` は `registry.ts`、`mcp.json` は `mcpScanner.ts`。設計決定 D-9）。
 
 ### 4.1 拒否対象（変更なし）
 
@@ -189,13 +190,13 @@ sqlite, sqlite-wal, sqlite-shm
 ```
 add / install
   └── assertValidName(name)          // ../・/・隠しファイルを含む名前を拒否
-  └── assertSafeCreation(dest, ...)  // 親ディレクトリに不審な symlink がないか
+  └── assertSafeCreation(dest, ...)  // 親ディレクトリに不審な symlink / junction がないか
 
 remove / toggle
   └── assertMutable(url, ...)        // ホワイトリスト確認
       ├── assertNotBundled           // バンドル済みスキルを守る
       ├── isDenied(url)              // 拒否リストを二重確認
-      ├── symlink → target が managedRoots 内か
+      ├── リンク（symlink / junction / hardlink）→ target が managedRoots 内か
       └── registry.json に載っているか
 ```
 
@@ -211,11 +212,13 @@ Mac App の Application Support の代わりに `globalStorageUri` を `env.appS
 | `<globalStorageUri>/agents/` | 管理対象 Subagent の実体 |
 | `<globalStorageUri>/disabled-agents/` | 無効化した Subagent の退避先 |
 
-`~/.claude/skills/`、`~/.claude/agents/`、`~/.cursor/agents/` には上記実体への symlink だけを置く。
+`~/.claude/skills/`、`~/.claude/agents/`、`~/.cursor/agents/` には上記実体へのリンクだけを置く。
+macOS / Linux は symlink、Windows は junction（ディレクトリ）と hardlink（`.md` ファイル）を使う（設計決定 D-4）。
+Windows の hardlink は同一ボリュームでのみ張れるため、失敗時は `OPERATION_FAILED` を返しコピーへフォールバックしない。
 プロジェクト内の `.claude/skills/` と `.claude/agents/` は管理ストアではなくユーザー資産なので、
 操作直前に `assertUserArtifact` で検証する。
 
-`globalStorageUri/registry.json` は WriteGuard の管理対象外。CLI が直接管理する。
+`globalStorageUri/registry.json` は WriteGuard の管理対象外。`registry.ts` が直接管理する。
 
 ---
 
@@ -226,13 +229,14 @@ Mac App の Application Support の代わりに `globalStorageUri` を `env.appS
 TS 拡張の起動時（`activate`）に以下を確認する:
 
 ```typescript
+// 旧 ManageArms は macOS 専用アプリなので、他 OS では検知そのものを行わない
 const legacyPath = path.join(
   os.homedir(),
   "Library/Application Support/ManageArms/registry.json"
 );
 const migrated = context.globalState.get<boolean>("migrationDone");
 
-if (fs.existsSync(legacyPath) && !migrated) {
+if (process.platform === "darwin" && fs.existsSync(legacyPath) && !migrated) {
   // 確認画面を表示して migrate コマンドを呼ぶ
 }
 ```

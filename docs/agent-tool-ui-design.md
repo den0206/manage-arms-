@@ -1,7 +1,7 @@
 # Agent Tool — UI 情報設計
 
 > 設計の前提は [vscode-cursor-extension-design-questions.md](vscode-cursor-extension-design-questions.md) を参照。
-> CLI コマンド仕様は [agent-tool-cli-api.md](agent-tool-cli-api.md) を参照。
+> モジュール API 仕様は [agent-tool-cli-api.md](agent-tool-cli-api.md) を参照。
 
 ---
 
@@ -61,7 +61,7 @@ AGENT TOOL                                    [＋ Add] [⟳ Refresh]
 
 ## 2. Environment セクション
 
-`scan-path` CLI コマンドの結果を表示する（拡張の `activate` 時に 1 回実行）。
+`scanPath()` の結果を表示する（拡張の `activate` 時に 1 回実行）。
 
 ```
 ▾ 🌐 Environment
@@ -148,10 +148,9 @@ Tree View 上部に候補カードを表示する:
 ```
 1. アイテムの [🗑] をクリック
 2. 確認ダイアログ（→ セクション 5.1）
-3. [削除] 実行 → remove コマンド
-4. 通知バー: "my-skill を削除しました  [元に戻す]"
-   → [元に戻す] クリックで rollback コマンド実行
-   → 通知は 30 秒で自動消去（ロールバック不可になる）
+3. [削除] 実行 → remove()
+4. 通知バー: "my-skill を削除しました"
+   → Undo は提供しない（設計決定 D-5）。取り消せないことは 5.1 の確認ダイアログで示す
 ```
 
 ### 4.3 有効化 / 無効化
@@ -195,8 +194,8 @@ Tree View 上部に候補カードを表示する:
 │ エージェント: Claude Code                     │
 │ スコープ: User Global                        │
 │                                              │
-│ ゴミ箱に移動します。削除後 30 秒間は          │
-│ 「元に戻す」で復元できます。                  │
+│ この操作は取り消せません。                    │
+│ 実体とリンクを完全に削除します。              │
 │                                              │
 │            [キャンセル]  [削除]              │
 └─────────────────────────────────────────────┘
@@ -241,12 +240,11 @@ Tree View 上部に候補カードを表示する:
 |---|---|---|
 | `agent-tool.addTool` | Skill を追加 | URL を入力してインストール |
 | `agent-tool.refreshInventory` | 一覧を更新 | キャッシュを破棄して再走査 |
-| `agent-tool.rescanPath` | CLI を再検出 | scan-path を再実行 |
+| `agent-tool.rescanPath` | CLI を再検出 | `scanPath()` を再実行 |
 | `agent-tool.toggleTool` | ツールを有効化/無効化 | 選択中アイテムをトグル |
 | `agent-tool.removeTool` | ツールを削除 | 選択中アイテムを削除（確認あり） |
 | `agent-tool.previewUpdate` | 更新をプレビュー | Diff Editor を開く |
 | `agent-tool.applyUpdate` | 更新を適用 | 選択中アイテムを更新（確認あり） |
-| `agent-tool.rollback` | 削除を元に戻す | 直前の削除を30秒以内に復元 |
 | `agent-tool.showMcpStatus` | MCP ステータスを表示 | 選択サーバーのプロセス情報 |
 | `agent-tool.migrateFromManageArms` | ManageArms から移行 | 手動で移行フローを開始 |
 | `agent-tool.openDocs` | ドキュメントを開く | GitHub リポジトリを開く |
@@ -301,11 +299,13 @@ Tree View 全体を無効化し、上部にバナーを表示する:
 | `WRITE_GUARD_DENIED` | `<path> は保護対象です` |
 | `INVALID_NAME` | `<name> は名前として使えません（取得元の指定を確認してください）` |
 | `NOT_IN_REGISTRY` | `<name> は他のツールが管理しています` |
-| `SYMLINK_OUTSIDE_STORE` | `<path> は Agent Tool が張った symlink ではありません` |
+| `SYMLINK_OUTSIDE_STORE` | `<path> は Agent Tool が張ったリンクではありません` |
 | `LOCK_TIMEOUT` | `書き込みロックを取得できませんでした（他のウィンドウが操作中の可能性があります）` |
-| `LEGACY_APP_RUNNING` | `ManageArms を終了してから再実行してください` |
 
-### 8.4 CLI 未検出（scan-path 失敗）
+macOS で ManageArms の起動を検知した場合は、モジュールを呼ぶ前に拡張が
+`ManageArms を終了してから再実行してください` と警告して操作を中止する。
+
+### 8.4 CLI 未検出（`scanPath()` が何も返さない）
 
 ```
 ╔══════════════════════════════════════════════╗

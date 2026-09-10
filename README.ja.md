@@ -2,24 +2,19 @@
 
 Agent Toolは、AIコーディングエージェントのSkill、Subagent、MCPサーバー、Pluginを横断管理するCursor拡張です。
 
-ManageArmsで検証済みのSwift管理Coreを、ローカルで動作するCursor拡張へ移行しています。初版はmacOS版Cursorを対象にします。
+ManageArms（macOSアプリ）で検証済みの管理Coreを、ローカルで動作するエディタ拡張へ移行しています。macOS / Linux / Windowsで動作します。
 
 ## 状態
 
-Phase 0を進行中です。リポジトリとSwift Coreの改名、旧Mac Appの撤去、拡張開発環境の整備を行っています。進捗は[リリース計画](docs/agent-tool-release-plan.md)を参照してください。
+管理CoreはTypeScriptに統一済みです。Swift Coreと同梱CLIを撤去し、すべての操作を拡張内で実行します。進捗は[リリース計画](docs/agent-tool-release-plan.md)を参照してください。
 
 ## 開発
 
-macOS 26、Swift 6.2、Node.js 20が必要です。
+Node.js 20が必要です。
 
 ```bash
-swift build
-swift test
-./scripts/check-invariants.sh
-
 npm ci
-npm run typecheck
-npm test
+npm run check      # 型検査・テスト・不変条件検査
 npm run package
 ```
 
@@ -29,7 +24,7 @@ npm run package
 
 - [プロダクト要件](docs/product-requirements.md)
 - [設計決定](docs/vscode-cursor-extension-design-questions.md)
-- [CLI API](docs/agent-tool-cli-api.md)
+- [モジュールAPI](docs/agent-tool-cli-api.md)
 - [ストレージと移行](docs/agent-tool-data-spec.md)
 - [セキュリティ](docs/agent-tool-security.md)
 - [テスト計画](docs/agent-tool-test-plan.md)

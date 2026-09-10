@@ -3,8 +3,8 @@
 > 設計の前提は [vscode-cursor-extension-design-questions.md](vscode-cursor-extension-design-questions.md) を参照。
 > プロダクト要件は [product-requirements.md](product-requirements.md) を参照。
 
-> **移行注記（2026-09-10）**: Swift CLI サブプロセスを廃止し、VS Code 拡張内の TypeScript だけで完結する設計に変更した（設計決定 D-2）。
-> 旧 CLI の JSON 仕様はこのファイル末尾の「参考」セクションに移した。
+> **移行注記（2026-09-10）**: Swift CLI サブプロセスを廃止し、拡張内の TypeScript だけで完結する設計に変更した（設計決定 D-2）。
+> 実装の入口は `src/agentTool.ts`。
 
 ---
 
@@ -15,7 +15,8 @@
 - **入出力**: TypeScript の型付きオブジェクト（JSON シリアライズ不要）
 - **失敗**: `AgentToolError` を throw する（`code` フィールドで種別を判定）
 - **storagePath**: `context.globalStorageUri.fsPath` を渡す（OS 別パスは VS Code API が解決）
-- **PROTOCOL_VERSION**: モジュールが export する定数 `"1"`。破壊的変更時にインクリメントする
+- **バージョン**: プロセス境界が無いので拡張とロジックの版ずれは起きない。
+  互換判定は `registry.json` の `schemaVersion` だけが持つ（`src/registry.ts`）
 
 ---
 
@@ -23,8 +24,6 @@
 
 ```typescript
 // src/agentTool.ts
-export const PROTOCOL_VERSION = "1";
-
 export type ErrorCode =
   | 'WRITE_GUARD_DENIED'    // WriteGuard がパス・名前を拒否した
   | 'INVALID_NAME'          // ツール名に ../  など不正な要素が含まれる
@@ -122,10 +121,12 @@ export type UpdateDiff = {
 export function inventory(params: {
   storagePath: string;
   projectPath: string | null;
-}): Promise<InventoryItem[]>;
+}): Promise<{ items: InventoryItem[]; issues: string[] }>;
 ```
 
 - `projectPath` が `null` の場合はユーザー全体のみ返す
+- `issues` は走査に失敗したエージェントの理由。1 つのエージェントの失敗で一覧全体を落とさない
+- プロジェクトのサブディレクトリにあるスキルは `apps/web:deploy` の修飾名で返す（名前で畳むため）
 - 走査は 180 秒キャッシュ。手動更新・書き込み直後・View 非表示で破棄する
 - frontmatter は先頭 4 KB だけ読む。本文は詳細表示中のみ保持する
 
@@ -217,11 +218,11 @@ export function updateApply(params: {
 export function mcpAdd(params: {
   storagePath: string;
   agent: AgentId;
-  scope: ScopeId;
-  server: McpServerDefinition;
-  projectPath?: string;
+  server: MCPServer;
 }): Promise<void>;
 ```
+
+追加先は user スコープだけ（各 CLI に `-s user` を載せる）。
 
 ---
 
@@ -232,10 +233,13 @@ export function mcpRemove(params: {
   storagePath: string;
   agent: AgentId;
   name: string;
-  scope: ScopeId;
-  projectPath?: string;
+  /** 登録先。CLI の `-s` にそのまま載る。 */
+  scope: 'user' | 'project' | 'local';
 }): Promise<void>;
 ```
+
+`scope` は一覧が読み取った登録先（`InventoryItem.mcpScope`）をそのまま渡す。
+`ScopeId` に潰すと `project` と `local` の区別が消え、同名の user サーバーを消す。
 
 ---
 
@@ -248,9 +252,12 @@ export function mcpStatus(params: {
 ```
 
 - View 表示中に 3 秒ポーリングで呼ぶ。View 非表示・dispose で停止する
-- プロセス検出コマンドは OS ごとに分岐する:
-  - macOS / Linux: `pgrep -x <name>`
-  - Windows: `tasklist /FI "IMAGENAME eq <name>.exe"`
+- 判定方式は「全プロセスを 1 回取得し、registry の MCP 定義（`command` + `args`）と突き合わせ、
+  親プロセスを辿って所有 Agent を決める」（設計決定 D-8）。プロセス名の一致では判定しない
+- 取得コマンドは OS ごとに分岐する:
+  - macOS / Linux: `ps -eo pid,ppid,etime,command`
+  - Windows: `powershell -NoProfile -Command "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CreationDate,CommandLine | ConvertTo-Json"`
+- 出力は 2 MB で打ち切る
 
 ---
 
@@ -275,6 +282,23 @@ export function pluginAdd(params: {
 }): Promise<void>;
 ```
 
+- URL が渡された場合は Marketplace を登録してから Plugin を追加する
+- Claude は `plugin install`、Codex は `plugin add` を使う
+
+### `pluginRemove` — Plugin 削除
+
+```typescript
+export function pluginRemove(params: {
+  storagePath: string;
+  agent: AgentId;
+  name: string;
+  scope?: 'user' | 'project' | 'local';
+  bundled?: boolean;
+}): Promise<void>;
+```
+
+Claude の削除には一覧から取得した `scope` をそのまま渡す。Marketplace は他の Plugin と共有できるため削除しない。
+
 ---
 
 ### `migrate` — ManageArms からの移行
@@ -295,64 +319,11 @@ export function migrate(params: {
 
 - `storagePath` は `context.globalStorageUri.fsPath` で得る。OS 別パスは VS Code API が解決する（手動分岐不要）
 - 180 秒キャッシュは拡張のメモリのみ。手動更新・書き込み直後・View 非表示で破棄する
-- すべての書き込みは `src/writeGuard.ts` を経由する（設計決定 D-9）
+- ファイル書き込みは `src/writeGuard.ts`（実体・リンク）、`src/registry.ts`（`registry.json`）、
+  `src/mcpScanner.ts`（`mcp.json`）の 3 経路だけに置く（設計決定 D-9）
 - Registry の read-modify-write は `src/registry.ts` の `withRegistryLock()` 内で行う（設計決定 D-7）
 - zip 展開・ダウンロードの一時ファイルは `os.tmpdir()` に置き、`try/finally` で確実に削除する
 
 ---
 
 ---
-
-## 参考 — 旧 Swift CLI JSON API（廃止済み）
-
-> 以下は Swift CLI サブプロセス時代（〜2026-09-10）の仕様。TypeScript 移行後は使用しない。
-
-### 旧 呼び出し規約
-
-```
-agent-tool-core <command>
-```
-
-- **入力**: JSON を stdin に渡す
-- **出力**: JSON を stdout に書く
-- **終了コード**: 成功 `0`、失敗 `1`
-
-### 旧 共通レスポンス形式
-
-```json
-{ "ok": true,  "protocolVersion": "1", "data": {} }
-{ "ok": false, "protocolVersion": "1", "error": { "code": "WRITE_GUARD_DENIED", "message": "..." } }
-```
-
-### 旧 コマンド入出力（代表例）
-
-**inventory 入力**:
-```json
-{ "storagePath": "/path/to/globalStorageUri", "projectPath": "/path/to/project" }
-```
-
-**add 入力**:
-```json
-{ "storagePath": "...", "url": "https://github.com/example/my-skill", "scope": "user", "kind": null }
-```
-
-**remove 出力**（undo フィールドを含む — 廃止）:
-```json
-{
-  "ok": true, "protocolVersion": "1",
-  "data": {
-    "undo": {
-      "originalPath": "/Users/yuuki/.agents/skills/my-skill",
-      "trashedPath": "/Users/yuuki/.Trash/my-skill",
-      "registryEntry": { "name": "my-skill", "kind": "skill", "repo": "...", "sha": "abc123" }
-    }
-  }
-}
-```
-
-**mcp-status 入力**:
-```json
-{ "storagePath": "...", "projectPath": "..." }
-```
-
-完全な旧 JSON 仕様は git 履歴を参照のこと。

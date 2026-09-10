@@ -23,6 +23,7 @@ ManageArms の機能を Cursor 拡張（Agent Tool）へ移行するにあたり
 - ローカルのホームディレクトリと CLI を扱うため、`extensionKind: ["ui"]` でローカル限定とする。
 - Remote SSH・Dev Container・Codespaces では非対応として明示的にエラー表示する。
 - 現行の Swift Core・WriteGuard・全テストは `AgentToolCore` へ改名して移行資産として維持する。
+  （2026-09-10 の D-2 で Swift 自体を廃止し、ロジックとテストを TypeScript へ移す方針に変更）
 
 ---
 
@@ -55,6 +56,8 @@ ManageArms の機能を Cursor 拡張（Agent Tool）へ移行するにあたり
 **決定:** B — 初版は拡張 UI と AgentToolCore Swift CLI の両方を macOS のみ対象とする。
 Windows / Linux では非対応メッセージだけを表示し、後続フェーズで対応を検討する
 
+> **D-1 で変更（2026-09-10）**: macOS / Linux / Windows すべてで全機能を提供する。
+
 #### Q4. 初版で「移行完了」とみなす機能範囲はどこまでか？
 
 - A. 一覧表示だけ
@@ -82,6 +85,8 @@ Windows / Linux では非対応メッセージだけを表示し、後続フェ�
 
 **決定:** A — 既存 Core を Phase 0 で `AgentToolCore` へ改名し、`AgentToolCoreCLI` を TypeScript 拡張から呼ぶ。WriteGuard と全テストを維持する
 
+> **D-2 で変更（2026-09-10）**: B（すべて TypeScript へ移植）に変更。Swift CLI は廃止する。
+
 #### Q7. Swift Core CLI を採用する場合、どう配布するか？
 
 - A. Universal Binary を VSIX へ同梱する
@@ -91,6 +96,8 @@ Windows / Linux では非対応メッセージだけを表示し、後続フェ�
 
 **決定:** A — Universal Binary を VSIX に同梱する
 
+> **D-2 で失効（2026-09-10）**: CLI 自体を廃止したため同梱物はない。
+
 #### Q8. 拡張と Core CLI の通信形式は何にするか？
 
 - A. 1コマンド 1 JSON 入出力
@@ -99,6 +106,8 @@ Windows / Linux では非対応メッセージだけを表示し、後続フェ�
 
 **決定:** A — 1コマンド 1 JSON 入出力。必要になった時点で B へ移行を検討
 
+> **D-2 で失効（2026-09-10）**: プロセス境界がなくなり、型付きの関数呼び出しになる。
+
 #### Q9. Core CLI の API バージョン互換性をどう管理するか？
 
 - A. 拡張と CLI を常に同一バージョンで配布する
@@ -106,6 +115,9 @@ Windows / Linux では非対応メッセージだけを表示し、後続フェ�
 - C. 厳密な Semantic Versioning と複数世代互換を提供する
 
 **決定:** A ＋ 起動時の `protocolVersion` 確認
+
+> **D-2 で失効（2026-09-10）**: 拡張とロジックが同一プロセスになるため版ずれが起きない。
+> 版の定数は持たず、互換判定は `registry.json` の `schemaVersion` だけが行う。
 
 #### Q10. 拡張はどこで実行させるか？
 
@@ -265,6 +277,8 @@ UI にはマスク済みの要約だけを通知が閉じるまで保持する
 
 **決定:** B — 削除は OS ゴミ箱へ移し、拡張が元パスとゴミ箱パスを30秒だけメモリ保持して復元できるようにする。更新は適用中の失敗復元だけを保証し、適用後 Undo は持たない
 
+> **D-5 で変更（2026-09-10）**: A に近い形へ変更。ゴミ箱移動と 30 秒 Undo を廃止し、確認ダイアログに一本化する。
+
 ### 6. 更新・監視・パフォーマンス
 
 #### Q28. インベントリをいつ再走査するか？
@@ -410,16 +424,26 @@ macOS 専用だった Agent Tool を macOS / Linux / Windows の 3 OS で全機�
 
 ---
 
-### D-4. symlink 方針
+### D-4. symlink 方針（2026-09-10 改訂）
 
-**決定:** macOS / Linux は symlink を維持し、Windows では直接配置に切り替える。
+**決定:** 3 OS すべてで単一ストア＋リンク共有を維持する。Windows だけリンク種別を替える。
 
-**理由:** Windows では symlink の作成に Developer Mode または管理者権限が必要なため、通常ユーザーが使えない。
+| OS | Skill（ディレクトリ） | Subagent（`.md` ファイル） |
+|---|---|---|
+| macOS / Linux | symlink | symlink |
+| Windows | junction（`fs.symlink(target, path, 'junction')`） | hardlink（`fs.link`） |
 
-| OS | Skill / Subagent 配置 |
-|---|---|
-| macOS / Linux | symlink で共有（`~/.agents/skills/` → `~/.claude/skills/` 等） |
-| Windows | 各 Agent ディレクトリへ直接コピー。`~/.agents/skills/` は使用しない |
+**理由:**
+
+- Windows で昇格が必要なのは symlink だけで、junction と hardlink は通常ユーザー権限で作成できる
+- どちらも Node.js 標準 API で作成でき、依存を増やさない
+- 直接コピー案（旧決定）は Windows だけ実体が Agent ごとに N 個になり、`InventoryItem.agents[]`（1 実体を複数 Agent が共有する前提）、無効化時の退避先、更新の N 重適用がすべて別設計になる。リンク共有を保てばこの分岐が消える
+
+**制約:**
+
+- hardlink は同一ボリューム内でのみ張れる。`%USERPROFILE%` と Agent ディレクトリが別ドライブの場合は失敗するため、エラーを `OPERATION_FAILED` として明示し、コピーへのフォールバックはしない
+- junction は絶対パスのみを保持する。ストア移動時はリンクを張り直す
+- 実機 Windows での作成可否確認を Phase の完了条件に入れる（D-10）
 
 ---
 
@@ -455,14 +479,21 @@ macOS 専用だった Agent Tool を macOS / Linux / Windows の 3 OS で全機�
 
 ---
 
-### D-8. MCP ステータス監視
+### D-8. MCP ステータス監視（2026-09-10 改訂）
 
-**決定:** 3 秒ポーリングを維持する。コマンドは OS ごとに分岐する。
+**決定:** 3 秒ポーリングを維持する。判定は「全プロセスを 1 回取得し、登録済み MCP 定義と突き合わせる」現行方式を移植する。
 
-| OS | コマンド |
+| OS | 取得コマンド（1 回） |
 |---|---|
-| macOS / Linux | `pgrep -x <name>` |
-| Windows | `tasklist /FI "IMAGENAME eq <name>.exe"` |
+| macOS / Linux | `ps -eo pid,ppid,etime,command` |
+| Windows | `powershell -NoProfile -Command "Get-CimInstance Win32_Process \| Select-Object ProcessId,ParentProcessId,CreationDate,CommandLine \| ConvertTo-Json"` |
+
+取得した行を registry の MCP 定義（`command` + `args`）と突き合わせ、親プロセスを辿って所有 Agent を決める。
+現行 `ProcessScanner.swift` の `snapshot` / `running` と同じ構造を保つ。
+
+**理由:** 名前一致（`pgrep -x <serverName>` / `tasklist /FI IMAGENAME`）では判定できない。
+MCP サーバーは `node .../server.js` や `npx -y <pkg>` として起動するため、
+プロセス名にサーバー名が現れず、常に「停止」と表示される。所有 Agent の特定にも親 PID が要る。
 
 ---
 
@@ -470,12 +501,19 @@ macOS 専用だった Agent Tool を macOS / Linux / Windows の 3 OS で全機�
 
 現在の「TypeScript から Agent 設定や管理リソースを直接書かない」は TypeScript 統一後に意味をなくす。以下に置き換える。
 
-> **すべての書き込みは `writeGuard.ts` を通す。** `registry.json`・`mcp.json`・Skill/Subagent ファイルへの書き込みは `writeGuard.ts` が提供する関数だけが行う。
+> **ファイル書き込みは 3 経路だけに置く。** Skill / Subagent の実体・リンク操作は `src/writeGuard.ts`、
+> `registry.json` は `src/registry.ts`、`mcp.json` は `src/mcpScanner.ts` が扱う。
+> この 3 ファイル以外から `node:fs` の書き込み・削除・リンク API を呼ばない。
+
+現行の不変条件 1・2 と同型で、Swift の `Registry` / `MCPScanner` / `WriteGuard` の分担をそのまま引き継ぐ。
+`registry.json` と `mcp.json` は WriteGuard の拒否リストに載っているため、WriteGuard 経由では書けない。
 
 WriteGuard が担う検証は Swift 版と同等：
 - `assertValidName`：名前にパス区切り・制御文字が含まれないことを確認
-- `assertSafeCreation`：作成先が走査ホワイトリスト内かつ親 symlink を経由しないことを確認
+- `assertSafeCreation`：作成先が走査ホワイトリスト内かつ親 symlink / junction を経由しないことを確認
 - プロセス間ロックは Registry 書き込み時に必ず取得する
+
+この 3 経路は `scripts/check-invariants.sh` の TypeScript 版で静的に検査する（D-10）。
 
 ---
 
@@ -484,10 +522,20 @@ WriteGuard が担う検証は Swift 版と同等：
 **移行:** 一気置き換えを基本とする（難しければ TypeScript 先行実装 → Swift 削除の順）。
 
 **削除対象:**
-- `Sources/AgentToolCore/`・`Sources/AgentToolCoreCLI/`・`Tests/ManageArmsCoreTests/`
+- `Sources/AgentToolCore/`・`Sources/AgentToolCoreCLI/`・`Tests/AgentToolCoreTests/`
 - `Package.swift`
+- `scripts/build-cli.sh`・`scripts/test-vsix-cli.sh`（Swift CLI の VSIX 同梱を前提とするため）
 
-**CI:** GitHub Actions に Linux ランナーを追加する。Windows ランナーは追加しない（symlink を使わない設計のため OS 差が小さい）。
+**書き換え対象:**
+- `scripts/check-invariants.sh` — Swift ソースの grep から、`src/` に対する検査へ書き換える。
+  `writeFile`・`appendFile`・`rename`・`rm`・`unlink`・`mkdir`・`symlink`・`link`・`cp` の呼び出しを
+  `writeGuard.ts`・`registry.ts`・`mcpScanner.ts` 以外で禁止し、D-9 を静的に守る。ESLint は導入しない（依存を増やさない）
+- `scripts/check-agent-compatibility.sh` — `swift test --filter` を `node --test` へ差し替える
+- `CLAUDE.md` の「完了の定義」— `swift build && swift test` を Node のテスト・型検査へ差し替える
+
+**CI:** GitHub Actions に Linux ランナーと Windows ランナーを追加する。
+Windows は junction / hardlink の作成が実機でしか検証できないため、`node --test` を同じスクリプトで回す。
+Cursor E2E は macOS のみ。
 
 ---
 

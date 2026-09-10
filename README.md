@@ -2,24 +2,19 @@
 
 Agent Tool is a Cursor extension for managing Skills, Subagents, MCP servers, and Plugins across AI coding agents.
 
-The project is migrating the tested Swift management core from ManageArms into a local Cursor extension. The first release targets Cursor on macOS.
+The project is migrating the tested management core from the ManageArms macOS app into a local editor extension. It runs on macOS, Linux, and Windows.
 
 ## Status
 
-Phase 0 is in progress: the repository and Swift core are being renamed, the former Mac app is being removed, and the extension toolchain is being established. See [the release plan](docs/agent-tool-release-plan.md).
+The management core is now TypeScript only: the Swift core and its bundled CLI have been removed, and every operation runs inside the extension. See [the release plan](docs/agent-tool-release-plan.md).
 
 ## Development
 
-Requirements: macOS 26, Swift 6.2, and Node.js 20.
+Requirements: Node.js 20.
 
 ```bash
-swift build
-swift test
-./scripts/check-invariants.sh
-
 npm ci
-npm run typecheck
-npm test
+npm run check      # typecheck + tests + invariant checks
 npm run package
 ```
 
@@ -29,7 +24,7 @@ The extension uses only in-memory caches. Its only mutable metadata file is `reg
 
 - [Product requirements](docs/product-requirements.md)
 - [Design decisions](docs/vscode-cursor-extension-design-questions.md)
-- [CLI API](docs/agent-tool-cli-api.md)
+- [Module API](docs/agent-tool-cli-api.md)
 - [Storage and migration](docs/agent-tool-data-spec.md)
 - [Security](docs/agent-tool-security.md)
 - [Test plan](docs/agent-tool-test-plan.md)
