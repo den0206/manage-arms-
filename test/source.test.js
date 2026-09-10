@@ -1,5 +1,7 @@
 const { strict: assert } = require("node:assert");
 const { test } = require("node:test");
+const { tmpdir } = require("node:os");
+const { join } = require("node:path");
 const { AGENT_IDS, mcpSource, skillRoots, subagentRoots, supports } = require("../out/agent.js");
 const { MCP_SOURCES, SOURCES, relativePath, sourcePath } = require("../out/source.js");
 
@@ -15,7 +17,7 @@ const forbidden = [
   "oauth_creds.json",
 ];
 
-const env = { home: "/tmp/fake-home", appSupport: "/tmp/fake-home/storage" };
+const env = { home: join(tmpdir(), "fake-home"), appSupport: join(tmpdir(), "fake-home", "storage") };
 
 test("列挙が空でない", () => {
   assert.ok(SOURCES.length >= 20, `SOURCES.length = ${SOURCES.length}`);

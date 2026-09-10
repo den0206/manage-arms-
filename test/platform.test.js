@@ -96,7 +96,9 @@ test("親を辿る途中で循環しても止まる", () => {
 });
 
 test("MCP ステータスは agent:name のキーで返す", async () => {
-  const run = async () => "  300     1    00:29 npm exec figma-mcp";
+  const run = async () => process.platform === "win32"
+    ? JSON.stringify({ ProcessId: 300, ParentProcessId: 1, CommandLine: "npm exec figma-mcp" })
+    : "  300     1    00:29 npm exec figma-mcp";
   const status = await mcpStatus({ cursor: [server("figma", { command: "npx", args: ["figma-mcp"] })] }, run);
   assert.deepEqual(status, { "cursor:figma": true });
 });
@@ -113,8 +115,9 @@ test("バージョン表記の揺れを吸収する", () => {
 test("PATH を自分で辿って実行ファイルを探す", () => {
   const env = fakeEnv();
   const dir = makeDir(join(env.home, "bin"));
-  writeFileIn(join(dir, "claude"), "#!/bin/sh\n");
-  assert.equal(which("claude", dir), join(dir, "claude"));
+  const executable = join(dir, `claude${process.platform === "win32" ? ".exe" : ""}`);
+  writeFileIn(executable, "#!/bin/sh\n");
+  assert.equal(which("claude", dir), executable);
   assert.equal(which("codex", dir), null);
 });
 
