@@ -217,8 +217,9 @@ case "mcp-remove":
         exit(1)
     }
 case "add":
+    let kind = request.kind.flatMap(Kind.init(rawValue:)) ?? .skill
     guard let url = request.url, let source = GitHubURL.parse(url),
-          request.kind == nil || request.kind == Kind.skill.rawValue,
+          kind == .skill || kind == .subagent,
           request.scope == nil || request.scope == "user" else {
         response(["ok": false, "protocolVersion": protocolVersion,
                   "error": ["code": "NOT_FOUND", "message": "a public GitHub Skill URL and user scope are required"]])
@@ -228,16 +229,18 @@ case "add":
         let env = environment(for: request)
         let staging = try await Fetcher.stage(source)
         defer { staging.discard() }
-        guard let candidate = staging.candidates.first(where: { $0.kind == .skill }) else {
+        guard let candidate = staging.candidates.first(where: { $0.kind == kind }) else {
             response(["ok": false, "protocolVersion": protocolVersion,
-                      "error": ["code": "NOT_FOUND", "message": "no Skill found"]])
+                      "error": ["code": "NOT_FOUND", "message": "requested tool kind was not found"]])
             exit(1)
         }
         var registry = try Registry.read(env: env)
         try Installer.install(candidate, from: staging, env: env, registry: &registry)
         response(["ok": true, "protocolVersion": protocolVersion,
                   "data": ["name": candidate.name, "kind": candidate.kind.rawValue,
-                            "installedPath": env.skillStore.appending(path: candidate.name).path,
+                            "installedPath": (candidate.kind == .subagent
+                                ? env.agentStore.appending(path: candidate.name + ".md")
+                                : env.skillStore.appending(path: candidate.name)).path,
                             "sha": staging.resolvedSHA as Any]])
     } catch let denial as WriteGuard.Denial {
         response(["ok": false, "protocolVersion": protocolVersion,
@@ -246,6 +249,42 @@ case "add":
     } catch {
         response(["ok": false, "protocolVersion": protocolVersion,
                   "error": ["code": "FETCH_FAILED", "message": error.localizedDescription]])
+        exit(1)
+    }
+case "preview":
+    guard let url = request.url, let source = GitHubURL.parse(url) else {
+        response(["ok": false, "protocolVersion": protocolVersion,
+                  "error": ["code": "NOT_FOUND", "message": "a public GitHub URL is required"]])
+        exit(1)
+    }
+    do {
+        let staging = try await Fetcher.stage(source)
+        defer { staging.discard() }
+        let hint = GitHubURL.skillHint(url)
+        let candidates = staging.candidates.filter { hint == nil || $0.name == hint }.map { candidate in
+            ["name": candidate.name, "kind": candidate.kind.rawValue,
+             "installSelector": candidate.installSelector as Any,
+             "description": candidate.description as Any]
+        }
+        response(["ok": true, "protocolVersion": protocolVersion, "data": ["candidates": candidates]])
+    } catch {
+        response(["ok": false, "protocolVersion": protocolVersion,
+                  "error": ["code": "NOT_FOUND", "message": error.localizedDescription]])
+        exit(1)
+    }
+case "plugin-add":
+    guard let name = request.name, let agentName = request.agent,
+          let agent = Agent(rawValue: agentName) else {
+        response(["ok": false, "protocolVersion": protocolVersion,
+                  "error": ["code": "NOT_FOUND", "message": "plugin name and agent are required"]])
+        exit(1)
+    }
+    do {
+        try PluginManager.add(name, source: request.url ?? "", to: agent, env: environment(for: request))
+        response(["ok": true, "protocolVersion": protocolVersion, "data": ["name": name]])
+    } catch {
+        response(["ok": false, "protocolVersion": protocolVersion,
+                  "error": ["code": "PLUGIN_ADD_FAILED", "message": String(describing: error)]])
         exit(1)
     }
 case "remove":
