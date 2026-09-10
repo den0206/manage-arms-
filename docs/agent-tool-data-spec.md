@@ -16,22 +16,22 @@
 | `agents/` | `<globalStorageUri>/agents/` | 管理対象 Subagent の実体 |
 | `disabled-skills/` / `disabled-agents/` | `<globalStorageUri>/` | 無効化した管理対象実体の退避先 |
 
-**`globalStorageUri`** の実パスは Cursor が管理する。
-macOS の場合:
+**`globalStorageUri`** の実パスは Cursor が OS 別に管理する。VS Code API の `context.globalStorageUri.fsPath` で取得する（手動構築不要）。
 
-```
-~/Library/Application Support/Cursor/User/globalStorage/yuuki-sakai.agent-tool/
-```
+| OS | `globalStorageUri` の実パス |
+|---|---|
+| macOS | `~/Library/Application Support/Cursor/User/globalStorage/yuuki-sakai.agent-tool/` |
+| Linux | `~/.config/Cursor/User/globalStorage/yuuki-sakai.agent-tool/` |
+| Windows | `%APPDATA%\Cursor\User\globalStorage\yuuki-sakai.agent-tool\` |
 
-- VS Code の場合は `Cursor` が `Code` に変わる
-- TS 拡張は `context.globalStorageUri.fsPath` で取得し、CLI に `storagePath` として渡す
+**CLI ストレージ（appSupport）** のパスは `context.globalStorageUri.fsPath` を使うためこの表と一致する。別途 `~/Library/Application Support/AgentTool/` などを参照する必要はない。
 
 ### 1.2 一時ファイル
 
 | 用途 | 場所 | 生存期間 |
 |---|---|---|
-| ダウンロード・zip 展開 | `FileManager.temporaryDirectory` | CLI プロセス内で `defer` 削除 |
-| 削除 Undo 情報 | TypeScript 拡張のメモリ | 通知の30秒間だけ |
+| ダウンロード・zip 展開 | `path.join(os.tmpdir(), 'agent-tool-fetch-<uuid>')` | `try/finally` で削除（成功・失敗・キャンセル全経路） |
+| 削除 Undo 情報 | 廃止（確認ダイアログに一本化） | — |
 
 永続キャッシュ、ログ、診断履歴、Undo スナップショットは持たない。Skill / Subagent の実体は
 管理対象データであり、キャッシュには数えない。
@@ -103,7 +103,7 @@ macOS の場合:
 
 ### 2.3 書き込み規則
 
-- **アトミック書き込み**: `Data.write(to:options:.atomic)` を使う。書き込み中のクラッシュで壊れない
+- **アトミック書き込み**: `tmp` ファイルに書いてから `fs.rename(tmp, dest)` で置き換える。書き込み中のクラッシュで壊れない
 - **フォーマット**: pretty-printed JSON、キーをソートする（diff が読みやすい）
 - **日付**: ISO 8601 形式
 - **存在しないキーは省略**: 既定値と変わらないフィールドは書き出さない（ファイルを汚染しない）
@@ -118,31 +118,38 @@ macOS の場合:
 現行の `NSLock` はプロセス内スレッドを守るだけ。
 拡張版では複数の Cursor ウィンドウが同時に CLI を起動しうるため、**プロセス間ロック**が必要。
 
-### 3.2 ロック方式: POSIX アドバイザリロック（`flock`）
+### 3.2 ロック方式: `O_EXCL` フラグによる原子的生成（TypeScript）
 
-```swift
-// AgentToolCore 内の実装イメージ
-func withRegistryLock<T>(storagePath: URL, _ body: () throws -> T) throws -> T {
-    let lockURL = storagePath.appending(path: "registry.lock")
-    FileManager.default.createFile(atPath: lockURL.path, contents: nil)
-    let fd = open(lockURL.path, O_RDWR)
-    defer { close(fd) }
-
-    // 排他ロック取得（最大 10 秒待機）
-    var deadline = Date.now.addingTimeInterval(10)
-    while flock(fd, LOCK_EX | LOCK_NB) != 0 {
-        guard Date.now < deadline else { throw LockError.timeout }
-        Thread.sleep(forTimeInterval: 0.05)
+```typescript
+// registry.ts 内の実装（agent-tool-security.md § 6 と同じ）
+async function withRegistryLock<T>(storagePath: string, fn: () => Promise<T>): Promise<T> {
+  const lockPath = path.join(storagePath, 'registry.lock');
+  const deadline = Date.now() + 10_000;
+  while (true) {
+    try {
+      const fd = fs.openSync(lockPath, 'wx');  // O_CREAT | O_EXCL — 原子的生成
+      fs.closeSync(fd);
+      break;
+    } catch (e: any) {
+      if (e.code !== 'EEXIST') throw e;
+      // stale ロック判定：mtime が 30 秒超なら削除して再試行
+      try {
+        const stat = fs.statSync(lockPath);
+        if (Date.now() - stat.mtimeMs > 30_000) { fs.unlinkSync(lockPath); continue; }
+      } catch {}
+      if (Date.now() >= deadline) throw new AgentToolError('LOCK_TIMEOUT', 'Registry lock timeout');
+      await new Promise(r => setTimeout(r, 50));
     }
-    defer { flock(fd, LOCK_UN) }
-
-    return try body()
+  }
+  try { return await fn(); }
+  finally { try { fs.unlinkSync(lockPath); } catch {} }
 }
 ```
 
 **特性:**
-- プロセス終了・クラッシュで自動解放される（ゾンビロックが残らない）
-- `registry.lock` ファイル自体は削除しない（削除と再作成が競合するため）
+- `O_EXCL` は macOS / Linux / Windows の全 OS で同一動作する
+- プロセスクラッシュ時は `registry.lock` が残る（stale ロック）が、30 秒後に自動回収する
+- `flock()` や npm `proper-lockfile` は使わない（Windows 互換のため）
 - タイムアウト 10 秒を超えたら `LOCK_TIMEOUT` エラーを返す
 
 ### 3.3 ロック取得のスコープ
@@ -162,7 +169,7 @@ func withRegistryLock<T>(storagePath: URL, _ body: () throws -> T) throws -> T {
 
 ## 4. WriteGuard の維持
 
-WriteGuard の全不変条件を AgentToolCore CLI 内に維持する。TypeScript 拡張が直接ファイルを操作することはない。
+WriteGuard の全不変条件を `writeGuard.ts` モジュール内に維持する。`writeGuard.ts` の外からファイルを操作しない。
 
 ### 4.1 拒否対象（変更なし）
 
@@ -244,7 +251,7 @@ if (fs.existsSync(legacyPath) && !migrated) {
      "sourcePath": "~/Library/Application Support/ManageArms"
    }
 
-3. migrate コマンドの処理（AgentToolCore CLI）
+3. migrate 関数の処理（`installer.ts`）
    a. sourcePath 配下の registry.json を読む
    b. browserDetection / menuBar / appearance を削除
    c. schemaVersion: "1" を追加
@@ -298,15 +305,15 @@ CLI が registry.json を読んだとき:
 |---|---|
 | 可変メタデータは 1 つだけ | `registry.json` のみ。管理対象実体以外のログ・スナップショットを作らない |
 | キャッシュディレクトリを持たない | CLI 結果は TypeScript のメモリだけに約180秒保持し、View 非表示で破棄 |
-| 一時展開は OS に回収させる | `FileManager.temporaryDirectory` + `defer` 削除 |
-| URLSession は `.ephemeral` | HTTP キャッシュファイルを生やさない |
+| 一時展開は OS に回収させる | `path.join(os.tmpdir(), 'agent-tool-fetch-<uuid>')` + `try/finally` 削除 |
+| HTTP キャッシュを生やさない | `fetch()` に `cache: 'no-store'` を指定 |
 | 全部読まない | frontmatter は先頭 4 KB のみ読む |
-| アトミックに書く | `Data.write(to:options:.atomic)` |
+| アトミックに書く | `fs.rename(tmp, dest)` で置き換える |
 
 ### メモリとライフサイクル
 
-- CLI は1コマンドごとに終了し、プロセス間のキャッシュや Undo 状態を持たない
-- Tree View は表示用 DTO だけを保持する。ファイル本文と Swift の `Inventory` は保持しない
+- 書き込み操作はモジュール関数として完結し、プロセス間キャッシュを持たない
+- Tree View は表示用 DTO だけを保持する。ファイル本文を常駐させない
 - MCP の3秒ポーリングとファイル監視は View 表示中だけ動かす
 - stdout / stderr は各2 MB、HTTP API 応答は2 MBで打ち切る
 - アーカイブはメモリに載せず一時ファイルへ流し、50 MBで打ち切る
