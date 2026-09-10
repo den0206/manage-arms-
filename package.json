@@ -1,0 +1,64 @@
+{
+  "name": "agent-tool",
+  "displayName": "Agent Tool",
+  "description": "%extension.description%",
+  "version": "0.1.0-alpha.1",
+  "publisher": "yuuki-sakai",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/den0206/agent-tool"
+  },
+  "engines": {
+    "vscode": "^1.90.0",
+    "node": ">=20"
+  },
+  "categories": ["Other"],
+  "keywords": ["ai", "agent", "mcp", "skills", "cursor"],
+  "extensionKind": ["ui"],
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "viewsContainers": { "activitybar": [{ "id": "agent-tool", "title": "Agent Tool", "icon": "media/icon.svg" }] },
+    "views": { "agent-tool": [{ "id": "agent-tool.inventory", "name": "Inventory" }] },
+    "commands": [
+      { "command": "agent-tool.toggleTool", "title": "%command.toggleTool%" },
+      { "command": "agent-tool.addSkill", "title": "%command.addSkill%" },
+      { "command": "agent-tool.removeTool", "title": "%command.removeTool%" },
+      { "command": "agent-tool.addMcp", "title": "%command.addMcp%" }
+    ],
+    "menus": {
+      "view/item/context": [{
+        "command": "agent-tool.toggleTool",
+        "when": "view == agent-tool.inventory && (viewItem == agent-tool.managed.skill || viewItem == agent-tool.managed.subagent || viewItem == agent-tool.mcp)",
+        "group": "inline"
+      }, {
+        "command": "agent-tool.removeTool",
+        "when": "view == agent-tool.inventory && (viewItem == agent-tool.managed.skill || viewItem == agent-tool.managed.subagent)",
+        "group": "inline@1"
+      }],
+      "view/title": [
+        { "command": "agent-tool.addSkill", "when": "view == agent-tool.inventory", "group": "navigation" },
+        { "command": "agent-tool.addMcp", "when": "view == agent-tool.inventory", "group": "navigation@1" }
+      ]
+    }
+  },
+  "main": "./out/extension.js",
+  "l10n": "./l10n",
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "build-cli": "./scripts/build-cli.sh",
+    "typecheck": "tsc -p ./ --noEmit",
+    "test": "npm run compile && node --test",
+    "test:vsix": "./scripts/test-vsix-cli.sh",
+    "test:cursor": "./scripts/test-cursor-e2e.sh",
+    "package": "npm run build-cli && node -e \"require('node:fs').mkdirSync('vsix',{recursive:true})\" && vsce package --out vsix/agent-tool.vsix",
+    "clean": "rm -rf out vsix"
+  },
+  "devDependencies": {
+    "@types/node": "26.4.1",
+    "@types/vscode": "1.90.0",
+    "@vscode/vsce": "3.9.2",
+    "typescript": "7.0.2"
+  }
+}
