@@ -16,7 +16,7 @@
   "categories": ["Other"],
   "keywords": ["ai", "agent", "mcp", "skills", "cursor"],
   "extensionKind": ["ui"],
-  "activationEvents": ["onStartupFinished"],
+  "activationEvents": ["onView:agent-tool.inventory"],
   "contributes": {
     "viewsContainers": { "activitybar": [{ "id": "agent-tool", "title": "Agent Tool", "icon": "media/icon.svg" }] },
     "views": { "agent-tool": [{ "id": "agent-tool.inventory", "name": "Dashboard", "type": "webview" }] },

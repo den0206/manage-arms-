@@ -22,7 +22,10 @@ export async function runCli(command: string, input: object = {}): Promise<CliRe
       clearTimeout(timeout);
       if (exceeded) reject(new Error("CLI output exceeded 2 MB"));
       else if (code === 0) resolve(output);
-      else reject(new Error(`CLI exited ${code}: ${stderr.slice(-1024)}`));
+      else {
+        const response = (() => { try { return JSON.parse(output) as CliResponse; } catch { return undefined; } })();
+        reject(new Error(response?.error?.message || `CLI exited ${code}: ${stderr.slice(-1024)}`));
+      }
     });
     child.stdin.end(JSON.stringify(input));
   });

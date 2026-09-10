@@ -10,6 +10,8 @@ public struct Candidate: Equatable, Sendable {
     public let description: String?
     /// 一時ディレクトリ内の実体。`Staging.discard()` か install で片付く。
     public let localURL: URL
+    /// Plugin CLI に渡す `plugin@marketplace`。展開ディレクトリ名は使わない。
+    public var installSelector: String? = nil
 }
 
 /// 一時展開の所有権。install するか discard するまで生きている。
@@ -427,7 +429,8 @@ public enum Fetcher {
         var found: [Candidate] = []
         if exists(".claude-plugin/plugin.json") {
             found.append(Candidate(kind: .plugin, name: base.lastPathComponent,
-                                   description: nil, localURL: base))
+                                   description: nil, localURL: base,
+                                   installSelector: pluginSelector(base)))
         }
         if exists("SKILL.md") {
             let front = FrontmatterParser.read(base.appending(path: "SKILL.md"))
@@ -456,6 +459,17 @@ public enum Fetcher {
         if !subagents.isEmpty { return found + subagents }
 
         return found + skills(under: base, depth: 3)
+    }
+
+    private static func pluginSelector(_ base: URL) -> String? {
+        let url = base.appending(path: ".claude-plugin/marketplace.json")
+        guard let data = try? Data(contentsOf: url),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let marketplace = object["name"] as? String,
+              let plugins = object["plugins"] as? [[String: Any]],
+              let name = plugins.first?["name"] as? String,
+              !name.isEmpty, !marketplace.isEmpty else { return nil }
+        return "\(name)@\(marketplace)"
     }
 
     /// リポジトリ直下を指された場合、スキルは何段か下に並んでいることがある。

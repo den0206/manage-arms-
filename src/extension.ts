@@ -153,6 +153,56 @@ export function activate(context: vscode.ExtensionContext): void {
       void dashboard.refresh(true);
     } catch (error) { void vscode.window.showWarningMessage(`Agent Tool: ${error instanceof Error ? error.message : "invalid MCP definition"}`); }
   }));
+  context.subscriptions.push(vscode.commands.registerCommand("agent-tool.addTool", async (input: { kind?: string; agent?: string; value?: string; extra?: string }) => {
+    if (!vscode.workspace.isTrusted || vscode.env.remoteName) {
+      void vscode.window.showWarningMessage("Agent Tool: add tools only from a trusted local Cursor window.");
+      return;
+    }
+    if (await isMacAppRunning()) {
+      void vscode.window.showWarningMessage("Agent Tool: ManageArms is running. Quit it before making changes.");
+      return;
+    }
+    const kind = input.kind;
+    const value = input.value?.trim();
+    const agent = input.agent;
+    if (!value || !agent || !["skill", "subagent", "mcp", "plugin"].includes(kind ?? "")) {
+      void vscode.window.showWarningMessage("Agent Tool: complete the tool form.");
+      return;
+    }
+    await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Agent Tool: Adding Tool" }, async () => {
+      let result;
+      if (kind === "mcp") {
+        const server = { name: value, ...JSON.parse(input.extra ?? "") };
+        result = await runCli("mcp-add", { storagePath: context.globalStorageUri.fsPath, agent, scope: "user", server });
+      } else if (kind === "plugin") {
+        result = await runCli("plugin-add", { storagePath: context.globalStorageUri.fsPath, agent, name: value, url: input.extra?.trim() || undefined });
+      } else {
+        result = await runCli("add", { storagePath: context.globalStorageUri.fsPath, url: value, scope: "user", kind });
+      }
+      if (!result.ok) throw new Error(result.error?.message ?? "tool add failed");
+    }).then(() => void dashboard.refresh(true), error => void vscode.window.showWarningMessage(`Agent Tool: ${error.message}`));
+  }));
+  context.subscriptions.push(vscode.commands.registerCommand("agent-tool.installPreview", async (input: { url?: string; kind?: string; name?: string; selector?: string }) => {
+    if (!vscode.workspace.isTrusted || vscode.env.remoteName || !input.url || !input.kind || !input.name) {
+      void vscode.window.showWarningMessage("Agent Tool: install tools only from a trusted local Cursor window.");
+      return;
+    }
+    const scope = await vscode.window.showQuickPick(["User Global", "Current Project"], { placeHolder: "Choose where to install" });
+    if (!scope) return;
+    const agent = await vscode.window.showQuickPick(["Claude Code", "Cursor", "Codex", "Gemini CLI"], { placeHolder: "Choose an AI Agent" });
+    if (!agent) return;
+    if (scope === "Current Project") {
+      void vscode.window.showWarningMessage("Agent Tool: Current Project installation is not available yet.");
+      return;
+    }
+    if (await isMacAppRunning()) { void vscode.window.showWarningMessage("Agent Tool: ManageArms is running. Quit it before making changes."); return; }
+    await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Agent Tool: Installing Tool" }, async () => {
+      const result = input.kind === "plugin"
+        ? await runCli("plugin-add", { storagePath: context.globalStorageUri.fsPath, agent: ({ "Claude Code": "claude", Cursor: "cursor", Codex: "codex", "Gemini CLI": "gemini" } as Record<string, string>)[agent], name: input.selector ?? input.name, url: input.url })
+        : await runCli("add", { storagePath: context.globalStorageUri.fsPath, url: input.url, scope: "user", kind: input.kind });
+      if (!result.ok) throw new Error(result.error?.message ?? "tool install failed");
+    }).then(() => void dashboard.refresh(true), error => void vscode.window.showWarningMessage(`Agent Tool: ${error.message}`));
+  }));
   context.subscriptions.push(vscode.commands.registerCommand("agent-tool.removeTool", async (node: InventoryNode) => {
     if (!node.tool || !node.agent || !vscode.workspace.isTrusted || vscode.env.remoteName) {
       void vscode.window.showWarningMessage("Agent Tool: remove tools only from a trusted local Cursor window.");
