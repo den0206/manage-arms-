@@ -134,18 +134,17 @@ export function activate(context: vscode.ExtensionContext): void {
       void vscode.window.showWarningMessage("Agent Tool: install tools only from a trusted local Cursor window.");
       return;
     }
-    const scope = await vscode.window.showQuickPick(["User Global", "Current Project"], { placeHolder: "Choose where to install" });
-    if (!scope) return;
-    const agent = await vscode.window.showQuickPick(["Claude Code", "Cursor", "Codex", "Gemini CLI"], { placeHolder: "Choose an AI Agent" });
-    if (!agent) return;
-    if (scope === "Current Project") {
-      void vscode.window.showWarningMessage("Agent Tool: Current Project installation is not available yet.");
-      return;
+    const agentMap: Record<string, string> = { "Claude Code": "claude", Cursor: "cursor", Codex: "codex", "Gemini CLI": "gemini" };
+    let agentId: string | undefined;
+    if (input.kind === "plugin") {
+      const picked = await vscode.window.showQuickPick(Object.keys(agentMap), { placeHolder: "Choose an AI Agent" });
+      if (!picked) return;
+      agentId = agentMap[picked];
     }
     if (await isMacAppRunning()) { void vscode.window.showWarningMessage("Agent Tool: ManageArms is running. Quit it before making changes."); return; }
     await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Agent Tool: Installing Tool" }, async () => {
       const result = input.kind === "plugin"
-        ? await runCli("plugin-add", { storagePath: context.globalStorageUri.fsPath, agent: ({ "Claude Code": "claude", Cursor: "cursor", Codex: "codex", "Gemini CLI": "gemini" } as Record<string, string>)[agent], name: input.selector ?? input.name, url: input.url })
+        ? await runCli("plugin-add", { storagePath: context.globalStorageUri.fsPath, agent: agentId, name: input.selector ?? input.name, url: input.url })
         : await runCli("add", { storagePath: context.globalStorageUri.fsPath, url: input.url, scope: "user", kind: input.kind });
       if (!result.ok) throw new Error(result.error?.message ?? "tool install failed");
     }).then(() => void dashboard.refresh(true), error => void vscode.window.showWarningMessage(`Agent Tool: ${error.message}`));
