@@ -10,36 +10,8 @@ function isMacAppRunning(): Promise<boolean> {
   return new Promise(resolve => execFile("pgrep", ["-x", "ManageArms"], err => resolve(!err)));
 }
 
-type Scope = "user" | "project";
-type Origin = "managed" | "user" | "bundled";
-type InventoryItem = { name: string; kind: "skill" | "subagent" | "mcp" | "plugin"; scope: Scope; agents: string[]; enabled: boolean; origin: Origin; sourcePath?: string; repoUrl?: string; hasUpdate: boolean };
 type UndoPayload = { originalPath: string; trashedPath: string; registryEntry: object };
-type NodeType = "scope" | "agent" | "kind" | "origin" | "tool" | "empty";
-const agentLabels: Record<string, string> = { claude: "Claude Code", cursor: "Cursor", codex: "Codex", gemini: "Gemini CLI" };
-const kindLabels: Record<InventoryItem["kind"], string> = { skill: "Skills", subagent: "Subagents", mcp: "MCP Servers", plugin: "Plugins" };
-const originLabels: Record<Origin, string> = { managed: "Your tools", user: "Your tools", bundled: "Bundled" };
-
-class InventoryNode extends vscode.TreeItem {
-  constructor(readonly type: NodeType, readonly scope: Scope, readonly agent?: string, readonly kind?: InventoryItem["kind"], readonly origin?: Origin, readonly tool?: InventoryItem, readonly running?: boolean) {
-    const label = tool?.name ?? (type === "scope" ? scope === "project" ? "Current Project" : "User Global" : type === "agent" ? agentLabels[agent ?? ""] ?? agent ?? "Unknown" : type === "kind" ? kindLabels[kind!] : type === "origin" ? originLabels[origin!] : "No tools found");
-    super(label, type === "tool" || type === "empty" ? vscode.TreeItemCollapsibleState.None : vscode.TreeItemCollapsibleState.Collapsed);
-    this.iconPath = this.icon();
-    if (tool) {
-      this.description = tool.kind === "mcp" ? running ? "Running" : "Stopped" : tool.hasUpdate ? "Update available" : undefined;
-      this.contextValue = tool.origin === "managed" ? `agent-tool.managed.${tool.kind}` : `agent-tool.${tool.kind}`;
-      this.tooltip = [tool.name, tool.sourcePath, tool.repoUrl].filter(Boolean).join("\n");
-    }
-  }
-  private icon(): vscode.ThemeIcon {
-    if (this.type === "scope") return new vscode.ThemeIcon(this.scope === "project" ? "folder" : "account");
-    if (this.type === "agent") return new vscode.ThemeIcon("hubot");
-    if (this.type === "kind") return new vscode.ThemeIcon({ skill: "book", subagent: "organization", mcp: "server", plugin: "extensions" }[this.kind!]);
-    if (this.type === "origin") return new vscode.ThemeIcon(this.origin === "bundled" ? "package" : "person");
-    if (this.type === "tool" && this.tool?.kind === "mcp") return new vscode.ThemeIcon(this.running ? "circle-filled" : "circle-outline");
-    if (this.type === "tool") return new vscode.ThemeIcon(this.tool?.enabled ? "check" : "circle-slash");
-    return new vscode.ThemeIcon("info");
-  }
-}
+type ToolNode = { tool: DashboardItem; scope: DashboardItem["scope"]; agent?: string };
 
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -48,7 +20,7 @@ export function activate(context: vscode.ExtensionContext): void {
   let undo: UndoPayload | undefined;
   let undoTimer: NodeJS.Timeout | undefined;
   context.subscriptions.push(vscode.window.registerWebviewViewProvider("agent-tool.inventory", dashboard), dashboard);
-  context.subscriptions.push(vscode.commands.registerCommand("agent-tool.toggleTool", async (node: InventoryNode) => {
+  context.subscriptions.push(vscode.commands.registerCommand("agent-tool.toggleTool", async (node: ToolNode) => {
     if (!node.tool || !node.agent || !vscode.workspace.isTrusted) {
       void vscode.window.showWarningMessage("Agent Tool: trust this workspace before changing tools.");
       return;
@@ -149,7 +121,7 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!result.ok) throw new Error(result.error?.message ?? "tool install failed");
     }).then(() => void dashboard.refresh(true), error => void vscode.window.showWarningMessage(`Agent Tool: ${error.message}`));
   }));
-  context.subscriptions.push(vscode.commands.registerCommand("agent-tool.removeTool", async (node: InventoryNode) => {
+  context.subscriptions.push(vscode.commands.registerCommand("agent-tool.removeTool", async (node: ToolNode) => {
     if (!node.tool || !node.agent || !vscode.workspace.isTrusted || vscode.env.remoteName) {
       void vscode.window.showWarningMessage("Agent Tool: remove tools only from a trusted local Cursor window.");
       return;
@@ -190,7 +162,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const agent = item.agents.length === 1 ? item.agents[0] : await vscode.window.showQuickPick(item.agents, { placeHolder: "Choose an agent" });
     if (!agent) return;
     const choice = await vscode.window.showQuickPick(["Enable or disable", "Remove"], { placeHolder: item.name });
-    const node = { tool: item, scope: item.scope, agent } as unknown as InventoryNode;
+    const node: ToolNode = { tool: item, scope: item.scope, agent };
     if (choice === "Enable or disable") await vscode.commands.executeCommand("agent-tool.toggleTool", node);
     if (choice === "Remove") await vscode.commands.executeCommand("agent-tool.removeTool", node);
   }));
