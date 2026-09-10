@@ -13,6 +13,7 @@ export type DashboardItem = {
   summary?: string;
   detail?: string;
   hasUpdate: boolean;
+  running?: boolean;
 };
 
 export class DashboardProvider
@@ -20,9 +21,12 @@ export class DashboardProvider
 {
   private view?: vscode.WebviewView;
   private snapshot?: {at: number; items: DashboardItem[]};
+  private status = new Map<string, boolean>();
+  private pollTimer?: NodeJS.Timeout;
 
   constructor(private readonly storagePath: string) {}
   dispose(): void {
+    this.stopPoll();
     this.view = undefined;
     this.snapshot = undefined;
   }
@@ -48,10 +52,11 @@ export class DashboardProvider
         void this.openActions(message.item);
     });
     view.onDidChangeVisibility(() => {
-      if (view.visible) void this.refresh();
-      else this.snapshot = undefined;
+      if (view.visible) { void this.refresh(); this.startPoll(); }
+      else { this.stopPoll(); this.snapshot = undefined; }
     });
     void this.refresh();
+    this.startPoll();
   }
 
   async refresh(force = false): Promise<void> {
@@ -96,8 +101,34 @@ export class DashboardProvider
     }
   }
 
+  private startPoll(): void {
+    this.stopPoll();
+    void this.refreshStatus();
+    this.pollTimer = setInterval(() => void this.refreshStatus(), 3_000);
+  }
+
+  private stopPoll(): void {
+    if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = undefined; }
+    this.status.clear();
+  }
+
+  private async refreshStatus(): Promise<void> {
+    if (!this.view?.visible) return;
+    try {
+      const result = await runCli('mcp-status', {storagePath: this.storagePath});
+      const servers = (result.data as {servers?: Array<{agent: string; name: string; running: boolean}>} | undefined)?.servers ?? [];
+      this.status = new Map(servers.map(s => [`${s.agent}:${s.name}`, s.running]));
+      if (this.snapshot) this.post(this.snapshot.items);
+    } catch { /* keep previous status */ }
+  }
+
   private post(items: DashboardItem[]): void {
-    this.view?.webview.postMessage({type: 'inventory', items});
+    const annotated = items.map(item =>
+      item.kind === 'mcp'
+        ? {...item, running: item.agents.some(a => this.status.get(`${a}:${item.name}`) === true)}
+        : item
+    );
+    this.view?.webview.postMessage({type: 'inventory', items: annotated});
   }
 }
 
@@ -141,7 +172,7 @@ function dashboardHtml(webview: vscode.Webview): string {
     document.querySelector('#overview').innerHTML='<div class="metric"><strong>'+managed+'</strong><span>Your tools</span></div><div class="metric"><strong>'+updates+'</strong><span>Updates available</span></div>';
     document.querySelector('#agents').innerHTML=agents.map(a=>'<button class="agent '+(a===agent?'active':'')+'" data-agent="'+a+'" role="tab" aria-selected="'+(a===agent)+'"><span>'+agentNames[a]+'</span><span class="agent-count">'+items.filter(x=>x.agents.includes(a)).length+'</span></button>').join(''); document.querySelector('#inventory-title').textContent=agentNames[agent]||'Tools';
     const filters=[['project','Current Project'],['user','User Global']]; document.querySelector('#filters').innerHTML=filters.map(([v,n])=>'<button class="filter '+(v===scope?'active':'')+'" data-filter="'+v+'">'+n+'</button>').join('');
-    const rowsHtml=rows=>'<div class="list">'+rows.map(x=>'<div class="item"><div class="glyph">'+icons[x.kind]+'</div><div><div class="name">'+esc(x.name)+'</div><div class="meta">'+esc(x.agents.join(' · '))+' · '+kinds[x.kind]+'</div></div><button class="icon action" data-index="'+items.indexOf(x)+'" title="操作">•••</button></div>').join('')+'</div>'; const yours=visible.filter(x=>x.origin!=='bundled'); const yourGroups=Object.entries(kinds).map(([value,title])=>[title,yours.filter(x=>x.kind===value)]).filter(([,rows])=>rows.length); const bundled=visible.filter(x=>x.origin==='bundled'); document.querySelector('#content').innerHTML=visible.length?yourGroups.map(([title,rows])=>'<div class="section">Your tools · '+title+'</div>'+rowsHtml(rows)).join('')+(bundled.length?'<button class="bundled-toggle" id="bundled-toggle">Bundled · '+bundled.length+' '+(bundledOpen?'⌄':'›')+'</button>'+(bundledOpen?rowsHtml(bundled):''):''):'<div class="empty">この条件に一致するツールはありません。</div>';
+    const rowsHtml=rows=>'<div class="list">'+rows.map(x=>'<div class="item"><div class="glyph">'+icons[x.kind]+'</div><div><div class="name">'+esc(x.name)+'</div><div class="meta">'+esc(x.agents.join(' · '))+' · '+kinds[x.kind]+(x.kind==='mcp'?' · '+(x.running?'Running':'Stopped'):'')+'</div></div><button class="icon action" data-index="'+items.indexOf(x)+'" title="操作">•••</button></div>').join('')+'</div>'; const yours=visible.filter(x=>x.origin!=='bundled'); const yourGroups=Object.entries(kinds).map(([value,title])=>[title,yours.filter(x=>x.kind===value)]).filter(([,rows])=>rows.length); const bundled=visible.filter(x=>x.origin==='bundled'); document.querySelector('#content').innerHTML=visible.length?yourGroups.map(([title,rows])=>'<div class="section">Your tools · '+title+'</div>'+rowsHtml(rows)).join('')+(bundled.length?'<button class="bundled-toggle" id="bundled-toggle">Bundled · '+bundled.length+' '+(bundledOpen?'⌄':'›')+'</button>'+(bundledOpen?rowsHtml(bundled):''):''):'<div class="empty">この条件に一致するツールはありません。</div>';
     document.querySelectorAll('[data-agent]').forEach(b=>b.onclick=()=>{agent=b.dataset.agent; hideDetail(); render();}); document.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>{scope=b.dataset.filter; hideDetail(); render();}); document.querySelectorAll('.action').forEach(b=>b.onclick=e=>{e.stopPropagation(); vscode.postMessage({type:'actions',item:items[Number(b.dataset.index)]});}); const toggle=document.querySelector('#bundled-toggle'); if(toggle) toggle.onclick=()=>{bundledOpen=!bundledOpen; render();}; }
   function hideDetail() { selected=''; document.querySelector('#detail').classList.add('hidden'); }
   function showDetail(x) { const key=x.name+'|'+x.kind+'|'+x.scope; if(selected===key) { hideDetail(); return; } selected=key; const usage={skill:'チャットで名前を指定するか、内容に合う依頼をしてください。',subagent:'対応する Agent の委譲機能から指定して使います。',mcp:'対応する Agent の MCP ツールとして利用できます。',plugin:'対応する Agent の Plugin 機能から利用します。'}[x.kind]; const detail=document.querySelector('#detail'); detail.innerHTML='<button class="icon" id="close-detail" title="閉じる">×</button><h2>'+esc(x.name)+'</h2><div class="detail-label">DESCRIPTION</div><p>'+esc(x.summary||'説明は提供されていません。')+'</p><div class="detail-label">HOW TO USE</div><p>'+usage+'</p>'+(x.detail?'<div class="detail-label">LOCATION</div><p class="detail-path">'+esc(x.detail)+'</p>':'')+(x.repoUrl?'<div class="detail-label">SOURCE</div><p class="detail-path">'+esc(x.repoUrl)+'</p>':''); detail.classList.remove('hidden'); document.querySelector('#close-detail').onclick=hideDetail; detail.scrollIntoView({block:'nearest'}); }
