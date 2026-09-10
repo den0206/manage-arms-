@@ -13,19 +13,87 @@
     "vscode": "^1.90.0",
     "node": ">=20"
   },
-  "categories": ["Other"],
-  "keywords": ["ai", "agent", "mcp", "skills", "cursor"],
-  "extensionKind": ["ui"],
-  "activationEvents": ["onView:agent-tool.inventory"],
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "agent",
+    "mcp",
+    "skills",
+    "cursor"
+  ],
+  "extensionKind": [
+    "ui"
+  ],
+  "activationEvents": [
+    "onView:agent-tool.inventory"
+  ],
   "contributes": {
-    "viewsContainers": { "activitybar": [{ "id": "agent-tool", "title": "Agent Tool", "icon": "media/icon.svg" }] },
-    "views": { "agent-tool": [{ "id": "agent-tool.inventory", "name": "Dashboard", "type": "webview" }] },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "agent-tool",
+          "title": "Agent Tool",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "agent-tool": [
+        {
+          "id": "agent-tool.inventory",
+          "name": "Dashboard",
+          "type": "webview"
+        }
+      ]
+    },
     "commands": [
-      { "command": "agent-tool.toggleTool", "title": "%command.toggleTool%" },
-      { "command": "agent-tool.addSkill", "title": "%command.addSkill%" },
-      { "command": "agent-tool.removeTool", "title": "%command.removeTool%" },
-      { "command": "agent-tool.addMcp", "title": "%command.addMcp%" },
-      { "command": "agent-tool.openToolActions", "title": "Agent Tool: Manage tool" }
+      {
+        "command": "agent-tool.toggleTool",
+        "title": "%command.toggleTool%",
+        "category": "Agent Tool"
+      },
+      {
+        "command": "agent-tool.addSkill",
+        "title": "%command.addSkill%",
+        "category": "Agent Tool"
+      },
+      {
+        "command": "agent-tool.removeTool",
+        "title": "%command.removeTool%",
+        "category": "Agent Tool"
+      },
+      {
+        "command": "agent-tool.addMcp",
+        "title": "%command.addMcp%",
+        "category": "Agent Tool"
+      },
+      {
+        "command": "agent-tool.previewUpdate",
+        "title": "%command.previewUpdate%",
+        "category": "Agent Tool"
+      },
+      {
+        "command": "agent-tool.applyUpdate",
+        "title": "%command.applyUpdate%",
+        "category": "Agent Tool"
+      },
+      {
+        "command": "agent-tool.refreshInventory",
+        "title": "%command.refreshInventory%",
+        "category": "Agent Tool"
+      },
+      {
+        "command": "agent-tool.migrateFromManageArms",
+        "title": "%command.migrate%",
+        "category": "Agent Tool"
+      },
+      {
+        "command": "agent-tool.openToolActions",
+        "title": "%command.openToolActions%",
+        "category": "Agent Tool"
+      }
     ],
     "menus": {}
   },
@@ -34,18 +102,21 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
-    "build-cli": "./scripts/build-cli.sh",
     "typecheck": "tsc -p ./ --noEmit",
     "test": "npm run compile && node --test",
-    "test:vsix": "./scripts/test-vsix-cli.sh",
     "test:cursor": "./scripts/test-cursor-e2e.sh",
-    "package": "npm run build-cli && node -e \"require('node:fs').mkdirSync('vsix',{recursive:true})\" && vsce package --out vsix/agent-tool.vsix",
-    "clean": "rm -rf out vsix"
+    "package": "node -e \"require('node:fs').mkdirSync('vsix',{recursive:true})\" && vsce package --out vsix/agent-tool.vsix",
+    "clean": "rm -rf out vsix",
+    "check": "npm run typecheck && npm test && ./scripts/check-invariants.sh"
   },
   "devDependencies": {
     "@types/node": "26.4.1",
     "@types/vscode": "1.90.0",
+    "@types/yauzl": "3.4.0",
     "@vscode/vsce": "3.9.2",
     "typescript": "7.0.2"
+  },
+  "dependencies": {
+    "yauzl": "3.4.0"
   }
 }

@@ -6,8 +6,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Windows and Linux support: every feature now runs on macOS, Linux, and Windows.
+- Commands for previewing and applying tool updates, refreshing the inventory, and starting the ManageArms migration manually.
+
 ### Changed
 
 - Began the Phase 0 migration from the ManageArms macOS app to the Agent Tool Cursor extension.
+- Replaced the bundled Swift command-line core with TypeScript that runs inside the extension, so the VSIX no longer ships a platform binary.
+- Skills and subagents are now shared through junctions and hard links on Windows, and through symbolic links on macOS and Linux.
 - Replaced the extension sidebar icon with a hexagonal hub design.
 - Enriched the Dashboard UI: SVG icons per tool kind (Skill/Subagent/MCP/Plugin), brand-colored glyphs, agent-dot indicators on agent tabs, and an agent-badge header card showing the active agent name and tool count.
+- The Dashboard now reports scan failures instead of showing an empty tool list, and all of its text is available in English and Japanese.
+
+### Fixed
+
+- Plugin installation now registers a supplied Marketplace before installing it; Claude no longer receives its unsupported `--marketplace` option. Plugin installation and removal show their commands for confirmation, and removal preserves the installed scope.
+- Removing or disabling a project-scoped Skill or Subagent no longer deletes the user-scoped item of the same name; project files are left to the project.
+- Removing a project or local MCP server now targets that registration instead of the user-wide server of the same name.
+- Commands containing shell syntax are refused on Windows, where arguments would otherwise be interpreted by the command processor.
+- A manually configured agent CLI path is now matched on Windows as well.
+
+### Removed
+
+- Deleting a tool no longer moves it to the Trash and no longer offers a 30-second undo; the confirmation dialog states that the removal is permanent.

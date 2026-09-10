@@ -1,0 +1,183 @@
+const { strict: assert } = require("node:assert");
+const { existsSync, readFileSync } = require("node:fs");
+const { join } = require("node:path");
+const { test } = require("node:test");
+const { agentStore, claudeSkills, disabledStore, skillStore } = require("../out/env.js");
+const { install } = require("../out/installer.js");
+const { disable, enable, layout, remove } = require("../out/skillManager.js");
+const { empty, upsert } = require("../out/registry.js");
+const { isManagedLink } = require("../out/writeGuard.js");
+const { fakeEnv, makeDir, writeFileIn } = require("./helpers.js");
+
+const code = expected => error => error.code === expected;
+
+const stagedSkill = (env, name, body = "hello") => {
+  const root = makeDir(join(env.home, "staging"));
+  writeFileIn(join(root, name, "SKILL.md"), `---\nname: ${name}\ndescription: ${body}\n---\n`);
+  return {
+    staging: { root, source: { repo: "owner/repo", branch: "main" }, candidates: [], resolvedSha: "abc123" },
+    candidate: { kind: "skill", name, localPath: join(root, name) },
+  };
+};
+
+// --- install ---
+
+test("実体を置き場に入れ、Claude 用のリンクを張る", () => {
+  const env = fakeEnv();
+  const registry = empty();
+  const { staging, candidate } = stagedSkill(env, "pdf");
+  install(candidate, staging, env, registry);
+
+  const store = join(skillStore(env), "pdf");
+  assert.ok(existsSync(join(store, "SKILL.md")));
+  assert.ok(isManagedLink(join(claudeSkills(env), "pdf"), store));
+  const entry = registry.resources.find(item => item.name === "pdf");
+  assert.equal(entry.repo, "owner/repo");
+  assert.equal(entry.sha, "abc123");
+});
+
+test("同名が既にあれば入れない", () => {
+  const env = fakeEnv();
+  const registry = empty();
+  const { staging, candidate } = stagedSkill(env, "pdf");
+  install(candidate, staging, env, registry);
+  assert.throws(() => install(candidate, staging, env, registry), code("ALREADY_EXISTS"));
+});
+
+/** 取得先の名乗り 1 つで管理ルートの外へ書けないこと。 */
+test("パスとして解決される名前は入れない", () => {
+  const env = fakeEnv();
+  const { staging } = stagedSkill(env, "ok");
+  const candidate = { kind: "skill", name: "../evil", localPath: join(staging.root, "ok") };
+  assert.throws(() => install(candidate, staging, env, empty()), code("INVALID_NAME"));
+});
+
+test("staging の外を指す取得物は入れない", () => {
+  const env = fakeEnv();
+  const { staging } = stagedSkill(env, "ok");
+  const outside = makeDir(join(env.home, "elsewhere", "evil"));
+  assert.throws(
+    () => install({ kind: "skill", name: "evil", localPath: outside }, staging, env, empty()),
+    code("FETCH_FAILED"));
+});
+
+// --- enable / disable ---
+
+test("無効化は実体を退避し、リンクを外す", () => {
+  const env = fakeEnv();
+  const registry = empty();
+  const { staging, candidate } = stagedSkill(env, "pdf");
+  install(candidate, staging, env, registry);
+
+  disable("pdf", "skill", env, registry);
+  assert.equal(existsSync(join(skillStore(env), "pdf")), false);
+  assert.ok(existsSync(join(disabledStore(env), "pdf", "SKILL.md")));
+  assert.equal(existsSync(join(claudeSkills(env), "pdf")), false);
+  assert.equal(registry.resources.find(item => item.name === "pdf").disabled, true);
+});
+
+test("有効化は実体を戻し、リンクを張り直す", () => {
+  const env = fakeEnv();
+  const registry = empty();
+  const { staging, candidate } = stagedSkill(env, "pdf");
+  install(candidate, staging, env, registry);
+  disable("pdf", "skill", env, registry);
+
+  enable("pdf", "skill", env, registry);
+  assert.ok(existsSync(join(skillStore(env), "pdf", "SKILL.md")));
+  assert.ok(isManagedLink(join(claudeSkills(env), "pdf"), join(skillStore(env), "pdf")));
+  assert.equal(registry.resources.find(item => item.name === "pdf").disabled, false);
+});
+
+test("実体が無いものは有効化できない", () => {
+  const env = fakeEnv();
+  assert.throws(() => enable("ghost", "skill", env, empty()), code("NOT_FOUND"));
+});
+
+/** registry に無いものは他のツールの持ち物。触らない。 */
+test("registry に無い実体は無効化できない", () => {
+  const env = fakeEnv();
+  writeFileIn(join(skillStore(env), "foreign", "SKILL.md"), "---\nname: foreign\n---\n");
+  assert.throws(() => disable("foreign", "skill", env, empty()), code("NOT_IN_REGISTRY"));
+});
+
+/** 退避先に別のものがあれば上書きしない。 */
+test("退避先が埋まっていれば無効化しない", () => {
+  const env = fakeEnv();
+  const registry = empty();
+  const { staging, candidate } = stagedSkill(env, "pdf");
+  install(candidate, staging, env, registry);
+  writeFileIn(join(disabledStore(env), "pdf", "SKILL.md"), "other");
+
+  assert.throws(() => disable("pdf", "skill", env, registry), code("ALREADY_EXISTS"));
+  assert.ok(existsSync(join(skillStore(env), "pdf")), "実体は動かさない");
+});
+
+// --- remove ---
+
+test("削除はリンクと実体を消し、registry から外す", () => {
+  const env = fakeEnv();
+  const registry = empty();
+  const { staging, candidate } = stagedSkill(env, "pdf");
+  install(candidate, staging, env, registry);
+
+  remove("pdf", "skill", env, registry);
+  assert.equal(existsSync(join(skillStore(env), "pdf")), false);
+  assert.equal(existsSync(join(claudeSkills(env), "pdf")), false);
+  assert.deepEqual(registry.resources, []);
+});
+
+test("実体が無いものは削除できない", () => {
+  const env = fakeEnv();
+  assert.throws(() => remove("ghost", "skill", env, empty()), code("NOT_FOUND"));
+});
+
+// --- Subagent の配置 ---
+
+test("Subagent は 2 本のリンクを張る", () => {
+  const env = fakeEnv();
+  const registry = empty();
+  const path = writeFileIn(join(env.home, "staging", "reviewer.md"),
+    "---\nname: reviewer\ntools: Read\n---\n");
+  install({ kind: "subagent", name: "reviewer", localPath: path },
+    { root: join(env.home, "staging"), source: { repo: "owner/repo" } }, env, registry);
+
+  const store = join(agentStore(env), "reviewer.md");
+  assert.equal(readFileSync(store, "utf8").includes("tools: Read"), true);
+  for (const dir of [".claude/agents", ".cursor/agents"]) {
+    assert.ok(isManagedLink(join(env.home, dir, "reviewer.md"), store), dir);
+  }
+});
+
+test("Subagent の退避先と実体は .md で分かれる", () => {
+  const env = fakeEnv();
+  const plan = layout("reviewer", "subagent", env);
+  assert.ok(plan.store.endsWith(join("agents", "reviewer.md")));
+  assert.ok(plan.parked.endsWith(join("disabled-agents", "reviewer.md")));
+  assert.equal(plan.linkKind, "file");
+});
+
+// --- 種別ごとの宛先 ---
+
+/**
+ * Plugin と MCP はこちらの管理ストアに実体を持たない。`layout` を素通りさせると
+ * `~/.agents/skills/<name>` を指し、同名の Skill を消しにいく。
+ * D-5 でゴミ箱を経由しないので、取り違えは復旧できない。
+ */
+for (const kind of ["plugin", "mcp"]) {
+  test(`${kind} は管理ストアの実体として扱わない`, () => {
+    const env = fakeEnv();
+    assert.throws(() => layout("github@openai-curated-remote", kind, env), code("OPERATION_FAILED"));
+    assert.throws(() => remove("github@openai-curated-remote", kind, env, empty()), code("OPERATION_FAILED"));
+  });
+}
+
+test("同名の Skill があっても Plugin の削除で巻き込まない", () => {
+  const env = fakeEnv();
+  const registry = empty();
+  const { staging, candidate } = stagedSkill(env, "ponytail");
+  install(candidate, staging, env, registry);
+
+  assert.throws(() => remove("ponytail", "plugin", env, registry), code("OPERATION_FAILED"));
+  assert.ok(existsSync(join(skillStore(env), "ponytail", "SKILL.md")), "Skill の実体は残る");
+});
