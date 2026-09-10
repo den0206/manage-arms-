@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { runCli, setCliPath } from "./cli";
+import { DashboardItem, DashboardProvider } from "./dashboard";
 
 function isMacAppRunning(): Promise<boolean> {
   return new Promise(resolve => execFile("pgrep", ["-x", "ManageArms"], err => resolve(!err)));
@@ -96,12 +97,10 @@ class InventoryProvider implements vscode.TreeDataProvider<InventoryNode>, vscod
 
 export function activate(context: vscode.ExtensionContext): void {
   setCliPath(process.env.AGENT_TOOL_CORE_CLI ?? vscode.Uri.joinPath(context.extensionUri, "bin", "agent-tool-core").fsPath);
-  const provider = new InventoryProvider(context.globalStorageUri.fsPath);
-  const view = vscode.window.createTreeView("agent-tool.inventory", { treeDataProvider: provider });
+  const dashboard = new DashboardProvider(context.globalStorageUri.fsPath);
   let undo: UndoPayload | undefined;
   let undoTimer: NodeJS.Timeout | undefined;
-  provider.setVisible(view.visible);
-  context.subscriptions.push(provider, view, view.onDidChangeVisibility(event => provider.setVisible(event.visible)));
+  context.subscriptions.push(vscode.window.registerWebviewViewProvider("agent-tool.inventory", dashboard), dashboard);
   context.subscriptions.push(vscode.commands.registerCommand("agent-tool.toggleTool", async (node: InventoryNode) => {
     if (!node.tool || !node.agent || !vscode.workspace.isTrusted) {
       void vscode.window.showWarningMessage("Agent Tool: trust this workspace before changing tools.");
@@ -123,7 +122,7 @@ export function activate(context: vscode.ExtensionContext): void {
       void vscode.window.showWarningMessage(`Agent Tool: ${result.error?.message ?? "toggle failed"}`);
       return;
     }
-    provider.refresh();
+    void dashboard.refresh(true);
   }));
   context.subscriptions.push(vscode.commands.registerCommand("agent-tool.addSkill", async () => {
     if (!vscode.workspace.isTrusted || vscode.env.remoteName) {
@@ -139,7 +138,7 @@ export function activate(context: vscode.ExtensionContext): void {
     await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Agent Tool: Adding Skill" }, async () => {
       const result = await runCli("add", { storagePath: context.globalStorageUri.fsPath, url, scope: "user", kind: "skill" });
       if (!result.ok) throw new Error(result.error?.message ?? "Skill add failed");
-    }).then(() => provider.refresh(), error => void vscode.window.showWarningMessage(`Agent Tool: ${error.message}`));
+    }).then(() => void dashboard.refresh(true), error => void vscode.window.showWarningMessage(`Agent Tool: ${error.message}`));
   }));
   context.subscriptions.push(vscode.commands.registerCommand("agent-tool.addMcp", async () => {
     if (!vscode.workspace.isTrusted || vscode.env.remoteName) { void vscode.window.showWarningMessage("Agent Tool: add MCP servers only from a trusted local Cursor window."); return; }
@@ -151,7 +150,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const server = { name, ...JSON.parse(definition) };
       const result = await runCli("mcp-add", { storagePath: context.globalStorageUri.fsPath, agent: "cursor", scope: "user", server });
       if (!result.ok) throw new Error(result.error?.message ?? "MCP add failed");
-      provider.refresh();
+      void dashboard.refresh(true);
     } catch (error) { void vscode.window.showWarningMessage(`Agent Tool: ${error instanceof Error ? error.message : "invalid MCP definition"}`); }
   }));
   context.subscriptions.push(vscode.commands.registerCommand("agent-tool.removeTool", async (node: InventoryNode) => {
@@ -169,7 +168,7 @@ export function activate(context: vscode.ExtensionContext): void {
       ? await runCli("mcp-remove", { storagePath: context.globalStorageUri.fsPath, agent: node.agent, name: node.tool.name, scope: node.scope })
       : await runCli("remove", { storagePath: context.globalStorageUri.fsPath, selector: { name: node.tool.name, kind: node.tool.kind, scope: node.scope, agent: node.agent, sourcePath: node.tool.sourcePath } });
     if (node.tool.kind === "mcp") {
-      if (result.ok) provider.refresh();
+      if (result.ok) void dashboard.refresh(true);
       else void vscode.window.showWarningMessage(`Agent Tool: ${result.error?.message ?? "remove failed"}`);
       return;
     }
@@ -181,16 +180,24 @@ export function activate(context: vscode.ExtensionContext): void {
     undo = payload;
     if (undoTimer) clearTimeout(undoTimer);
     undoTimer = setTimeout(() => { undo = undefined; }, 30_000);
-    provider.refresh();
+    void dashboard.refresh(true);
     void vscode.window.showInformationMessage(`${node.tool.name} was moved to Trash.`, "Undo").then(async action => {
       if (action !== "Undo" || !undo) return;
       const restored = await runCli("rollback", { storagePath: context.globalStorageUri.fsPath, undo });
       undo = undefined;
-      if (restored.ok) provider.refresh();
+      if (restored.ok) void dashboard.refresh(true);
       else void vscode.window.showWarningMessage(`Agent Tool: ${restored.error?.message ?? "rollback failed"}`);
     });
   }));
   context.subscriptions.push({ dispose: () => { if (undoTimer) clearTimeout(undoTimer); undo = undefined; } });
+  context.subscriptions.push(vscode.commands.registerCommand("agent-tool.openToolActions", async (item: DashboardItem) => {
+    const agent = item.agents.length === 1 ? item.agents[0] : await vscode.window.showQuickPick(item.agents, { placeHolder: "Choose an agent" });
+    if (!agent) return;
+    const choice = await vscode.window.showQuickPick(["Enable or disable", "Remove"], { placeHolder: item.name });
+    const node = { tool: item, scope: item.scope, agent } as unknown as InventoryNode;
+    if (choice === "Enable or disable") await vscode.commands.executeCommand("agent-tool.toggleTool", node);
+    if (choice === "Remove") await vscode.commands.executeCommand("agent-tool.removeTool", node);
+  }));
   void runCli("version").catch(() => undefined);
   const legacyPath = join(homedir(), "Library", "Application Support", "ManageArms");
   if (existsSync(join(legacyPath, "registry.json")) && !context.globalState.get("migrationDone") && !context.globalState.get("migrationDeclined")) {
@@ -200,7 +207,7 @@ export function activate(context: vscode.ExtensionContext): void {
       await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Agent Tool: Migrating ManageArms data" }, async () => {
         const result = await runCli("migrate", { storagePath: context.globalStorageUri.fsPath, sourcePath: legacyPath });
         if (!result.ok) throw new Error(result.error?.message ?? "migration failed");
-      }).then(async () => { await context.globalState.update("migrationDone", true); provider.refresh(); }, error => void vscode.window.showWarningMessage(`Agent Tool: ${error.message}`));
+      }).then(async () => { await context.globalState.update("migrationDone", true); void dashboard.refresh(true); }, error => void vscode.window.showWarningMessage(`Agent Tool: ${error.message}`));
     });
   }
 }

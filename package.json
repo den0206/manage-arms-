@@ -19,28 +19,15 @@
   "activationEvents": ["onStartupFinished"],
   "contributes": {
     "viewsContainers": { "activitybar": [{ "id": "agent-tool", "title": "Agent Tool", "icon": "media/icon.svg" }] },
-    "views": { "agent-tool": [{ "id": "agent-tool.inventory", "name": "Inventory" }] },
+    "views": { "agent-tool": [{ "id": "agent-tool.inventory", "name": "Dashboard", "type": "webview" }] },
     "commands": [
       { "command": "agent-tool.toggleTool", "title": "%command.toggleTool%" },
       { "command": "agent-tool.addSkill", "title": "%command.addSkill%" },
       { "command": "agent-tool.removeTool", "title": "%command.removeTool%" },
-      { "command": "agent-tool.addMcp", "title": "%command.addMcp%" }
+      { "command": "agent-tool.addMcp", "title": "%command.addMcp%" },
+      { "command": "agent-tool.openToolActions", "title": "Agent Tool: Manage tool" }
     ],
-    "menus": {
-      "view/item/context": [{
-        "command": "agent-tool.toggleTool",
-        "when": "view == agent-tool.inventory && (viewItem == agent-tool.managed.skill || viewItem == agent-tool.managed.subagent || viewItem == agent-tool.mcp)",
-        "group": "inline"
-      }, {
-        "command": "agent-tool.removeTool",
-        "when": "view == agent-tool.inventory && (viewItem == agent-tool.managed.skill || viewItem == agent-tool.managed.subagent)",
-        "group": "inline@1"
-      }],
-      "view/title": [
-        { "command": "agent-tool.addSkill", "when": "view == agent-tool.inventory", "group": "navigation" },
-        { "command": "agent-tool.addMcp", "when": "view == agent-tool.inventory", "group": "navigation@1" }
-      ]
-    }
+    "menus": {}
   },
   "main": "./out/extension.js",
   "l10n": "./l10n",
