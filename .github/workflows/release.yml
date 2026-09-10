@@ -20,7 +20,7 @@ name: Release
 # **署名・公証は必須**。シークレットが 1 つでも欠けていたら、ビルドもせずに最初のステップで止める。
 # 未署名／アドホックの DMG は Gatekeeper に「開発元を確認できません」と弾かれる配布物にしかならず、
 # 出回ってしまうと回収できないため、作らせない（Scripts/build-app.sh 側にも同じガードがある）。
-# セットアップ手順は docs/signing.md。
+# 必要な証明書・公証情報は下記 secrets 検査と各署名ステップを正とする。
 #
 # 署名 — 以下 4 つすべて必須:
 #   MACOS_CERT_P12         Developer ID Application 証明書（.p12）を base64 化した文字列
@@ -77,7 +77,7 @@ jobs:
           done
           if [ -n "$MISSING" ]; then
             echo "::error::署名・公証・公開に必要なシークレットが未設定です:$MISSING"
-            echo "::error::未署名の DMG は作りません。設定手順は docs/signing.md を参照してください。"
+            echo "::error::未署名の DMG は作りません。必要なシークレットはこの workflow の env を確認してください。"
             exit 1
           fi
           echo "✓ 署名・公証・公開のシークレットが揃っています"

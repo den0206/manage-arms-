@@ -19,22 +19,29 @@ AGENT TOOL                                    [＋ Add] [⟳ Refresh]
     ○ gemini     —        not found
 
 ▾ 📁 Current Project  (/path/to/project)
-  ▾ Skills
-      ✓ my-skill          [⬆] [⊘] [🗑]
-      ✗ disabled-skill          [⊘] [🗑]
-  ▾ Subagents
-      ✓ my-agent
-  ▾ MCP Servers
-      ● running-server    [●]
-      ○ stopped-server
+  ▾ Claude Code
+    ▾ Skills
+        ✓ my-skill        [⬆] [⊘] [🗑]
+    ▾ Subagents
+        ✓ my-agent
+    ▾ MCP Servers
+        ● running-server  [●]
+    ▾ Plugins
+        (none)
 
-▾ 👤 User Global  (~/.claude/)
-  ▾ Skills
-      ✓ global-skill  ⬆2  [⬆] [⊘] [🗑]
-  ▾ Subagents
-      (none)
-  ▾ MCP Servers
-      ● my-mcp        [●]
+▾ 👤 User Global
+  ▾ Claude Code
+    ▾ Skills
+        ✓ global-skill  ⬆2  [⬆] [⊘] [🗑]
+    ▾ Subagents
+        (none)
+    ▾ MCP Servers
+        ● my-mcp      [●]
+    ▾ Plugins
+        ✓ ponytail
+  ▸ Cursor
+  ▸ Codex
+  ▸ Gemini CLI
 ─────────────────────────────────────────────────────────────────
 ```
 
@@ -112,7 +119,7 @@ View を閉じるとポーリングを停止する。
 **方法 A: コマンドパレットから URL 貼り付け**
 
 ```
-1. Cmd+Shift+P → "Agent Tool: Add Tool"
+1. Cmd+Shift+P → "Agent Tool: Add Skill"
 2. Quick Input が開く
    "GitHub URL を貼り付けてください"
    > https://github.com/example/my-skill
@@ -169,7 +176,7 @@ Tree View 上部に候補カードを表示する:
    "my-skill の更新を適用しますか？"  [適用] [キャンセル]
 6. [適用] → 確認ダイアログ（→ セクション 5.2）
 7. update-apply コマンド実行
-8. 通知バー: "更新しました  [元に戻す]"
+8. 通知バー: "更新しました"
 ```
 
 ---
@@ -232,14 +239,14 @@ Tree View 上部に候補カードを表示する:
 
 | コマンド ID | タイトル（日本語） | 説明 |
 |---|---|---|
-| `agent-tool.addTool` | ツールを追加 | URL を入力してインストール |
+| `agent-tool.addTool` | Skill を追加 | URL を入力してインストール |
 | `agent-tool.refreshInventory` | 一覧を更新 | キャッシュを破棄して再走査 |
 | `agent-tool.rescanPath` | CLI を再検出 | scan-path を再実行 |
 | `agent-tool.toggleTool` | ツールを有効化/無効化 | 選択中アイテムをトグル |
 | `agent-tool.removeTool` | ツールを削除 | 選択中アイテムを削除（確認あり） |
 | `agent-tool.previewUpdate` | 更新をプレビュー | Diff Editor を開く |
 | `agent-tool.applyUpdate` | 更新を適用 | 選択中アイテムを更新（確認あり） |
-| `agent-tool.rollback` | 操作を元に戻す | 直前の削除・更新を取り消し |
+| `agent-tool.rollback` | 削除を元に戻す | 直前の削除を30秒以内に復元 |
 | `agent-tool.showMcpStatus` | MCP ステータスを表示 | 選択サーバーのプロセス情報 |
 | `agent-tool.migrateFromManageArms` | ManageArms から移行 | 手動で移行フローを開始 |
 | `agent-tool.openDocs` | ドキュメントを開く | GitHub リポジトリを開く |
@@ -296,6 +303,7 @@ Tree View 全体を無効化し、上部にバナーを表示する:
 | `NOT_IN_REGISTRY` | `<name> は他のツールが管理しています` |
 | `SYMLINK_OUTSIDE_STORE` | `<path> は Agent Tool が張った symlink ではありません` |
 | `LOCK_TIMEOUT` | `書き込みロックを取得できませんでした（他のウィンドウが操作中の可能性があります）` |
+| `LEGACY_APP_RUNNING` | `ManageArms を終了してから再実行してください` |
 
 ### 8.4 CLI 未検出（scan-path 失敗）
 
@@ -312,20 +320,27 @@ Tree View 全体を無効化し、上部にバナーを表示する:
 
 ## 9. ファイル監視によるリアルタイム更新
 
-TS 拡張は `vscode.workspace.createFileSystemWatcher` で以下のパターンを監視する。
+TS 拡張は `vscode.workspace.createFileSystemWatcher` と `RelativePattern` で以下を監視する。
 変更を検知したら `inventory` コマンドを再実行して Tree View を更新する（キャッシュを破棄）。
 
 | 監視パターン | 対象 |
 |---|---|
-| `~/.claude/commands/**` | User Global スキル |
+| `~/.agents/skills/**` | 管理対象の共有 Skill |
+| `~/.claude/skills/**` | Claude Skill |
+| `~/.cursor/skills/**` | Cursor Skill |
+| `~/.codex/skills/**` | Codex Skill |
 | `~/.claude/agents/**` | User Global サブエージェント |
-| `~/.claude/commands/.disabled/**` | 無効化されたスキル |
+| `~/.cursor/agents/**` | Cursor サブエージェント |
+| `<globalStorageUri>/disabled-skills/**` | 無効化された Skill 実体 |
+| `<globalStorageUri>/disabled-agents/**` | 無効化された Subagent 実体 |
 | `<workspaceFolder>/.claude/skills/**` | Current Project スキル |
 | `<workspaceFolder>/.claude/agents/**` | Current Project サブエージェント |
+| `<workspaceFolder>/.mcp.json` | Current Project MCP |
 | `~/.cursor/mcp.json` | Cursor MCP 設定 |
-| `~/.claude/claude_desktop_config.json` | Claude MCP 設定 |
+| `~/.claude.json` | Claude MCP・プロジェクト設定 |
+| `~/.gemini/settings.json` | Gemini MCP 設定 |
 
 **注意:**
 - `~/.claude/projects/` や `logs_*.sqlite` は監視対象に含めない（大容量・高頻度）
 - ファイル監視は `globPattern` を最小限に絞り、ホワイトリスト外を監視しない
-- View が非表示のときも監視は継続するが、UI 更新はバッジのみ（Tree の再描画はしない）
+- View が非表示になったら watcher、ポーリング、キャッシュを破棄する。再表示時に全件再走査する

@@ -81,6 +81,9 @@ AgentToolCore CLI がすべての書き込み・削除操作の前に通過さ�
 | `registry.json` の書き込み | AgentToolCore CLI のみ | TS 拡張は読み取り専用（globalStorageUri 経由） |
 | 一時ファイル | CLI プロセス内の `defer` で管理 | 残骸を残さない |
 
+全コマンドの `storagePath` は絶対パスとして検証する。破壊的操作では `selector.sourcePath` を
+直接信用せず、最新インベントリと照合して1件に確定してから WriteGuard を通す。
+
 ---
 
 ## 4. 未信頼ワークスペース
@@ -116,7 +119,7 @@ VS Code の `workspace.isTrusted` が `false` の場合:
 
 ## 7. CLI 出力のシークレットマスク
 
-`Exec` 経由の CLI 呼び出しで stdout / stderr をメモリ保持する際、以下のパターンを置換する:
+`Exec` 経由の CLI 呼び出しでは stdout / stderr を各2 MBに制限し、以下のパターンを置換する:
 
 ```
 --token <value>       → --token [REDACTED]
@@ -124,7 +127,8 @@ VS Code の `workspace.isTrusted` が `false` の場合:
 Bearer <value>        → Bearer [REDACTED]
 ```
 
-- マスク済み文字列のみ通知・ログに出す
+- raw 出力はプロセス終了直後に破棄し、マスク済みの要約だけを通知が閉じるまで保持する
+- 永続ログは作らない
 - 生の出力はプロセス終了時に破棄する（ディスクに書かない）
 
 ---
@@ -135,7 +139,8 @@ Bearer <value>        → Bearer [REDACTED]
 - `URLSession.ephemeral` を使う（HTTP キャッシュファイルを生やさない）
 - ダウンロード先は `FileManager.temporaryDirectory`（`defer` で削除）
 - zip 展開後、`assertValidName` を各エントリに適用してから移動する
-- 2 MB 超のレスポンスは打ち切る（`Exec` の既存上限と同様）
+- GitHub API 応答は2 MB、アーカイブは50 MB、展開後は200 MB、単一ファイルは20 MBで打ち切る
+- アーカイブはメモリへ全量保持せず、一時ファイルへ流す
 
 ---
 
@@ -162,8 +167,11 @@ Bearer <value>        → Bearer [REDACTED]
 
 ---
 
-## 10. Mac App 削除後の移行期間
+## 10. 既存 Mac App との競合防止
 
 - 旧 `registry.json`（`~/Library/Application Support/ManageArms/`）は **読み取りのみ**参照する
 - 移行完了まで旧ファイルへの書き込みは行わない
 - 移行後、旧ファイルの削除はユーザーに委ねる（自動削除しない）
+- Mac App の追加リリースや移行告知は行わない
+- `add` / `remove` / `toggle` / `update-apply` / `mcp-add` / `mcp-remove` / `migrate` の直前に ManageArms の実行中プロセスを確認する
+- 実行中なら `LEGACY_APP_RUNNING` で拒否し、終了後の再実行を求める

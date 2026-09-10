@@ -28,7 +28,7 @@ if [ "${CONFIG}" = "release" ] && [ "${SIGN_IDENTITY}" = "-" ] && [ "${ALLOW_ADH
     echo "error: リリースビルドには Developer ID 署名が必要です。" >&2
     echo "  SIGN_IDENTITY=\"Developer ID Application: 名前 (TEAMID)\" ./Scripts/build-app.sh" >&2
     echo "  使える ID の一覧: security find-identity -v -p codesigning" >&2
-    echo "  セットアップ手順: docs/signing.md" >&2
+    echo "  必要な署名設定は .github/workflows/release.yml を参照してください" >&2
     echo "  署名せず動作確認だけしたい場合は ALLOW_ADHOC=1 を付けてください（配布不可）。" >&2
     exit 1
 fi
