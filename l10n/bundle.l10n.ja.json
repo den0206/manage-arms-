@@ -1,0 +1,7 @@
+{
+  "extension.description": "AIエージェントのSkill、Subagent、MCPサーバー、PluginをCursorから管理します。",
+  "command.toggleTool": "ツールを有効化または無効化",
+  "command.addSkill": "GitHubからSkillを追加",
+  "command.removeTool": "ツールを削除",
+  "command.addMcp": "MCPサーバーを追加"
+}

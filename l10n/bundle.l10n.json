@@ -1,0 +1,7 @@
+{
+  "extension.description": "Manage AI agent skills, subagents, MCP servers, and plugins from Cursor.",
+  "command.toggleTool": "Enable or Disable Tool",
+  "command.addSkill": "Add Skill from GitHub",
+  "command.removeTool": "Remove Tool",
+  "command.addMcp": "Add MCP Server"
+}
