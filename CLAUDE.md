@@ -1,176 +1,115 @@
-# CLAUDE.md — ManageArms 作業ガイド
+# CLAUDE.md — Agent Tool 作業ガイド
 
-AI コーディングエージェントの周辺リソース（MCP / Skills / Subagents / Plugins）を
-横断管理する macOS アプリ。Swift 6 / SwiftUI / **依存ライブラリゼロ**。
+AI エージェントの周辺リソース（MCP / Skills / Subagents / Plugins）を管理する
+Cursor 拡張 **Agent Tool** へ、ManageArms macOS アプリから段階的に移行する。
+Swift 6 / TypeScript。Swift Core は外部依存ゼロを維持する。
 
-このファイルは「作業の進め方」を定める。**機能の詳細設計は [DESIGN.md](DESIGN.md) が正**。
-設計と矛盾する実装をしそうになったら、まず DESIGN.md の該当章を読むこと。
+## 設計の正本
 
-| ファイル | 内容 |
+| ファイル | 役割 |
 |---|---|
-| `DESIGN.md` | 設計の正本。中核の判断（3 章）・データモデル・スコープ・テスト戦略・実測データ |
-| `AGENTS.md` | Agent向けの入口。内容はこの `CLAUDE.md` を参照し、ルールを複製しない |
-| `README.md` / `README.ja.md` | 利用者・新規参加者向けの入口（英語が既定、日本語は対訳）。**片方だけ直さない** |
-| `.claude/commands/` | `/commit-by-feature`・`/review-for-merge`（このリポジトリ用のスラッシュコマンド） |
-| `docs/signing.md` | Developer ID 署名・公証のセットアップ手順と罠（人間が 1 回だけやる作業） |
-| `CHANGELOG.md` | 公開 Release 本文の出所。**英語**・Keep a Changelog |
+| `docs/product-requirements.md` | 移行後の対象機能・完了条件 |
+| `docs/vscode-cursor-extension-design-questions.md` | 設計決定と理由 |
+| `docs/agent-tool-cli-api.md` | TypeScript 拡張と Swift CLI の境界 |
+| `docs/agent-tool-data-spec.md` | ストレージ・ロック・移行 |
+| `docs/agent-tool-ui-design.md` | Tree View と操作フロー |
+| `docs/agent-tool-security.md` | WriteGuard・権限・信頼境界 |
+| `docs/agent-tool-test-plan.md` | Swift / TypeScript / Cursor の検証 |
+| `docs/agent-tool-release-plan.md` | Phase 0 の改名・撤去と開発・配布順序 |
+| `DESIGN.md` | Phase 0 で削除する現行 Mac App の実装確認用 |
+
+Agent Tool の判断では `docs/agent-tool-*.md` を優先する。仕様を複製せず、該当する正本を更新する。
+
+## 移行中の境界
+
+- 製品・拡張名は **Agent Tool**、拡張 ID は `agent-tool`。
+- Phase 0 で既存リポジトリとローカルディレクトリを `agent-tool`、Coreを `AgentToolCore` へ変更する。
+- Mac App、旧CHANGELOG、配布・署名・公証資産はmainから削除する。旧データの移行元パスだけ残す。
+- TypeScript はルートの `src/` と `test/` に置き、`Scripts/` は `scripts/` へ変更する。
+- Swift CLI は1コマンド1プロセス。プロセスをまたぐ状態を CLI メモリに置かない。
+- TypeScript は Cursor API と表示、Swift CLI は走査・判定・書き込み・WriteGuard を担当する。
+- TypeScript から Agent 設定や管理リソースを直接書かない。
+- ManageArms が実行中なら破壊的CLI操作を拒否する。
 
 ## 完了の定義
 
-実装したら毎回これを通す。`main` 向け PR では `.github/workflows/ci.yml` が同じものを回す。
+Phase 0 完了まではSwift変更時に:
 
 ```bash
 swift build && swift test
-./Scripts/check-invariants.sh                                              # 不変条件（翻訳の網羅も含む）
+./Scripts/check-invariants.sh
 ./Scripts/release-changelog.sh --check && ./Scripts/test-release-changelog.sh
-CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh                            # .app が組めること
 ```
 
-**CI に別のロジックを持たせない。** CI は上と同じスクリプトを呼ぶだけにする。
-片方だけ直すと「手元では通るのに CI で落ちる／その逆」が起きる。
+Phase 0 後は `scripts/` の同等コマンドを使う。`package.json` 追加後はNode 20で
+テスト・型検査・VSIX組み立て・固定Cursor StableのE2Eも通す。
+CI はローカルと同じスクリプトを呼び、別ロジックを持たせない。
 
 ## 絶対に守る不変条件
 
-`Scripts/check-invariants.sh` が機械的に検査する。載せるのは
-**「破れると実ユーザーのデータが壊れる」もの**だけ。網羅性より、
-赤くなったときに必ず本物のバグである状態を優先する。
+1. Agent 設定の書き込みは Swift Core の専用経路だけに置く。
+   `registry.json` は `Registry`、Cursor の `mcp.json` は `MCPScanner` が扱う。
+2. 削除・移動・symlink 作成は `WriteGuard` を通す。作成前に `assertValidName`、
+   親 symlink は `assertSafeCreation` で検証する。
+3. 走査対象は `Source` のホワイトリストだけにする。ホームやワークスペース全体を再帰走査しない。
+4. 壊れた registry の上で書き込みを始めない。read-modify-write はプロセス間ロック内で行い、
+   registry はアトミックに保存する。
+5. 未信頼ワークスペースでは一覧だけを許可し、Remote 環境では CLI を起動しない。
+6. UI 文言は `l10n/` の英語・日本語を同時に更新する。
 
-1. **設定ファイルの書き込みは 2 か所だけ** — `Registry`（自分の `registry.json`）/
-   `MCPScanner`（`~/.cursor/mcp.json`）。
-   ここが増えると「書き込みは各 CLI に委譲する」という中核の判断（DESIGN 3.1）が崩れ、
-   実行中の Claude と競合してユーザーの全状態を壊しうる。
-2. **削除・移動・symlink 作成は `WriteGuard` を通る経路だけ** — Skill/Subagent の
-   共通 lifecycle を持つ `SkillManager` と `Updater` は必ず `WriteGuard.assertMutable` を呼ぶ。
-   `Fetcher` / `Installer` は一時ディレクトリのみ、`InstallLocationGuard` は
-   直前に自分が `/Applications` へ作ったバンドルのみ。
-   既存ユーザーToolの削除は `WriteGuard.assertUserArtifact` で既知ルート直下を検証する。
-   新しいファイルで無防備に `removeItem` を書くと `~/.claude` や `~/.agents` を消しうる。
-2b. **作成もガードを通る** — 取得物が名乗った名前（frontmatter の `name`）は
-   こちらの管理下に無い。`../` を含む名前がそのままパス要素になると管理ルートの外へ書ける。
-   `WriteGuard.assertValidName` を `Fetcher` / `Installer` / `ManagedLifecycle` で通す。
-3. **UI に出る日本語リテラルが `Localizable.strings` で引けること** —
-   ja / en のキー集合の一致だけでは「**両方に無い**」文言を見逃す
-   （`String` を返すプロパティは SwiftUI が自動で引かない）。
-   `Scripts/check-localization.py` が Sources 側から検査する。
-4. **走査対象はホワイトリスト**（DESIGN 3.4）。除外リスト方式にしない。
-   `Source` の列挙に無いパスは存在しても読まない。`projects` / `sessions` は
-   使用実績の集計からのみ、`usageLog` ケース経由で読む。
-5. **常駐中に抱えない・キャッシュしない**（DESIGN 3.5 / 15）。メニューバー常駐は既定 ON
-   だが、ウィンドウを閉じたら一覧はメモリから捨てる（`AppModel.releaseForBackground`）。
-   設定はアクティブ化時に再走査し、ウィンドウ表示中だけ起動状態を3秒ごとに取得する。
-   永続ファイルは `registry.json` 1 つだけ。
-   **唯一の例外が `CLIScan`** — DESIGN 3.5 が求める CLI 呼び出しの間引きで、
-   CLI に訊かないと分からないことだけを 3 分持ち、閉じたら捨てる。
+不変条件スクリプトの許可リストを広げる場合は、ユーザーデータへ到達しない理由を
+スクリプト内に記す。
 
-## ストレージ・メモリの規律（徹底する）
+## ストレージ・メモリ管理
 
-**リソース管理アプリが自分でディスクを汚したら本末転倒。** DESIGN 9 章が正本。
-目標値（`footprint -p` の phys_footprint で見る）: 常駐時 65 MB ／表示中 < 80 MB ／
-アプリ自身のディスク使用 < 5 MB ／起動〜一覧表示 < 300 ms。
+リソース管理ツール自身がディスクとメモリを増やさないことを機能要件として扱う。
 
-- **無駄なファイルを作らない。** 迷ったら作らない。恒久ファイルを増やす前に、
-  「毎回計算し直せないか」「一時領域で完結しないか」を先に潰す。
-  永続化してよいのは `registry.json` **1 つだけ**（DESIGN 4.1）。
-  ログファイル・スナップショット・「あとで使うかもしれない」中間生成物は置かない。
-- **キャッシュディレクトリを持たない。** 一時展開は `FileManager.temporaryDirectory` で
-  完結させ、OS に回収させる。自前の掃除機能を持たなくて済む状態にするのが、
-  最も確実なストレージ管理。
-- **`URLSession` は必ず `.ephemeral`。** 既定設定のままだと
-  `~/Library/Caches/<bundle-id>/Cache.db` が勝手に生える。HTTP キャッシュは
-  `registry.json` の ETag で自前管理しており、二重に持つ理由が無い。
-- **作ったものは同じ関数の中で片付ける。** ダウンロード・zip 展開・staging は
-  `defer` で必ず削除する。成功・失敗・キャンセルのどの経路でも残さない。
-  中途半端な残骸を後から掃除する機能を足すのは、作らない設計に負けている。
-- **全部読まない。** 一覧に要るのは frontmatter だけなので**先頭 4 KB** しか読まない
-  （`FileHandle.read(upToCount:)`）。本文は詳細を開いたときに読み、閉じたら捨てる。
-  `~/.claude/projects` は 129 MB、`logs_*.sqlite` は 44 MB ある — 素朴に走査すると UI が固まる。
-- **メモリに溜めない。** 大きい取得物は `URLSession.download` でファイルへ流す
-  （`Data` で全体を保持しない）。スキャン結果はキャッシュせず、
-  アクティブ化のたびに読み直して捨てる（不変条件 5）。
-- **`registry.json` はアトミックに書く。** 唯一の永続ファイルなので、
-  書き込み中のクラッシュで壊れると全リソースの出所情報が飛ぶ
-  （`Data.write(to:options:.atomic)`）。
+- 可変メタデータは `<globalStorageUri>/registry.json` だけ。`registry.lock` は内容を持たないロック inode。
+- Skill / Subagent 実体は管理対象データであり、キャッシュではない。既存配置を再利用し、コピーを重複させない。
+- ログ、診断履歴、Undo スナップショット、インベントリ、差分を永続化しない。
+- CLI 由来の180秒キャッシュは拡張のメモリだけに置き、手動更新・書き込み直後・View 非表示で破棄する。
+- MCP の3秒ポーリングとファイル監視は対象 View の表示中だけ動かし、再表示時に再走査する。
+- CLI の stdout / stderr は各2 MBで打ち切り、マスク済みの直近分だけをメモリ保持する。
+- HTTP は `URLSessionConfiguration.ephemeral` を使い、アーカイブをファイルへ流す。
+- ダウンロード50 MB、展開後200 MB、単一ファイル20 MB、CLI出力2 MBの上限を維持する。
+- 一時ダウンロード・展開・staging は OS の一時領域に置き、成功・失敗・キャンセルの全経路で削除する。
+- 一覧では frontmatter の先頭4 KBだけを読む。本文は詳細表示中だけ保持し、閉じたら破棄する。
+- Tree View は表示に必要な DTO だけを保持し、Swift の Inventory や本文を複製して常駐させない。
+- 目標は一覧表示300 ms未満（メモリキャッシュ時）、常駐増分65 MB未満、VSIX 20 MB未満。
 
-同じ規律をリポジトリにも適用する。**スクリプト・ドキュメント・設定ファイルも、
-役割が重なるなら増やさず既存に足す。** 使われなくなったものは消す。
+上限を緩めるのは、実測で不足が確認され、新しい上限と回収経路をテストできる場合だけにする。
 
-## 設計上のパターン
+## 実装パターン
 
-- **外部依存は `Environment`（構造体 + クロージャ）で注入する。** protocol を切らない
-  （DESIGN 3.6 — 実装が 1 つしか無いものに interface を作らない）。
-  テストは `Environment.test(home:)` で偽のホームを指し、**実ユーザーの `~/.claude` に
-  一切到達しない**。
-- **エージェント抽象に protocol を切らない。** `enum Agent` と `switch` で足りる。
-- OS を触る処理は薄く端に寄せ、**判定そのものは純粋関数**にしてテストする
-  （`InstallLocationClassifier` / `PasteInput.classify` / `WriteGuard.isInside` が実例）。
-- **握り潰さない。** 失敗は `AppModel.errorMessage` に出して UI に見せる。
-- **SourceKit の赤線は当てにしない。** 真偽は必ず `swift build` / `swift test` で判定する
-  （モジュール再コンパイル前の diagnostics は古いことが多い）。
+- 外部依存は `Environment`（構造体 + クロージャ）で注入する。実装が1つの protocol を作らない。
+- Agent は `enum Agent` と `switch` を使う。
+- OS 操作は端へ寄せ、判定を純粋関数にして Swift Testing で検証する。
+- CLI 入力は JSON の構造化フィールドで受け、区切り文字列から復元しない。
+- CLI の失敗は安定したエラーコードとマスク済みメッセージで返す。
+- Swift / Node.js / VS Code API の標準機能を優先し、必要になるまで依存を増やさない。
 
-## ローカライズ
+## テスト
 
-- `Localization/{ja,en}.lproj/Localizable.strings`。`build-app.sh` が `.app` に同梱する。
-- **キーは日本語文字列そのもの。** `Text("…")` / `Button("…")` などのリテラルは
-  SwiftUI が `LocalizedStringKey` として自動で引く。`ja` は恒等写像、`en` を翻訳する。
-- **`String` を返す計算プロパティは自動で引かれない。** `String(localized: "…")` を使う
-  （`Screen.title` / `helpText` / `Filter.title` が実例）。
-- 引数が 2 つ以上ある文言は、**英語側を positional**（`%1$@` / `%2$lld`）にする。
-  語順が日本語と逆転するため、非 positional だと引数が入れ替わる。
-- 翻訳対象でないもの（差分の本文など）は `Text(verbatim:)` にする。
-- 追加したら必ず両ファイルに入れる。検査は `./Scripts/check-invariants.sh`。
+- Swift は `Environment.test(home:)` を使い、実ユーザーのホームへ到達させない。
+- 走査ホワイトリスト、WriteGuard、ロック、移行衝突、出力上限を優先する。
+- TypeScript は CLI 境界、View のライフサイクル、Remote / Workspace Trust を検証する。
+- Cursor E2E は固定URLとSHA-256のCursor Stable実行ファイルを明示して、全PRで起動する。
+- UI スナップショットやモック自体を検証するテストは書かない。
+- テスト件数を仕様に固定しない。完了条件は全テスト成功とする。
 
-## テスト方針
+## ローカライズ・コミット
 
-- **Swift Testing**（`import Testing` / `@Test` / `#expect`）。
-- **純粋関数を最も厚く書く**（DESIGN 10.1）。走査範囲の検査（10.2）は設計の生命線。
-- ファイルシステム操作は**偽ホーム**で実行する（10.3）。CLI 呼び出しはフェイク（10.4）。
-- 実 CLI・実ネットワークを使う確認は `MANUAL=1 swift test`（`_ManualCheck.swift`）。
-  通常の `swift test` では無効化されている。
-- **書かないもの**（10.6）: UI のスナップショット、モックを検証するだけのテスト。
+- 拡張の英語・日本語文言は `l10n/` で管理する。パス・コマンド・差分は verbatim で表示する。
+- 日本語の Conventional Commits を使う。コミットと push はユーザーが求めた場合だけ行う。
+- 利用者に見える変更は `CHANGELOG.md` の `[Unreleased]` に英語で追加する。
+- README を変える場合は英語版と日本語版を同時に更新する。
+- 役割が重なる文書・スクリプト・設定を増やさない。
+- 実装後は `/ponytail:ponytail-review` で過剰実装を確認する。
 
-## 自動テストできないもの（実機で確認する）
+## 配布・依存管理
 
-- **`.app` を Finder から起動したときの CLI 解決。** GUI の `PATH` はターミナルと違う
-  （DESIGN 3.7）。`swift run` では再現しない
-- **メニューバーのアイコン。** `MenuBarExtra` のラベルはまるごとテンプレートとして
-  描かれるため、色を出すには非テンプレート画像に差し替える必要がある（実機で確認済み）。
-  ダークモードでの見え方は実機でしか分からない
-- **ウィンドウを閉じた常駐状態で検知が続くか**（App Nap がタイマーを間引かないか）
-- symlink を張った瞬間に、稼働中の Claude / Cursor の一覧へ反映されるか
-- DMG のインストール導線、設置場所ガードの表示と移動・再起動
-- 公証済みビルドの初回起動が無警告か（`spctl -a -vv <app>` が `accepted`）
-
-## コミット規約
-
-- **日本語・Conventional Commits**。実績: `feat(scope):` `fix:` `docs:` `test:` `ci:` `chore:`。
-  例: `feat(build): .app バンドルの組み立てと署名スクリプトを追加`
-- **機能単位で分割**してコミットする。各コミットは `swift build` が通る状態に保つ。
-- コミット・push はユーザーが求めたときだけ行う。
-- **利用者に見える変更をしたら `CHANGELOG.md` の `[Unreleased]` に 1 項目足す。**
-  **英語**で書く（公開 Release の本文になる。コミットメッセージは日本語のまま）。
-  節見出しは `Added` / `Changed` / `Deprecated` / `Removed` / `Fixed` / `Security` のみ。
-  **版見出しへの切り出しはリリース時に CI がやるので手で移さない。**
-- 仕様やテスト件数が変わったら `DESIGN.md` / `README.md` / `README.ja.md` も同時に更新する。
-
-## CI / リリース
-
-- **PR ゲート**: `main` 向け PR で `.github/workflows/ci.yml` が「完了の定義」を実行する。
-- **リリース**: `main` から `release/Ver_X.Y.Z` を切って push → `release.yml` が
-  テスト → 署名ビルド → `.app` 公証 → DMG → DMG 署名・公証 → Gatekeeper 検証 →
-  **公開リポジトリへ Release 作成** → ソースへ同じタグを付与 → `main` へ CHANGELOG 反映。
-- **配布は `den0206/manage-arms-releases`（公開）、ソースはこのリポジトリ（Private）**
-  （DESIGN 13.8）。利用者向けの README・CHANGELOG・デモ・Issue テンプレートは配布側にあり、
-  Release の公開を受けて配布側の `sync-release-docs.yml` が最新版表示を追従させる。
-  **こちらの README は開発者向け。** 利用者向けの文言を足すなら配布側を直す。
-- **署名・公証・公開は必須。** シークレット（署名 4 + 公証 3 + `RELEASES_TOKEN`）が
-  1 つでも欠けていれば checkout より前に落ちる。
-  未署名の DMG は出回ると回収できないので作らせない。手順は `docs/signing.md`。
-- **公開済みリリースは不変。** 同じタグが既にあれば上書きせず `Ver_X.Y.Z+N` に採番する。
-  タグの権威は publish 先の公開リポジトリ（ソース側のタグは記録用の写し）。
-- サードパーティ Action は使わない（許可は公式 `actions/checkout` のみ）。
-
-## 過剰実装のレビュー
-
-実装が一段落したら `/ponytail:ponytail-review` を回す（差分を過剰実装の観点だけで見て、
-削除・stdlib 置換の候補を出す）。**採用しない指摘**: 上記の不変条件・入力検証・
-エラー処理・アクセシビリティを削るもの。リポジトリ全体を見直すときは `/ponytail:ponytail-audit`。
+- Secondary Simulator と同じくNode 20、npm、`package-lock.json`、Node標準 `node:test`を使う。
+- 依存は必要最小限の正確な版に固定し、`ignore-scripts=true`、第三者Actionのcommit SHA固定を守る。
+- Publisherは`yuuki-sakai`。alpha / betaはGitHub Releases、安定版は同じVSIXをOpen VSXからGitHubの順に公開する。
+- Universal CLIは署名・公証しない。最初の公開前と配布経路変更時に、配布VSIXからの初回起動を実機確認する。
+- 定期canaryは設けない。リリース前にRSSとAgent Tool自身の保存容量を計測する。

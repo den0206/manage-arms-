@@ -8,7 +8,7 @@ AI コーディングエージェント（Claude Code / Cursor / Codex / Gemini 
 - **配布**: DMG の直配布（App Sandbox 非対応のため App Store 不可）。公開先は
   [den0206/manage-arms-releases](https://github.com/den0206/manage-arms-releases)。13 章
 - **状態**: **v1〜v5 実装済み**（Skills / Subagents / Plugins / 使用実績 / MCP。v4 の権限は撤去）、
-  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト 375 件 / 52 スイート
+  および **配布基盤**（`.app` 組み立て / 署名・公証 / DMG / CI）。テスト件数は固定しない
   （`swift test` の実測値。`arguments:` 付きは実行時に分かれるので `@Test` の定義数とは一致しない。
   `MANUAL=1` の実 CLI 確認は通常の `swift test` では無効）
 - **実装**: SPM パッケージ。`swift test` / `CONFIG=debug UNIVERSAL=0 ./Scripts/build-app.sh`
@@ -1752,7 +1752,7 @@ CI の `runs-on` の 3 か所を必ず揃える。ズレると「手元では通
 - **DMG を署名しないと** `spctl -a -t open --context context:primary-signature` が
   `no usable signature` になる
 
-手順と罠（中間証明書が無いと `0 valid identities` になる件を含む）は `docs/signing.md`。
+Mac App 廃止まで必要な署名・公証手順は `.github/workflows/release.yml` に集約する。
 
 ### 13.5 設置場所ガード
 

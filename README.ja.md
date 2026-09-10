@@ -39,7 +39,7 @@ DMG から直接起動した場合は、起動時にアプリケーションフ�
 Swift Package として構成されている（`.xcodeproj` は無い。Xcode で `Package.swift` を直接開ける）。
 
 ```bash
-swift test                  # 単体テスト（375 件 / 52 スイート。MANUAL=1 で実CLI確認が加わる）
+swift test                  # 全単体テスト（MANUAL=1 で実CLI確認が加わる）
 swift build                 # コンパイル確認
 
 # 配布形態は「手組みの .app バンドル」。build-app.sh が組み立て + 署名まで行う。
@@ -76,7 +76,7 @@ Sources/
 Localization/           ja / en。キーは日本語文字列そのもの
 Resources/              Info.plist / entitlements / アイコン
 Scripts/                .app 組み立て・DMG・CHANGELOG 切り出し・不変条件の検査
-docs/signing.md         Developer ID 署名と公証のセットアップ
+docs/                   Agent Tool への移行・実装仕様
 ```
 
 ## セキュリティ
@@ -101,7 +101,7 @@ docs/signing.md         Developer ID 署名と公証のセットアップ
 ## リリース
 
 `main` から `release/Ver_X.Y.Z` ブランチを切って push すると、CI がテスト → 署名ビルド →
-公証 → DMG → GitHub Release までを行う。手順とセットアップは [docs/signing.md](docs/signing.md)。
+公証 → DMG → GitHub Release までを行う。Mac App 廃止まで必要な手順は release workflow 内に残す。
 
 **Release の公開先は別の公開リポジトリ**
 [den0206/manage-arms-releases](https://github.com/den0206/manage-arms-releases)。
