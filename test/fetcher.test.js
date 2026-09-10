@@ -1,6 +1,7 @@
 const { strict: assert } = require("node:assert");
 const { existsSync, readFileSync } = require("node:fs");
 const { join } = require("node:path");
+const { tmpdir } = require("node:os");
 const { test } = require("node:test");
 const { extract, identify, safeJoin, singleTopLevel, stage } = require("../out/fetcher.js");
 const { archiveUrl, parseUrl } = require("../out/github.js");
@@ -40,7 +41,7 @@ test("zipball の URL を組み立てる", () => {
 // --- Zip Slip ---
 
 test("展開先の外へ出るパスを弾く", () => {
-  const root = "/tmp/unpack";
+  const root = join(tmpdir(), "unpack");
   assert.equal(safeJoin(root, "../evil"), null);
   assert.equal(safeJoin(root, "a/../../evil"), null);
   assert.equal(safeJoin(root, "/etc/passwd"), join(root, "etc/passwd"));  // 先頭の / は落ちる
