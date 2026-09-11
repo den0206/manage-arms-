@@ -373,10 +373,16 @@ export async function pluginRemove(params: {
 
 /** Claude は Marketplace を先に登録する。Codex も同じ二段階だが `add` を使う。 */
 export function pluginAddCommands(agent: "claude" | "codex", name: string, url?: string): string[][] {
+  const source = url === undefined ? undefined : parseUrl(url);
+  const marketplaceUrl = source?.subdir === undefined ? url
+    : `https://github.com/${source.repo}`;
+  const selector = source?.subdir === undefined || name.includes("@") ? name
+    : `${name}@${basename(source.repo)}`;
   const install = agent === "claude"
-    ? ["claude", "plugin", "install", name, "-s", "user"]
-    : ["codex", "plugin", "add", name];
-  return url === undefined ? [install] : [[agent, "plugin", "marketplace", "add", url], install];
+    ? ["claude", "plugin", "install", selector, "-s", "user"]
+    : ["codex", "plugin", "add", selector];
+  return marketplaceUrl === undefined
+    ? [install] : [[agent, "plugin", "marketplace", "add", marketplaceUrl], install];
 }
 
 /** Codex は scope を受けない。Claude は一覧が返した scope をそのまま使う。 */

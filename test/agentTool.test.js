@@ -167,6 +167,14 @@ test("Plugin は marketplace を登録してから追加し、削除時は登録
     ["claude", "plugin", "remove", "tool@market", "-s", "local"]);
 });
 
+test("GitHub サブディレクトリの Plugin は Marketplace のルートを登録する", () => {
+  assert.deepEqual(agentTool.pluginAddCommands("claude", "context7",
+    "https://github.com/anthropics/claude-plugins-official/tree/main/external_plugins/context7"), [
+    ["claude", "plugin", "marketplace", "add", "https://github.com/anthropics/claude-plugins-official"],
+    ["claude", "plugin", "install", "context7@claude-plugins-official", "-s", "user"],
+  ]);
+});
+
 /** Windows は `.cmd` のために shell 実行が要るが、Node は引数をクォートしない。 */
 test("Windows で shell 構文を含むコマンドは実行しない", () => {
   const { hasShellSyntax } = require("../out/exec.js");

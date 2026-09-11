@@ -39,6 +39,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - The plugin list no longer mixes in project-scoped plugins that belong to other projects; only the plugins of the project being viewed are shown.
 - Scan failures in the Other projects list are reported instead of showing what looks like an empty project.
 - Plugin installation now registers a supplied Marketplace before installing it; Claude no longer receives its unsupported `--marketplace` option. Plugin installation and removal show their commands for confirmation, and removal preserves the installed scope.
+- GitHub subdirectory Plugins now register the repository Marketplace root and install with its `plugin@marketplace` selector.
 - Removing or disabling a project-scoped Skill or Subagent no longer deletes the user-scoped item of the same name; project files are left to the project.
 - Removing a project or local MCP server now targets that registration instead of the user-wide server of the same name.
 - Commands containing shell syntax are refused on Windows, where arguments would otherwise be interpreted by the command processor.
