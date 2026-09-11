@@ -4,7 +4,7 @@ const { join } = require("node:path");
 const { test } = require("node:test");
 const agentTool = require("../out/agentTool.js");
 const { hasUpdate, inventory } = require("../out/inventory.js");
-const { addCommand, removeCommand, editCursor, validate } = require("../out/mcpScanner.js");
+const { CONFIG_SIZE_LIMIT, addCommand, readJsonc, removeCommand, editCursor, validate } = require("../out/mcpScanner.js");
 const { parseAll } = require("../out/mcpServer.js");
 const { fakeEnv, makeDir, writeFileIn } = require("./helpers.js");
 
@@ -118,6 +118,13 @@ test("書き込みは一時ファイルを残さない", () => {
   makeDir(env.home);
   editCursor(env, servers => { servers.a = { command: "x" }; });
   assert.equal(existsSync(join(env.home, ".cursor", "mcp.json.tmp")), false);
+});
+
+test("大きすぎる設定はメモリに読まない", () => {
+  const env = fakeEnv();
+  const path = writeFileIn(join(env.home, ".cursor", "mcp.json"), Buffer.alloc(CONFIG_SIZE_LIMIT + 1, 0x20));
+  assert.throws(() => readJsonc(path), code("OPERATION_FAILED"));
+  assert.throws(() => editCursor(env, () => {}), code("OPERATION_FAILED"));
 });
 
 /**

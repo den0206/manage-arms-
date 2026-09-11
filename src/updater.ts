@@ -18,15 +18,34 @@ export type UpdateDiff = {
 
 /** 差分に載せる 1 ファイルの上限。これを超えるものは要約だけ出す。 */
 export const DIFF_TEXT_LIMIT = 256 * 1024;
+/** 差分画面へ一度に渡す本文の総量。1 ファイルの上限だけでは常駐メモリを守れない。 */
+export const DIFF_TOTAL_LIMIT = 2 * 1024 * 1024;
+export const DIFF_FILE_LIMIT = 10_000;
+export const API_RESPONSE_LIMIT = 2 * 1024 * 1024;
 
 export type Http = (url: string, headers: Record<string, string>) =>
   Promise<{ status: number; body: string; headers: Record<string, string> }>;
+
+export async function readLimitedText(body: AsyncIterable<Uint8Array> | null,
+                                      limit: number): Promise<string> {
+  if (body === null) throw new AgentToolError("FETCH_FAILED", "GitHub returned an empty response");
+  let size = 0;
+  let text = "";
+  const decoder = new TextDecoder();
+  for await (const chunk of body) {
+    size += chunk.byteLength;
+    if (size > limit) throw new AgentToolError("FETCH_FAILED", "GitHub response is too large to read");
+    text += decoder.decode(chunk, { stream: true });
+  }
+  return text + decoder.decode();
+}
 
 const defaultHttp: Http = async (url, headers) => {
   const response = await fetch(url, { headers, cache: "no-store" });
   return {
     status: response.status,
-    body: await response.text(),
+    body: await readLimitedText(response.body as unknown as AsyncIterable<Uint8Array> | null,
+      API_RESPONSE_LIMIT),
     headers: Object.fromEntries(response.headers),
   };
 };
@@ -97,19 +116,26 @@ const destinationFor = (entry: Entry, env: Env): string => {
 };
 
 /** 実体の相対パスを集める。ディレクトリでなければそれ自身だけ。 */
-function files(root: string): string[] {
+function files(root: string): { paths: string[]; truncated: boolean } {
   try {
-    if (!statSync(root).isDirectory()) return [""];
+    if (!statSync(root).isDirectory()) return { paths: [""], truncated: false };
   } catch {
-    return [];
+    return { paths: [], truncated: false };
   }
-  const walk = (dir: string): string[] =>
-    readdirSync(dir, { withFileTypes: true }).flatMap(item => {
+  const paths: string[] = [];
+  let truncated = false;
+  const walk = (dir: string): void => {
+    for (const item of readdirSync(dir, { withFileTypes: true })
+      .sort((a, b) => a.name < b.name ? -1 : 1)) {
+      if (item.isSymbolicLink()) continue;
+      if (paths.length >= DIFF_FILE_LIMIT) { truncated = true; return; }
       const path = join(dir, item.name);
-      if (item.isSymbolicLink()) return [];
-      return item.isDirectory() ? walk(path) : [relative(root, path).split(sep).join("/")];
-    });
-  return walk(root).sort();
+      if (item.isDirectory()) walk(path);
+      else paths.push(relative(root, path).split(sep).join("/"));
+    }
+  };
+  walk(root);
+  return { paths, truncated };
 }
 
 const readText = (path: string): string => {
@@ -121,6 +147,34 @@ const readText = (path: string): string => {
     return "";
   }
 };
+
+export function diffFiles(current: string, candidate: string, name: string): UpdateDiff["files"] {
+  const beforeFiles = files(current);
+  const afterFiles = files(candidate);
+  const paths = [...new Set([...beforeFiles.paths, ...afterFiles.paths])].sort();
+  const result: UpdateDiff["files"] = [];
+  let total = 0;
+  let omitted = 0;
+  const at = (root: string, path: string): string => path === "" ? root : join(root, path);
+  for (const path of paths) {
+    const before = readText(at(current, path));
+    const after = readText(at(candidate, path));
+    if (before === after) continue;
+    const size = Buffer.byteLength(before) + Buffer.byteLength(after);
+    if (total + size > DIFF_TOTAL_LIMIT) { omitted += 1; continue; }
+    total += size;
+    result.push({ path: path === "" ? name : path, before, after });
+  }
+  const reasons = [
+    ...(omitted > 0 ? [`${omitted} file(s) did not fit in the 2 MB diff budget`] : []),
+    ...(beforeFiles.truncated || afterFiles.truncated
+      ? ["more than 10,000 files; the rest were not scanned"] : []),
+  ];
+  if (reasons.length > 0) result.push({
+    path: "[additional changes omitted]", before: "", after: reasons.join("\n"),
+  });
+  return result;
+}
 
 /**
  * 更新差分。返した本文は Diff Editor へ渡し、Editor を閉じたら破棄する。
@@ -134,18 +188,10 @@ export async function updatePreview(params: {
   const { staging, candidate, sha } = await stageEntry(entry, params.registry, params);
   try {
     const current = destinationFor(entry, params.env);
-    const paths = [...new Set([...files(current), ...files(candidate.localPath)])].sort();
-    const at = (root: string, path: string): string => path === "" ? root : join(root, path);
     return {
       currentSha: entry.sha ?? null,
       latestSha: sha,
-      files: paths
-        .map(path => ({
-          path: path === "" ? entry.name : path,
-          before: readText(at(current, path)),
-          after: readText(at(candidate.localPath, path)),
-        }))
-        .filter(file => file.before !== file.after),
+      files: diffFiles(current, candidate.localPath, entry.name),
     };
   } finally {
     discard(staging);

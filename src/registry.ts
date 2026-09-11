@@ -5,6 +5,7 @@ import { Env, registryFile } from "./env";
 import { AgentToolError } from "./errors";
 
 export const SCHEMA_VERSION = "1";
+export const REGISTRY_SIZE_LIMIT = 2 * 1024 * 1024;
 
 export type Entry = {
   name: string;
@@ -107,6 +108,9 @@ export function load(env: Env): Registry {
 export function read(env: Env): Registry {
   let raw: string;
   try {
+    if (statSync(registryFile(env)).size > REGISTRY_SIZE_LIMIT) {
+      throw new AgentToolError("OPERATION_FAILED", "registry.json is too large to read (limit 2 MB)");
+    }
     raw = readFileSync(registryFile(env), "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return empty();
