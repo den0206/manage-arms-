@@ -22,42 +22,25 @@ export type Entry = {
 };
 
 export type RepoState = { etag?: string; latestSha?: string; checkedAt?: string };
-export type Usage = {
-  /** null は「未集計」。「一度も使われていない」と区別する。 */
-  scannedUpTo: string | null;
-  lastUsed: Record<string, string>;
-  scannedSources: Record<string, string>;
-};
-/** 既定は「有効・自動検出のまま」。保存してよいのは利用者が決めたことだけ。 */
-export type AgentSetting = { enabled: boolean; path?: string };
+/** 保存してよいのは利用者が決めたことだけ。自動検出できるものは持たない。 */
+export type AgentSetting = { path?: string };
 
 export type Registry = {
   schemaVersion: string;
   resources: Entry[];
-  projects: string[];
   repos: Record<string, RepoState>;
-  usage: Usage;
   agents: Partial<Record<AgentId, AgentSetting>>;
-  excludedProjects: string[];
 };
 
 export const empty = (): Registry => ({
   schemaVersion: SCHEMA_VERSION,
-  resources: [], projects: [], repos: {},
-  usage: { scannedUpTo: null, lastUsed: {}, scannedSources: {} },
-  agents: {}, excludedProjects: [],
+  resources: [], repos: {}, agents: {},
 });
 
 const obj = (v: unknown): Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v) ? v as Record<string, unknown> : {};
 const arr = (v: unknown): unknown[] => Array.isArray(v) ? v : [];
 const str = (v: unknown): string | undefined => typeof v === "string" ? v : undefined;
-const strings = (v: unknown): string[] => arr(v).filter((x): x is string => typeof x === "string");
-const strMap = (v: unknown): Record<string, string> => {
-  const out: Record<string, string> = {};
-  for (const [k, value] of Object.entries(obj(v))) if (typeof value === "string") out[k] = value;
-  return out;
-};
 
 /**
  * 欠けているキーは既定値で埋める。1 つ足りないだけで失敗させると、
@@ -70,15 +53,10 @@ export function decode(raw: unknown): Registry {
     throw new AgentToolError("SCHEMA_UNSUPPORTED",
       `registry.json uses schema ${version}; update Agent Tool to read it`);
   }
-  const usage = obj(root.usage);
   const agents: Partial<Record<AgentId, AgentSetting>> = {};
   for (const [key, value] of Object.entries(obj(root.agents))) {
     if (!(AGENT_IDS as readonly string[]).includes(key)) continue;
-    const setting = obj(value);
-    agents[key as AgentId] = {
-      enabled: typeof setting.enabled === "boolean" ? setting.enabled : true,
-      path: str(setting.path),
-    };
+    agents[key as AgentId] = { path: str(obj(value).path) };
   }
   return {
     schemaVersion: SCHEMA_VERSION,
@@ -93,18 +71,11 @@ export function decode(raw: unknown): Registry {
         project: str(entry.project),
       }];
     }),
-    projects: strings(root.projects),
     repos: Object.fromEntries(Object.entries(obj(root.repos)).map(([key, value]) => {
       const state = obj(value);
       return [key, { etag: str(state.etag), latestSha: str(state.latestSha), checkedAt: str(state.checkedAt) }];
     })),
-    usage: {
-      scannedUpTo: str(usage.scannedUpTo) ?? null,
-      lastUsed: strMap(usage.lastUsed),
-      scannedSources: strMap(usage.scannedSources),
-    },
     agents,
-    excludedProjects: strings(root.excludedProjects),
   };
 }
 
@@ -223,9 +194,6 @@ export function upsert(registry: Registry, value: Entry): void {
   if (index >= 0) registry.resources[index] = value;
   else registry.resources.push(value);
 }
-
-export const setting = (registry: Registry, agent: AgentId): AgentSetting =>
-  registry.agents[agent] ?? { enabled: true };
 
 /** 手動指定された CLI パスだけを取り出す。 */
 export function cliOverrides(registry: Registry): Partial<Record<AgentId, string>> {

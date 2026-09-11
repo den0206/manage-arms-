@@ -7,7 +7,15 @@
 
 ## `registry.json`
 
-`schemaVersion` は `"1"`。リソース、取得元、エージェント CLI の手動設定を保持する。
+`schemaVersion` は `"1"`。保持するのは 3 つだけ:
+
+| キー | 内容 |
+|---|---|
+| `resources` | 管理下の Skill / Subagent（名前、種別、取得元、SHA、固定、無効化、project スコープのパス） |
+| `repos` | 取得元ごとの最新 SHA と確認日時（`checkUpdates` が書き、`hasUpdate` が読む） |
+| `agents` | エージェント CLI の手動パス指定 |
+
+自動検出できるもの、使用実績、除外リストは持たない。
 未知の将来スキーマは `SCHEMA_UNSUPPORTED` として拒否し、既定値と同じフィールドは書き出さない。
 
 ## ロックと書き込み

@@ -19,7 +19,7 @@ export type UpdateDiff = {
 /** 差分に載せる 1 ファイルの上限。これを超えるものは要約だけ出す。 */
 export const DIFF_TEXT_LIMIT = 256 * 1024;
 
-type Http = (url: string, headers: Record<string, string>) =>
+export type Http = (url: string, headers: Record<string, string>) =>
   Promise<{ status: number; body: string; headers: Record<string, string> }>;
 
 const defaultHttp: Http = async (url, headers) => {

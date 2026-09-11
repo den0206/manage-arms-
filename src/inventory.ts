@@ -18,6 +18,8 @@ export type InventoryItem = {
   readonly sourcePath?: string;
   readonly repoUrl?: string;
   readonly hasUpdate: boolean;
+  /** 更新を追わないと利用者が決めたもの。 */
+  readonly pinned: boolean;
   /** frontmatter の先頭 4 KB から取得。本文は詳細表示のときだけ読む。 */
   readonly summary?: string;
   /** MCP の登録先。削除コマンドの `-s` になるので `scope` に潰さず持つ。 */
@@ -76,6 +78,7 @@ function group(found: Skill[], kind: KindId, scope: ScopeId, registry: Registry,
       sourcePath: items[0].path,
       repoUrl: entry?.repo,
       hasUpdate: hasUpdate(entry, registry),
+      pinned: entry?.pinned === true,
       summary: items.find(item => item.description !== undefined)?.description,
     };
   }).sort(byName);
@@ -126,7 +129,7 @@ export async function inventory(params: {
         name: server.name, kind: "mcp" as const, scope: "user" as const, agents: [agent],
         enabled: server.enabled,
         origin: server.isProtected ? "bundled" as const : "user" as const,
-        hasUpdate: false, summary: mcpSummary(server), mcpScope: "user" as const,
+        hasUpdate: false, pinned: false, summary: mcpSummary(server), mcpScope: "user" as const,
       }))).sort(byName);
   }
 
@@ -140,7 +143,7 @@ export async function inventory(params: {
       name: plugin.id, kind: "plugin", scope: plugin.projectPath ? "project" : "user",
       agents: [plugin.agent], enabled: plugin.enabled,
       origin: plugin.isBundled ? "bundled" : "user",
-      sourcePath: plugin.projectPath, hasUpdate: false,
+      sourcePath: plugin.projectPath, hasUpdate: false, pinned: false,
       pluginScope: plugin.scope,
       summary: plugin.version === undefined ? undefined : `v${plugin.version}`,
     })).sort(byName);
@@ -150,7 +153,7 @@ export async function inventory(params: {
     : [...mcp.readProject(projectPath, env)].map(([name, { server, scope }]): InventoryItem => ({
       name, kind: "mcp", scope: "project", agents: ["claude" as AgentId],
       enabled: server.enabled, origin: server.isProtected ? "bundled" : "user",
-      hasUpdate: false, summary: `${scope} · ${mcpSummary(server)}`, mcpScope: scope,
+      hasUpdate: false, pinned: false, summary: `${scope} · ${mcpSummary(server)}`, mcpScope: scope,
     }));
 
   return {

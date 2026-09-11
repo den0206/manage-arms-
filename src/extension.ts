@@ -30,8 +30,25 @@ async function pickScope(): Promise<{ scope: "user" | "project"; projectPath?: s
   return picked.value === "project" ? { scope: "project", projectPath: folder } : { scope: "user" };
 }
 
-const message = (error: unknown): string =>
-  error instanceof AgentToolError || error instanceof Error ? error.message : String(error);
+/**
+ * 失敗の理由を利用者の言葉にする。生のメッセージにはパスやコマンドが入っていて
+ * 直すのに要るので捨てない。前に 1 行の意味を足すだけにする（UI 設計 8.3）。
+ */
+const HINTS: Partial<Record<string, () => string>> = {
+  WRITE_GUARD_DENIED: () => vscode.l10n.t("The target is protected."),
+  INVALID_NAME: () => vscode.l10n.t("The name from the source cannot be used as a path."),
+  NOT_IN_REGISTRY: () => vscode.l10n.t("Another tool manages this item."),
+  SYMLINK_OUTSIDE_STORE: () => vscode.l10n.t("This link was not created by Agent Tool."),
+  LOCK_TIMEOUT: () => vscode.l10n.t("Another window is writing; try again."),
+};
+
+const message = (error: unknown): string => {
+  if (error instanceof AgentToolError) {
+    const hint = HINTS[error.code]?.();
+    return hint === undefined ? error.message : `${hint} ${error.message}`;
+  }
+  return error instanceof Error ? error.message : String(error);
+};
 
 export function activate(context: vscode.ExtensionContext): void {
   const storagePath = context.globalStorageUri.fsPath;
@@ -208,13 +225,42 @@ export function activate(context: vscode.ExtensionContext): void {
 
   command("agent-tool.applyUpdate", async (node: ToolNode) => {
     if (!node?.tool || !node.agent || !await canWrite()) return;
+    // 実体を置き換える操作で、元には戻せない（設計決定 D-5）。
+    const choice = await vscode.window.showWarningMessage(
+      vscode.l10n.t("Apply the update to {0}? The current version is replaced.", node.tool.name),
+      { modal: true, detail: node.tool.sourcePath }, vscode.l10n.t("Apply"));
+    if (!choice) return;
     const selector = selectorOf(node);
     const result = await withProgress(vscode.l10n.t("Agent Tool: Applying update"),
       () => agentTool.updateApply({ storagePath, selector }));
     if (result.ok) void dashboard.refresh(true);
   });
 
+  command("agent-tool.togglePin", async (node: ToolNode) => {
+    if (!node?.tool || !node.agent || !await canWrite()) return;
+    const result = await withProgress(vscode.l10n.t("Agent Tool: Updating tool"),
+      () => agentTool.togglePin({ storagePath, selector: selectorOf(node) }));
+    if (result.ok) void dashboard.refresh(true);
+  });
+
   command("agent-tool.refreshInventory", () => void dashboard.refresh(true));
+
+  command("agent-tool.inventory.focus", () =>
+    vscode.commands.executeCommand("workbench.view.extension.agent-tool"));
+
+  command("agent-tool.checkUpdates", async () => {
+    if (!await canWrite()) return;
+    const result = await withProgress(vscode.l10n.t("Agent Tool: Checking for updates"),
+      () => agentTool.checkUpdates({ storagePath }));
+    if (!result.ok) return;
+    // 通知は 1 つにまとめる。取得元ごとに出すと画面が埋まる。
+    if (result.value.issues.length > 0) {
+      void vscode.window.showWarningMessage(
+        vscode.l10n.t("Agent Tool: some sources could not be checked."),
+        { modal: false, detail: result.value.issues.join("\n") });
+    }
+    void dashboard.refresh(true);
+  });
 
   command("agent-tool.openToolActions", async (item: DashboardItem) => {
     const agent = item.agents.length === 1
@@ -236,6 +282,10 @@ export function activate(context: vscode.ExtensionContext): void {
       ...(manageable && item.hasUpdate
         ? [{ label: vscode.l10n.t("Preview update"), value: "agent-tool.previewUpdate" },
            { label: vscode.l10n.t("Apply update"), value: "agent-tool.applyUpdate" }] : []),
+      ...(manageable && item.origin === "managed"
+        ? [{ label: item.pinned ? vscode.l10n.t("Unpin (follow updates again)")
+               : vscode.l10n.t("Pin (stop following updates)"),
+            value: "agent-tool.togglePin" }] : []),
       ...(removable ? [{ label: vscode.l10n.t("Remove"), value: "agent-tool.removeTool" }] : []),
     ];
     if (actions.length === 0) {

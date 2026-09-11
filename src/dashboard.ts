@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { basename, dirname } from 'node:path';
 import * as agentTool from './agentTool';
 
 export type DashboardItem = {
@@ -12,8 +13,8 @@ export type DashboardItem = {
   pluginScope?: 'user' | 'project' | 'local';
   repoUrl?: string;
   summary?: string;
-  detail?: string;
   hasUpdate: boolean;
+  pinned?: boolean;
   running?: boolean;
   /** MCP の登録先。削除コマンドの `-s` に載る。 */
   mcpScope?: 'user' | 'project' | 'local';
@@ -27,15 +28,27 @@ export class DashboardProvider
   private status = new Map<string, boolean>();
   private issues: string[] = [];
   private knownProjects: string[] = [];
+  /** CLI の検出結果。ログインシェルを起こすので、手動更新のときだけ引き直す。 */
+  private environment?: agentTool.AgentInfo[];
+  /** 直前に提案した URL。再表示のたびに同じ提案を出さないためだけに持つ。 */
+  private offered = '';
   private pollTimer?: NodeJS.Timeout;
+  private watchers: vscode.FileSystemWatcher[] = [];
+  private watchTimer?: NodeJS.Timeout;
+  /** 更新件数のバッジ。0 件のときは出さない。 */
+  private readonly badge = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 0);
 
   constructor(private readonly storagePath: string) {}
   dispose(): void {
     this.stopPoll();
+    this.stopWatch();
+    this.badge.dispose();
     this.view = undefined;
     this.snapshot = undefined;
     this.issues = [];
     this.knownProjects = [];
+    this.environment = undefined;
+    this.offered = '';
   }
 
   resolveWebviewView(view: vscode.WebviewView): void {
@@ -44,6 +57,8 @@ export class DashboardProvider
     view.webview.html = dashboardHtml(view.webview);
     view.webview.onDidReceiveMessage((message) => {
       if (message?.type === 'refresh') void this.refresh(true);
+      if (message?.type === 'checkUpdates')
+        void vscode.commands.executeCommand('agent-tool.checkUpdates');
       if (message?.type === 'addSkill')
         void vscode.commands.executeCommand(
           'agent-tool.addSkill',
@@ -61,10 +76,26 @@ export class DashboardProvider
         void this.loadProject(message.path);
     });
     view.onDidChangeVisibility(() => {
-      if (view.visible) { void this.refresh(); this.startPoll(); }
-      else { this.stopPoll(); this.snapshot = undefined; this.issues = []; this.knownProjects = []; }
+      if (view.visible) {
+        void this.refresh();
+        void this.offerClipboard();
+        this.startPoll();
+        this.startWatch();
+      } else {
+        this.stopPoll();
+        this.stopWatch();
+        this.snapshot = undefined;
+        this.issues = [];
+        this.knownProjects = [];
+        this.environment = undefined;
+      }
     });
-    if (view.visible) { void this.refresh(); this.startPoll(); }
+    if (view.visible) {
+      void this.refresh();
+      void this.offerClipboard();
+      this.startPoll();
+      this.startWatch();
+    }
   }
 
   async refresh(force = false): Promise<void> {
@@ -79,6 +110,11 @@ export class DashboardProvider
       this.knownProjects = agentTool
         .projects({storagePath: this.storagePath})
         .filter((path) => path !== folder);
+      if (force || this.environment === undefined) {
+        this.environment = await agentTool
+          .scanPath({storagePath: this.storagePath})
+          .catch(() => []);
+      }
       const {items, issues} = await agentTool.inventory({
         storagePath: this.storagePath,
         projectPath: folder,
@@ -124,6 +160,20 @@ export class DashboardProvider
     this.view?.webview.postMessage({type: 'installDone', ok: ok === true});
   }
 
+  /** クリップボードに解析できる URL があれば 1 回だけ提案する。読むだけで何も実行しない。 */
+  private async offerClipboard(): Promise<void> {
+    let text = '';
+    try {
+      text = (await vscode.env.clipboard.readText()).trim();
+    } catch {
+      return;                                   // 読めない環境では何も提案しない
+    }
+    if (text === '' || text.length > 2048 || text === this.offered) return;
+    if (!agentTool.isSupportedUrl(text)) return;
+    this.offered = text;
+    this.view?.webview.postMessage({type: 'clipboard', url: text});
+  }
+
   private async analyze(url: string): Promise<void> {
     this.view?.webview.postMessage({type: 'analysisStart', loading: true});
     try {
@@ -134,6 +184,41 @@ export class DashboardProvider
       this.view?.webview.postMessage({type: 'preview', url, candidates: [],
         error: error instanceof Error ? error.message : vscode.l10n.t('The URL could not be analyzed.')});
     }
+  }
+
+  /**
+   * 走査対象の変更で一覧を読み直す。監視するのは `watchPaths` が返すホワイトリストだけで、
+   * ホームやワークスペース全体は見ない。View が表示されている間だけ動かす。
+   */
+  private startWatch(): void {
+    this.stopWatch();
+    const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? null;
+    for (const path of agentTool.watchPaths({storagePath: this.storagePath, projectPath: folder})) {
+      const file = path.endsWith('.json');
+      const uri = vscode.Uri.file(file ? dirname(path) : path);
+      const watcher = vscode.workspace.createFileSystemWatcher(
+        new vscode.RelativePattern(uri, file ? basename(path) : '**'));
+      const touched = (): void => this.scheduleRefresh();
+      watcher.onDidCreate(touched);
+      watcher.onDidChange(touched);
+      watcher.onDidDelete(touched);
+      this.watchers.push(watcher);
+    }
+  }
+
+  private stopWatch(): void {
+    if (this.watchTimer) { clearTimeout(this.watchTimer); this.watchTimer = undefined; }
+    for (const watcher of this.watchers) watcher.dispose();
+    this.watchers = [];
+  }
+
+  /** 1 回の操作で何十件も飛んでくるので、まとめてから読み直す。 */
+  private scheduleRefresh(): void {
+    if (this.watchTimer) clearTimeout(this.watchTimer);
+    this.watchTimer = setTimeout(() => {
+      this.watchTimer = undefined;
+      void this.refresh(true);
+    }, 400);
   }
 
   private startPoll(): void {
@@ -163,13 +248,22 @@ export class DashboardProvider
         ? {...item, running: item.agents.some(a => this.status.get(`${a}:${item.name}`) === true)}
         : item
     );
+    const updates = annotated.filter(item => item.hasUpdate).length;
+    this.badge.text = `$(arrow-up) ${updates}`;
+    this.badge.tooltip = vscode.l10n.t("Agent Tool: {0} updates available", String(updates));
+    this.badge.command = 'agent-tool.inventory.focus';
+    if (updates > 0) this.badge.show(); else this.badge.hide();
+
     const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     const projectName = folder === undefined
       ? 'Current Project'
       : folder.split(/[\\/]/).filter(Boolean).pop() ?? 'Current Project';
     this.view?.webview.postMessage({
       type: 'inventory', items: annotated, projectName, issues, error,
-      projects: this.knownProjects,
+      projects: this.knownProjects, environment: this.environment ?? [],
+      // 書き込みを拒む理由は、操作して初めて分かるのでは遅い。一覧に出しておく。
+      readOnly: !vscode.workspace.isTrusted ? 'untrusted'
+        : vscode.env.remoteName !== undefined ? 'remote' : '',
     });
   }
 }
@@ -191,6 +285,15 @@ const webviewText = (): Record<string, string> => ({
   title: vscode.l10n.t("Agent Tool"),
   subtitle: vscode.l10n.t("AI agent tools in this workspace"),
   refresh: vscode.l10n.t("Refresh"),
+  checkUpdates: vscode.l10n.t("Check for updates"),
+  pinned: vscode.l10n.t("Pinned"),
+  clipboard: vscode.l10n.t("Found a URL in your clipboard"),
+  analyzeIt: vscode.l10n.t("Analyze it"),
+  environment: vscode.l10n.t("Environment"),
+  cliMissing: vscode.l10n.t("Not found"),
+  noCli: vscode.l10n.t("No AI agent CLI was found on PATH. Existing tools are still listed."),
+  untrusted: vscode.l10n.t("Untrusted workspace — the list is read-only. Trust the workspace to make changes."),
+  remote: vscode.l10n.t("Remote window — tool changes are available only in a local window."),
   close: vscode.l10n.t("Close"),
   actions: vscode.l10n.t("Actions"),
   addSection: vscode.l10n.t("Add a tool"),
@@ -244,6 +347,13 @@ function dashboardHtml(webview: vscode.Webview): string {
     h1 { margin:0; font-size:17px; letter-spacing:-.2px; } .sub { color:var(--vscode-descriptionForeground); margin-top:3px; font-size:12px; }
     button { border:0; color:var(--vscode-button-foreground); background:var(--vscode-button-background); border-radius:6px; padding:7px 9px; cursor:pointer; font:inherit; }
     button:hover { background:var(--vscode-button-hoverBackground); } button.icon { color:var(--vscode-foreground); background:transparent; font-size:16px; padding:5px 8px; }
+    .banner { display:flex; gap:8px; align-items:flex-start; padding:9px 11px; margin:0 0 14px; border:1px solid var(--vscode-editorWarning-foreground); border-radius:8px; color:var(--vscode-editorWarning-foreground); }
+    .env { display:grid; gap:4px; margin:0 0 16px; }
+    .env-row { display:flex; align-items:center; gap:8px; font-size:11px; color:var(--vscode-descriptionForeground); }
+    .env-row .name { color:var(--vscode-foreground); font-weight:600; font-size:12px; min-width:92px; }
+    .env-row .path { font-family:var(--vscode-editor-font-family); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .env-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; background:var(--vscode-charts-green,#22c55e); }
+    .env-row[data-found="false"] .env-dot { background:var(--vscode-descriptionForeground); opacity:.4; }
     .overview { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-bottom:18px; }
     .metric { padding:11px; border:1px solid var(--vscode-widget-border); border-radius:8px; background:var(--vscode-editor-background); }
     .metric strong { display:block; font-size:21px; line-height:22px; } .metric span { color:var(--vscode-descriptionForeground); font-size:11px; }
@@ -278,11 +388,11 @@ function dashboardHtml(webview: vscode.Webview): string {
     select { width:100%; color:var(--vscode-dropdown-foreground); background:var(--vscode-dropdown-background); border:1px solid var(--vscode-dropdown-border,var(--vscode-widget-border)); border-radius:6px; padding:6px 7px; font:inherit; }
     #other-path { color:var(--vscode-descriptionForeground); font-family:var(--vscode-editor-font-family); font-size:11px; margin:6px 0 8px; overflow-wrap:anywhere; }
     .empty { color:var(--vscode-descriptionForeground); padding:28px 8px; text-align:center; } .hidden { display:none; } .bundled-toggle { width:100%; color:var(--vscode-descriptionForeground); background:transparent; padding:3px 0; text-align:left; font-size:11px; font-weight:600; letter-spacing:.4px; text-transform:uppercase; } .section-toggle { width:100%; color:var(--vscode-descriptionForeground); background:transparent; border:1px solid var(--vscode-widget-border); border-top:none; border-radius:0 0 8px 8px; padding:6px 0; font-size:11px; font-weight:600; text-align:center; margin-bottom:6px; } .item:focus-visible { outline:1px solid var(--vscode-focusBorder); outline-offset:1px; } .item + .detail { margin:0 0 6px; } .detail { margin:0 0 16px; padding:11px; border:1px solid var(--vscode-widget-border); border-radius:8px; background:var(--vscode-editor-background); } .detail > .icon { float:right; } .detail h2 { margin:0 0 8px; font-size:14px; } .detail p { margin:7px 0; line-height:1.45; } .detail-label { color:var(--vscode-descriptionForeground); font-size:11px; font-weight:600; } .detail-path { font-family:var(--vscode-editor-font-family); font-size:11px; overflow-wrap:anywhere; } .issues { grid-column:1/-1; border-color:var(--vscode-editorWarning-foreground); } .issues strong { color:var(--vscode-editorWarning-foreground); font-size:15px; } .loading { display:flex; align-items:center; gap:8px; color:var(--vscode-descriptionForeground); } .spinner { width:14px; height:14px; border:2px solid var(--vscode-widget-border); border-top-color:var(--vscode-textLink-foreground); border-radius:50%; animation:spin .8s linear infinite; } @keyframes spin { to { transform:rotate(360deg) } }
-  </style></head><body><header><div><h1>Agent Tool</h1><div class="sub">${text0.subtitle}</div></div><button class="icon" title="${text0.refresh}" id="refresh">↻</button></header><div class="overview" id="overview"></div><div class="section">${text0.addSection}</div><form class="add-form" id="add-form"><input id="tool-url" type="url" maxlength="2048" required placeholder="https://github.com/owner/repository" aria-label="${text0.urlLabel}"><button type="submit">${text0.analyze}</button></form><section class="detail hidden" id="preview"></section><nav class="agent-nav" id="agents" aria-label="AI Agents"></nav><div class="agent-badge" id="agent-badge"></div><div class="filters" id="filters"></div><div id="content"></div><section id="others"></section><script nonce="${nonce}">
-  const vscode = acquireVsCodeApi(); const T = ${text}; let items = []; let issues = []; let loadError = ''; let agent = ''; let scope = 'project'; let projectName = 'Current Project'; let sectionExpanded = {}; let selected = ''; let projects = []; let otherPath = ''; let otherItems = []; let otherLoading = false; let otherError = ''; let lastPreview = null; let otherIssues = [];
+  </style></head><body><header><div><h1>Agent Tool</h1><div class="sub">${text0.subtitle}</div></div><div><button class="icon" title="${text0.checkUpdates}" id="check-updates">⬆</button><button class="icon" title="${text0.refresh}" id="refresh">↻</button></div></header><div class="banner hidden" id="banner"></div><div class="overview" id="overview"></div><section id="environment"></section><div class="section">${text0.addSection}</div><form class="add-form" id="add-form"><input id="tool-url" type="url" maxlength="2048" required placeholder="https://github.com/owner/repository" aria-label="${text0.urlLabel}"><button type="submit">${text0.analyze}</button></form><section class="detail hidden" id="clip"></section><section class="detail hidden" id="preview"></section><nav class="agent-nav" id="agents" aria-label="AI Agents"></nav><div class="agent-badge" id="agent-badge"></div><div class="filters" id="filters"></div><div id="content"></div><section id="others"></section><script nonce="${nonce}">
+  const vscode = acquireVsCodeApi(); const T = ${text}; let items = []; let issues = []; let loadError = ''; let agent = ''; let scope = 'project'; let projectName = 'Current Project'; let sectionExpanded = {}; let selected = ''; let projects = []; let otherPath = ''; let otherItems = []; let otherLoading = false; let otherError = ''; let lastPreview = null; let environment = []; let readOnly = ''; let envOpen = false; let otherIssues = [];
   const kinds = {skill:'Skill',subagent:'Subagent',mcp:'MCP',plugin:'Plugin'}; const icons = {skill:'<svg viewBox="0 0 14 14" width="13" height="13" fill="currentColor"><path d="M2 0h10v14H2V0zm2 3h6v1.5H4V3zm0 3h6v1.5H4V6zm0 3h4v1.5H4V9z"/></svg>',subagent:'<svg viewBox="0 0 14 14" width="13" height="13" fill="currentColor"><circle cx="7" cy="4" r="3"/><path d="M1 13.5c0-3.3 2.7-6 6-6s6 2.7 6 6H1z"/></svg>',mcp:'<svg viewBox="0 0 14 14" width="13" height="13" fill="currentColor"><rect x="1" y="0" width="12" height="5" rx="1.5"/><rect x="1" y="7" width="12" height="5" rx="1.5"/></svg>',plugin:'<svg viewBox="0 0 14 14" width="13" height="13" fill="currentColor"><path d="M5 0h1.5v3H5zm3.5 0H10v3H8.5zM2.5 3h9v2.5a4.5 4.5 0 01-3.5 4.4V14h-2v-3.6A4.5 4.5 0 012.5 5.5V3z"/></svg>'}; const agentNames = {claude:'Claude Code',cursor:'Cursor',codex:'Codex',gemini:'Gemini CLI'};
   const esc = s => String(s).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
-  function rowsHtml(rows, other) { return '<div class="list">'+rows.map((x,i)=>{ const meta=esc(x.agents.join(' · '))+' · '+kinds[x.kind]+(!other&&x.kind==='mcp'?' · '+esc(x.running?T.running:T.stopped):''); const tail=other?'':'<button class="icon action" data-index="'+items.indexOf(x)+'" title="'+esc(T.actions)+'">•••</button>'; const at=other?' data-other="'+i+'"':' data-index="'+items.indexOf(x)+'"'; return '<div class="item"'+at+' role="button" tabindex="0" aria-expanded="'+(selected===keyOf(x))+'"><div class="glyph" data-kind="'+x.kind+'">'+icons[x.kind]+'</div><div><div class="name">'+esc(x.name)+'</div><div class="meta">'+meta+'</div></div>'+tail+'</div>'+(selected===keyOf(x)?detailHtml(x):''); }).join('')+'</div>'; }
+  function rowsHtml(rows, other) { return '<div class="list">'+rows.map((x,i)=>{ const meta=esc(x.agents.join(' · '))+' · '+kinds[x.kind]+(!other&&x.kind==='mcp'?' · '+esc(x.running?T.running:T.stopped):'')+(x.pinned?' · 📌 '+esc(T.pinned):''); const tail=other?'':'<button class="icon action" data-index="'+items.indexOf(x)+'" title="'+esc(T.actions)+'">•••</button>'; const at=other?' data-other="'+i+'"':' data-index="'+items.indexOf(x)+'"'; return '<div class="item"'+at+' role="button" tabindex="0" aria-expanded="'+(selected===keyOf(x))+'"><div class="glyph" data-kind="'+x.kind+'">'+icons[x.kind]+'</div><div><div class="name">'+esc(x.name)+'</div><div class="meta">'+meta+'</div></div>'+tail+'</div>'+(selected===keyOf(x)?detailHtml(x):''); }).join('')+'</div>'; }
   function bindRows(nodes, pick) { nodes.forEach(node=>{ const open=()=>toggleDetail(pick(node)); node.onclick=open; node.onkeydown=e=>{ if(e.key==='Enter'||e.key===' ') { e.preventDefault(); open(); } }; }); }
   const shortName = p => String(p).split(/[\\\\/]/).filter(Boolean).pop() || String(p);
   function renderOthers() { const box=document.querySelector('#others'); if(scope!=='user'||!projects.length) { box.innerHTML=''; box.dataset.list=''; return; }
@@ -298,18 +408,32 @@ function dashboardHtml(webview: vscode.Webview): string {
     bindRows(body.querySelectorAll('.item[data-other]'), node=>rows[Number(node.dataset.other)]); }
   function render() { const agents=Object.keys(agentNames).filter(a=>items.some(x=>x.agents.includes(a))); if(!agents.includes(agent)) agent=agents[0]??''; const visible=items.filter(x=>x.agents.includes(agent)&&x.scope===scope); const managed=items.filter(x=>x.origin!=='bundled').length, updates=items.filter(x=>x.hasUpdate).length;
     document.querySelector('#overview').innerHTML='<div class="metric"><strong>'+managed+'</strong><span>'+esc(T.yourTools)+'</span></div><div class="metric"><strong>'+updates+'</strong><span>'+esc(T.updates)+'</span></div>'+banner();
+    renderBanner(); renderEnvironment();
     document.querySelector('#agents').innerHTML=agents.length?agents.map(a=>'<button class="agent '+(a===agent?'active':'')+'" data-agent="'+a+'" role="tab" aria-selected="'+(a===agent)+'"><span class="agent-dot"></span><span>'+agentNames[a]+'</span><span class="agent-count">'+items.filter(x=>x.agents.includes(a)).length+'</span></button>').join(''):'<p class="empty">'+esc(T.noAgents)+'</p>'; const _cnt=items.filter(x=>x.agents.includes(agent)).length;const _ab=document.querySelector('#agent-badge');if(_ab)_ab.innerHTML=agent?'<span class="badge-pip" data-agent="'+agent+'"></span><span class="badge-name">'+agentNames[agent]+'</span><span class="badge-count">'+_cnt+' tool'+(_cnt===1?'':'s')+'</span>':'';
     const filters=[['user',T.userGlobal],['project',projectName]]; document.querySelector('#filters').innerHTML=filters.map(([v,n])=>'<button class="filter '+(v===scope?'active':'')+'" data-filter="'+v+'">'+n+'</button>').join('');
     const yours=visible.filter(x=>x.origin!=='bundled'); const yourGroups=Object.entries(kinds).map(([value,title])=>[title,yours.filter(x=>x.kind===value),value]).filter(([,rows])=>rows.length); const bundled=visible.filter(x=>x.origin==='bundled'); document.querySelector('#content').innerHTML=visible.length?yourGroups.map(([title,rows,kv])=>{const exp=sectionExpanded[kv]; const shown=exp?rows:rows.slice(0,5); const rest=rows.length-shown.length; const tog=rows.length>5?'<button class="section-toggle" data-kind="'+kv+'">'+(exp?'⏄ '+esc(T.showLess):'› '+rest+' more')+'</button>':''; return '<div class="section">'+title+'</div>'+rowsHtml(shown)+tog;}).join('')+(bundled.length?(()=>{const exp=sectionExpanded['bundled']; const shown=exp?bundled:[]; const rest=bundled.length; const tog='<button class="section-toggle" data-kind="bundled">'+(exp?'⏄ '+esc(T.showLess):'› '+rest+' more')+'</button>'; return '<div class="section">'+esc(T.bundled)+'</div>'+rowsHtml(shown)+tog;})():''):'<div class="empty">'+esc(T.noMatch)+'</div>';
     document.querySelectorAll('[data-agent]').forEach(b=>b.onclick=()=>{agent=b.dataset.agent; hideDetail(); render();}); document.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>{scope=b.dataset.filter; hideDetail(); render();}); bindRows(document.querySelectorAll('#content .item[data-index]'), node=>items[Number(node.dataset.index)]); document.querySelectorAll('.action').forEach(b=>b.onclick=e=>{e.stopPropagation(); vscode.postMessage({type:'actions',item:items[Number(b.dataset.index)]});}); document.querySelectorAll('.section-toggle').forEach(b=>b.onclick=()=>{sectionExpanded[b.dataset.kind]=!sectionExpanded[b.dataset.kind]; render();}); renderOthers(); }
+  function renderEnvironment() { const box=document.querySelector('#environment'); if(!environment.length) { box.innerHTML=''; return; }
+    const missing=environment.filter(x=>!x.found).length;
+    const rows=envOpen?environment:environment.filter(x=>x.found);
+    box.innerHTML='<button class="section-toggle" id="env-toggle" style="border-radius:8px;border-top:1px solid var(--vscode-widget-border)">'+esc(T.environment)+' · '+(environment.length-missing)+'/'+environment.length+(envOpen?' ⏄':' ›')+'</button>'+(envOpen?'<div class="env">'+rows.map(x=>'<div class="env-row" data-found="'+x.found+'"><span class="env-dot"></span><span class="name">'+esc(x.displayName)+'</span><span>'+esc(x.version||'')+'</span><span class="path">'+esc(x.found?(x.path||''):T.cliMissing)+'</span></div>').join('')+'</div>':'');
+    document.querySelector('#env-toggle').onclick=()=>{envOpen=!envOpen; renderEnvironment();}; }
+  function renderBanner() { const box=document.querySelector('#banner');
+    const noCli=environment.length>0&&environment.every(x=>!x.found);
+    const text=readOnly==='untrusted'?T.untrusted:readOnly==='remote'?T.remote:noCli?T.noCli:'';
+    box.innerHTML=text?'<span>⚠</span><span>'+esc(text)+'</span>':'';
+    box.classList.toggle('hidden', text===''); }
   function banner() { const lines=(loadError?[loadError]:[]).concat(issues); return lines.length?'<div class="metric issues"><strong>⚠</strong><span>'+esc(T.loadFailed)+'<br>'+lines.map(esc).join('<br>')+'</span></div>':''; }
-  const keyOf = x => x.name+'|'+x.kind+'|'+x.scope+'|'+(x.detail||'');
+  const keyOf = x => x.name+'|'+x.kind+'|'+x.scope+'|'+(x.sourcePath||'');
   function hideDetail() { selected=''; }
   function toggleDetail(x) { selected = selected===keyOf(x) ? '' : keyOf(x); render(); }
-  function detailHtml(x) { const usage=esc({skill:T.useSkill,subagent:T.useSubagent,mcp:T.useMcp,plugin:T.usePlugin}[x.kind]||''); return '<div class="detail"><div class="detail-label">'+esc(T.description)+'</div><p>'+esc(x.summary||T.noDescription)+'</p><div class="detail-label">'+esc(T.howToUse)+'</div><p>'+usage+'</p>'+(x.detail?'<div class="detail-label">'+esc(T.location)+'</div><p class="detail-path">'+esc(x.detail)+'</p>':'')+(x.repoUrl?'<div class="detail-label">'+esc(T.source)+'</div><p class="detail-path">'+esc(x.repoUrl)+'</p>':'')+'</div>'; }
+  function detailHtml(x) { const usage=esc({skill:T.useSkill,subagent:T.useSubagent,mcp:T.useMcp,plugin:T.usePlugin}[x.kind]||''); return '<div class="detail"><div class="detail-label">'+esc(T.description)+'</div><p>'+esc(x.summary||T.noDescription)+'</p><div class="detail-label">'+esc(T.howToUse)+'</div><p>'+usage+'</p>'+(x.sourcePath?'<div class="detail-label">'+esc(T.location)+'</div><p class="detail-path">'+esc(x.sourcePath)+'</p>':'')+(x.repoUrl?'<div class="detail-label">'+esc(T.source)+'</div><p class="detail-path">'+esc(x.repoUrl)+'</p>':'')+'</div>'; }
+  function showClipboard(url) { const box=document.querySelector('#clip'); box.innerHTML='<button class="icon" id="clip-close" title="'+esc(T.close)+'">×</button><h2>'+esc(T.clipboard)+'</h2><p class="detail-path">'+esc(url)+'</p><button id="clip-use">'+esc(T.analyzeIt)+'</button>'; box.classList.remove('hidden');
+    document.querySelector('#clip-close').onclick=()=>box.classList.add('hidden');
+    document.querySelector('#clip-use').onclick=()=>{ box.classList.add('hidden'); document.querySelector('#tool-url').value=url; vscode.postMessage({type:'analyzeTool',url}); }; }
   function hidePreview() { lastPreview=null; document.querySelector('#preview').classList.add('hidden'); }
   function showPreview(result) { lastPreview=result; const panel=document.querySelector('#preview'); const rows=result.candidates||[]; const body=result.loading?'<div class="loading"><span class="spinner"></span>'+esc(T.analyzing)+'</div>':rows.length?'<h2>'+esc(T.detected)+'</h2>'+rows.map((x,i)=>'<p><strong>'+esc(x.installSelector||x.name)+'</strong> · '+esc(kinds[x.kind]||x.kind)+'<br>'+esc(x.description||T.noDescription)+'<br><button class="install" data-index="'+i+'">'+esc(T.install)+'</button></p>').join(''):'<h2>'+esc(T.notFound)+'</h2><p>'+esc(result.error||T.notFoundBody)+'</p>'; panel.innerHTML='<button class="icon" id="close-preview" title="'+esc(T.close)+'">×</button>'+body; panel.classList.remove('hidden'); document.querySelector('#close-preview').onclick=hidePreview; panel.querySelectorAll('.install').forEach(b=>b.onclick=()=>{b.disabled=true; b.textContent=T.installing; const candidate=rows[Number(b.dataset.index)]; vscode.postMessage({type:'installTool',url:result.url,kind:candidate.kind,name:candidate.name,selector:candidate.installSelector});}); }
-  document.querySelector('#refresh').onclick=()=>vscode.postMessage({type:'refresh'}); document.querySelector('#add-form').onsubmit=e=>{e.preventDefault(); vscode.postMessage({type:'analyzeTool',url:document.querySelector('#tool-url').value});}; window.addEventListener('message',e=>{if(e.data.type==='inventory'){items=e.data.items; issues=e.data.issues||[]; loadError=e.data.error||''; if(e.data.projectName) projectName=e.data.projectName; projects=e.data.projects||[]; if(otherPath&&!projects.includes(otherPath)){otherPath=''; otherItems=[]; otherError=''; otherIssues=[];} render();}
- if(e.data.type==='projectInventory'&&e.data.path===otherPath){otherLoading=false; otherItems=e.data.items||[]; otherIssues=e.data.issues||[]; otherError=e.data.error||''; renderOthers();} if(e.data.type==='installDone'){ if(e.data.ok) hidePreview(); else if(lastPreview) showPreview(lastPreview); } if(e.data.type==='analysisStart') showPreview(e.data); if(e.data.type==='preview') showPreview(e.data);}); render();
+  document.querySelector('#refresh').onclick=()=>vscode.postMessage({type:'refresh'}); document.querySelector('#check-updates').onclick=()=>vscode.postMessage({type:'checkUpdates'}); document.querySelector('#add-form').onsubmit=e=>{e.preventDefault(); vscode.postMessage({type:'analyzeTool',url:document.querySelector('#tool-url').value});}; window.addEventListener('message',e=>{if(e.data.type==='inventory'){items=e.data.items; issues=e.data.issues||[]; loadError=e.data.error||''; if(e.data.projectName) projectName=e.data.projectName; projects=e.data.projects||[]; environment=e.data.environment||environment; readOnly=e.data.readOnly||''; if(otherPath&&!projects.includes(otherPath)){otherPath=''; otherItems=[]; otherError=''; otherIssues=[];} render();}
+ if(e.data.type==='projectInventory'&&e.data.path===otherPath){otherLoading=false; otherItems=e.data.items||[]; otherIssues=e.data.issues||[]; otherError=e.data.error||''; renderOthers();} if(e.data.type==='clipboard') showClipboard(e.data.url); if(e.data.type==='installDone'){ if(e.data.ok) hidePreview(); else if(lastPreview) showPreview(lastPreview); } if(e.data.type==='analysisStart') showPreview(e.data); if(e.data.type==='preview') showPreview(e.data);}); render();
   </script></body></html>`;
 }

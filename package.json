@@ -80,8 +80,18 @@
         "category": "Agent Tool"
       },
       {
+        "command": "agent-tool.togglePin",
+        "title": "%command.togglePin%",
+        "category": "Agent Tool"
+      },
+      {
         "command": "agent-tool.refreshInventory",
         "title": "%command.refreshInventory%",
+        "category": "Agent Tool"
+      },
+      {
+        "command": "agent-tool.checkUpdates",
+        "title": "%command.checkUpdates%",
         "category": "Agent Tool"
       },
       {

@@ -14,9 +14,8 @@ test("欠けているキーは既定値で埋める", () => {
   const registry = decode({ resources: [{ name: "a", kind: "skill" }] });
   assert.equal(registry.resources[0].pinned, false);
   assert.equal(registry.resources[0].disabled, false);
-  assert.deepEqual(registry.projects, []);
-  assert.equal(registry.usage.scannedUpTo, null);
-  assert.deepEqual(registry.excludedProjects, []);
+  assert.deepEqual(registry.repos, {});
+  assert.deepEqual(registry.agents, {});
 });
 
 test("name か kind が無いリソースは読み飛ばす", () => {

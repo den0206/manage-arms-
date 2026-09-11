@@ -1,21 +1,22 @@
 import { homedir } from "node:os";
-import { basename } from "node:path";
+import { basename, join } from "node:path";
 import { AgentId, KindId, ScopeId } from "./agent";
 import { AgentInfo, scanPath as detectAgents } from "./detector";
 import { Env, Run } from "./env";
 import { AgentToolError } from "./errors";
 import { run as runCommand } from "./exec";
 import { Candidate, discard, fetchPage, stage } from "./fetcher";
-import { fromJsonLd, needsPage, parseUrl, skillHint } from "./github";
+import { fromJsonLd, GitHubSource, needsPage, parseUrl, skillHint } from "./github";
 import { install } from "./installer";
 import { inventory as buildInventory, InventoryItem } from "./inventory";
 import * as mcp from "./mcpScanner";
 import { MCPScope, MCPServer } from "./mcpServer";
 import { mcpStatus as pollMcpStatus } from "./processScanner";
 import { knownProjects } from "./projectScan";
-import { cliOverrides, entry, load, read, Registry, save, update } from "./registry";
+import { cliOverrides, entry, load, read, Registry, save, update, upsert } from "./registry";
 import { disable, enable, Place, remove as removeManaged, removeUnmanaged, USER } from "./skillManager";
-import { updateApply as applyUpdate, updatePreview as previewUpdate, UpdateDiff } from "./updater";
+import { SOURCES, sourcePath } from "./source";
+import { updateApply as applyUpdate, Http, updatePreview as previewUpdate, resolveSha, UpdateDiff } from "./updater";
 
 export { AgentToolError } from "./errors";
 export type { ErrorCode } from "./errors";
@@ -79,6 +80,60 @@ export function projects(params: { storagePath: string }): string[] {
   return knownProjects(envOf(params.storagePath));
 }
 
+/**
+ * 管理下の取得元の最新 SHA を引き、`registry.repos` に記録する。
+ * ここが走らないと `hasUpdate` は永久に false のままで、更新の導線が出ない。
+ * GitHub の API を叩くので、明示的な操作のときだけ走らせる（定期ポーリングは持たない）。
+ */
+export async function checkUpdates(params: { storagePath: string; http?: Http }):
+  Promise<{ checked: number; issues: string[] }> {
+  const env = envOf(params.storagePath);
+  const sources = new Map<string, GitHubSource>();
+  for (const item of read(env).resources) {
+    // 固定中は更新しないと決めたもの。レート制限を使ってまで確認しない。
+    if (item.repo === undefined || item.pinned) continue;
+    sources.set(`${item.repo}#${item.branch ?? "main"}`, { repo: item.repo, branch: item.branch });
+  }
+
+  const found = new Map<string, string>();
+  const issues: string[] = [];
+  for (const [key, source] of sources) {
+    try {
+      found.set(key, await resolveSha(source, params.http));
+    } catch (error) {
+      issues.push(`${key}: ${error instanceof AgentToolError || error instanceof Error
+        ? error.message : String(error)}`);
+    }
+  }
+  if (found.size > 0) {
+    const checkedAt = new Date().toISOString();
+    await mutate(params.storagePath, registry => {
+      for (const [key, latestSha] of found) {
+        registry.repos[key] = { ...registry.repos[key], latestSha, checkedAt };
+      }
+    });
+  }
+  return { checked: found.size, issues };
+}
+
+/**
+ * View 表示中に監視するパス。走査ホワイトリスト（`source.ts`）から導くので、
+ * 対象が増えても監視の側で二重に宣言しない。ホームやワークスペース全体は含めない。
+ */
+export function watchPaths(params: { storagePath: string; projectPath: string | null }): string[] {
+  const env = envOf(params.storagePath);
+  const paths = SOURCES.flatMap(source => {
+    const path = sourcePath(source, env);
+    return path === null ? [] : [path];
+  });
+  if (params.projectPath !== null) {
+    paths.push(join(params.projectPath, ".claude", "skills"),
+      join(params.projectPath, ".claude", "agents"),
+      join(params.projectPath, ".mcp.json"));
+  }
+  return [...new Set(paths)].sort();
+}
+
 export function scanPath(params: { storagePath: string }): Promise<AgentInfo[]> {
   const env = envOf(params.storagePath);
   return detectAgents(env, runnerFor(env), cliOverrides(load(env)));
@@ -97,6 +152,10 @@ async function resolveUrl(url: string): Promise<string> {
   }
   return target;
 }
+
+/** この URL を解析できるか。クリップボードの中身を提案してよいかの判定に使う。 */
+export const isSupportedUrl = (url: string): boolean =>
+  parseUrl(url) !== null || needsPage(url) !== null;
 
 /**
  * 取得した候補を返すだけ。入れるかどうかは確認画面で決める。
@@ -231,6 +290,27 @@ export async function toggle(params: { storagePath: string; selector: Selector }
   await mutate(params.storagePath, (registry, scoped) =>
     wasEnabled ? disable(name, kind, scoped, registry) : enable(name, kind, scoped, registry));
   return { enabled: !wasEnabled };
+}
+
+/**
+ * 更新の固定を切り替える。固定中は `hasUpdate` にも更新確認にも載せない —
+ * 上流が方針転換したときに、こちらの都合で追随を止められるようにする。
+ */
+export async function togglePin(params: { storagePath: string; selector: Selector }):
+  Promise<{ pinned: boolean }> {
+  assertManageable(params.selector);
+  const { name, kind } = params.selector;
+  const project = projectOf(params.selector);
+  let pinned = false;
+  await mutate(params.storagePath, registry => {
+    const current = entry(registry, name, kind, project);
+    if (current === undefined) {
+      throw new AgentToolError("NOT_IN_REGISTRY", `${name} has no known source, so it cannot be pinned`);
+    }
+    pinned = !current.pinned;
+    upsert(registry, { ...current, pinned });
+  });
+  return { pinned };
 }
 
 export function updatePreview(params: { storagePath: string; selector: Selector }): Promise<UpdateDiff> {

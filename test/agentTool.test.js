@@ -3,7 +3,7 @@ const { existsSync, readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const { test } = require("node:test");
 const agentTool = require("../out/agentTool.js");
-const { inventory } = require("../out/inventory.js");
+const { hasUpdate, inventory } = require("../out/inventory.js");
 const { addCommand, removeCommand, editCursor, validate } = require("../out/mcpScanner.js");
 const { parseAll } = require("../out/mcpServer.js");
 const { fakeEnv, makeDir, writeFileIn } = require("./helpers.js");
@@ -196,4 +196,58 @@ test("ワークスペースが無いまま project を指定したら user へ�
   await assert.rejects(agentTool.add({
     storagePath: env.appSupport, url: "https://github.com/o/r", kind: "skill", scope: "project",
   }), code("OPERATION_FAILED"));
+});
+
+// --- 更新確認 ---
+
+/** ここが走らないと registry.repos が空のままで、更新の導線が一生出ない。 */
+test("更新確認は最新 SHA を registry に記録する", async () => {
+  const env = fakeEnv();
+  const { empty, save, read } = require("../out/registry.js");
+  const registry = empty();
+  registry.resources = [
+    { name: "pdf", kind: "skill", repo: "o/r", sha: "old", pinned: false, disabled: false },
+    { name: "fixed", kind: "skill", repo: "o/pinned", sha: "old", pinned: true, disabled: false },
+    { name: "local", kind: "skill", pinned: false, disabled: false },
+  ];
+  await save(env, registry);
+
+  const asked = [];
+  const http = async url => {
+    asked.push(url);
+    return url.includes("/o/r/") ? { status: 200, body: JSON.stringify({ sha: "new" }), headers: {} }
+      : { status: 404, body: "", headers: {} };
+  };
+  const result = await agentTool.checkUpdates({ storagePath: env.appSupport, http });
+
+  assert.equal(result.checked, 1);
+  assert.deepEqual(result.issues, []);
+  // 固定中と取得元の無いものは問い合わせない。
+  assert.equal(asked.length, 1);
+  const saved = read(env);
+  assert.equal(saved.repos["o/r#main"].latestSha, "new");
+  assert.ok(saved.repos["o/r#main"].checkedAt);
+  assert.equal(hasUpdate(saved.resources[0], saved), true);
+});
+
+test("確認できなかった取得元は理由を返し、他の記録は残す", async () => {
+  const env = fakeEnv();
+  const { empty, save, read } = require("../out/registry.js");
+  const registry = empty();
+  registry.resources = [
+    { name: "ok", kind: "skill", repo: "o/ok", sha: "a", pinned: false, disabled: false },
+    { name: "gone", kind: "skill", repo: "o/gone", sha: "a", pinned: false, disabled: false },
+  ];
+  await save(env, registry);
+
+  const result = await agentTool.checkUpdates({
+    storagePath: env.appSupport,
+    http: async url => url.includes("/o/ok/")
+      ? { status: 200, body: JSON.stringify({ sha: "b" }), headers: {} }
+      : { status: 404, body: "", headers: {} },
+  });
+  assert.equal(result.checked, 1);
+  assert.equal(result.issues.length, 1);
+  assert.match(result.issues[0], /o\/gone#main/);
+  assert.equal(read(env).repos["o/ok#main"].latestSha, "b");
 });

@@ -74,18 +74,13 @@ export type InventoryItem = {
   agents: AgentId[];       // 複数エージェントで共有する場合がある
   enabled: boolean;
   origin: 'managed' | 'user' | 'bundled';
-  sourcePath?: string;
+  sourcePath?: string;     // 実体の場所。詳細表示でそのまま見せる
   repoUrl?: string;
   hasUpdate: boolean;
+  pinned: boolean;         // 更新を追わないと利用者が決めたもの
   summary?: string;        // frontmatter の先頭 4 KB から取得
-  detail?: string;         // 詳細表示中のみ保持、閉じたら破棄
-};
-
-export type McpServerDefinition = {
-  name: string;
-  command: string;
-  args?: string[];
-  env?: Record<string, string>;
+  mcpScope?: 'user' | 'project' | 'local';    // MCP の登録先。削除コマンドの -s に載る
+  pluginScope?: 'user' | 'project' | 'local'; // Plugin の登録先
 };
 
 export type PreviewCandidate = {
@@ -104,7 +99,7 @@ export type AgentInfo = {
 };
 
 export type UpdateDiff = {
-  currentSha: string;
+  currentSha: string | null;   // 初回取得時は記録が無い
   latestSha: string;
   files: Array<{ path: string; before: string; after: string }>;
 };
@@ -147,14 +142,71 @@ export function projects(params: {
 
 ---
 
+### `checkUpdates` — 最新 SHA の確認
+
+```typescript
+export function checkUpdates(params: {
+  storagePath: string;
+}): Promise<{ checked: number; issues: string[] }>;
+```
+
+- 管理下の取得元ごとに GitHub の HEAD を引き、`registry.repos[<repo>#<branch>]` に
+  `latestSha` と `checkedAt` を書く。`hasUpdate` はこの記録だけで決まる
+- 固定中（`pinned`）の取得元は問い合わせない
+- 定期ポーリングは持たない。明示的な操作（`agent-tool.checkUpdates`）でだけ走る
+- 失敗した取得元は `issues` に理由を入れ、成功した分の記録は残す
+
+---
+
+### `togglePin` — 更新の固定
+
+```typescript
+export function togglePin(params: {
+  storagePath: string;
+  selector: Selector;
+}): Promise<{ pinned: boolean }>;
+```
+
+registry に取得元があるものだけ。固定中は `hasUpdate` にも `checkUpdates` にも載せない。
+
+---
+
+### `watchPaths` — 監視対象のパス
+
+```typescript
+export function watchPaths(params: {
+  storagePath: string;
+  projectPath: string | null;
+}): string[];
+```
+
+`source.ts` の走査ホワイトリストとワークスペースの `.claude/skills`・`.claude/agents`・`.mcp.json` を返す。
+Dashboard は View 表示中だけこれを `createFileSystemWatcher` に渡す。ホームやワークスペース全体は監視しない。
+
+---
+
+### `isSupportedUrl` — 解析できる URL か
+
+```typescript
+export function isSupportedUrl(url: string): boolean;
+```
+
+クリップボードの内容を提案してよいかの判定に使う。純粋関数でネットワークに触れない。
+
+---
+
 ### `scanPath` — AI エージェント CLI の検知
 
 ```typescript
-export function scanPath(): Promise<AgentInfo[]>;
+export function scanPath(params: {
+  storagePath: string;
+}): Promise<AgentInfo[]>;
 ```
 
 - ログインシェル（`$SHELL -l -c 'echo $PATH'`）で PATH を解決する
 - Windows では `powershell -Command $env:PATH` を使う
+- 手動指定した CLI パス（`registry.agents[agent].path`）があればそれを優先する
+- Dashboard の Environment 欄がこれを表示する。手動更新のときだけ引き直す
 
 ---
 
@@ -265,7 +317,7 @@ export function mcpRemove(params: {
 
 ```typescript
 export function mcpStatus(params: {
-  agents: AgentId[];
+  storagePath: string;
 }): Promise<Record<string, boolean>>;  // key: "agent:serverName"
 ```
 

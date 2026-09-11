@@ -21,14 +21,25 @@ function loadExtension(stub, tool) {
 function stubVscode(overrides = {}) {
   const state = {
     warnings: [], warningDetails: [], commands: new Map(), disposed: 0,
-    provider: undefined, posted: [], picks: [],
+    provider: undefined, posted: [], picks: [], watchers: 0, badge: {shown: false},
   };
   const stub = {
     l10n: { t: (text, ...args) => args.reduce((acc, value, i) => acc.replace(`{${i}}`, value), text) },
-    Uri: { joinPath: () => ({ fsPath: "" }) },
+    Uri: { joinPath: () => ({ fsPath: "" }), file: fsPath => ({ fsPath }) },
     ProgressLocation: { Notification: 15 },
-    env: { remoteName: undefined },
-    workspace: { isTrusted: true, workspaceFolders: undefined },
+    StatusBarAlignment: { Right: 2 },
+    RelativePattern: class { constructor(base, pattern) { this.base = base; this.pattern = pattern; } },
+    env: { remoteName: undefined, clipboard: { readText: async () => "" } },
+    workspace: {
+      isTrusted: true, workspaceFolders: undefined,
+      createFileSystemWatcher: () => {
+        state.watchers += 1;
+        return {
+          onDidCreate() {}, onDidChange() {}, onDidDelete() {},
+          dispose: () => { state.watchers -= 1; },
+        };
+      },
+    },
     window: {
       registerWebviewViewProvider: (_id, provider) => {
         state.provider = provider;
@@ -44,6 +55,12 @@ function stubVscode(overrides = {}) {
       showInformationMessage: () => Promise.resolve(undefined),
       showInputBox: () => Promise.resolve(undefined),
       showQuickPick: items => { state.picks.push(items); return Promise.resolve(undefined); },
+      createStatusBarItem: () => ({
+        text: "", tooltip: "", command: "",
+        show: () => { state.badge.shown = true; },
+        hide: () => { state.badge.shown = false; },
+        dispose() {},
+      }),
       withProgress: (_options, body) => body(),
     },
     commands: {
@@ -73,7 +90,8 @@ test("activate は CLI を起動せずに全コマンドを登録する", () => 
   for (const name of [
     "agent-tool.toggleTool", "agent-tool.addSkill", "agent-tool.addMcp", "agent-tool.removeTool",
     "agent-tool.previewUpdate", "agent-tool.applyUpdate", "agent-tool.refreshInventory",
-    "agent-tool.openToolActions",
+    "agent-tool.openToolActions", "agent-tool.checkUpdates", "agent-tool.togglePin",
+    "agent-tool.inventory.focus",
   ]) {
     assert.ok(state.commands.has(name), name);
   }
@@ -92,7 +110,7 @@ test("未信頼ワークスペースでは書き込みを拒否する", async ()
 
 /** Remote 環境ではローカルの Agent 設定を書き換えない。 */
 test("Remote 環境では書き込みを拒否する", async () => {
-  const { stub, state } = stubVscode({ env: { remoteName: "ssh-remote" } });
+  const { stub, state } = stubVscode({ env: { remoteName: "ssh-remote", clipboard: { readText: async () => "" } } });
   activateWith(stub, fakeEnv().appSupport);
   await state.commands.get("agent-tool.removeTool")({
     tool: { name: "x", kind: "skill", scope: "user", agents: ["claude"] },
@@ -112,7 +130,7 @@ test("Webview の HTML は構文が通り、文言を l10n から引く", () => 
   const { readFileSync } = require("node:fs");
   const bundle = JSON.parse(readFileSync(require.resolve("../l10n/bundle.l10n.json"), "utf8"));
   const { stub } = stubVscode({
-    env: { remoteName: undefined, language: "en" },
+    env: { remoteName: undefined, language: "en", clipboard: { readText: async () => "" } },
     l10n: { t: text => bundle[text] ?? text },
   });
   const { DashboardProvider } = loadExtension(stub) && require("../out/dashboard.js");
@@ -149,15 +167,17 @@ test("dispose でタイマーとキャッシュを手放す", () => {
 
 /** 表示中の Webview を用意して、一覧の再読み込みが届いたかを見る。 */
 function showView(state) {
-  state.provider.resolveWebviewView({
+  const view = {
     webview: {
       options: {}, cspSource: "vscode-resource:", html: "",
       onDidReceiveMessage: handler => { state.onMessage = handler; return { dispose() {} }; },
       postMessage: message => { state.posted.push(message); return Promise.resolve(true); },
     },
     visible: true,
-    onDidChangeVisibility: () => ({ dispose() {} }),
-  });
+    onDidChangeVisibility: handler => { state.onVisibility = handler; return { dispose() {} }; },
+  };
+  state.provider.resolveWebviewView(view);
+  return view;
 }
 
 /**
@@ -170,6 +190,7 @@ test("void を返す操作の成功後も一覧を読み直す", async () => {
   stub.window.withProgress = () => Promise.resolve(undefined);
   const { context } = activateWith(stub, fakeEnv().appSupport, {
     inventory: async () => ({ items: [], issues: [] }), mcpStatus: async () => ({}),
+    watchPaths: () => [], scanPath: async () => [], projects: () => [],
   });
   try {
     showView(state);
@@ -246,7 +267,7 @@ test("他プロジェクトの一覧は既知パスだけを走査する", async
         issues: ["claude Plugin: boom"],
       };
     },
-    mcpStatus: async () => ({}),
+    mcpStatus: async () => ({}), watchPaths: () => [], scanPath: async () => [],
     projects: () => ["/known/project"],
   });
   const settle = () => new Promise(resolve => setImmediate(resolve));
@@ -277,7 +298,7 @@ function runWebviewScript() {
   const { readFileSync } = require("node:fs");
   const bundle = JSON.parse(readFileSync(require.resolve("../l10n/bundle.l10n.json"), "utf8"));
   const { stub } = stubVscode({
-    env: { remoteName: undefined, language: "en" },
+    env: { remoteName: undefined, language: "en", clipboard: { readText: async () => "" } },
     l10n: { t: text => bundle[text] ?? text },
   });
   const { DashboardProvider } = loadExtension(stub) && require("../out/dashboard.js");
@@ -299,7 +320,7 @@ function runWebviewScript() {
   const body = script.slice(script.indexOf(">") + 1);
   const element = () => ({
     innerHTML: "", textContent: "", value: "", dataset: {},
-    classList: { add() {}, remove() {} },
+    classList: { add() {}, remove() {}, toggle() {} },
     querySelectorAll: () => [], scrollIntoView() {},
   });
   const listeners = [];
@@ -317,7 +338,8 @@ test("カードのタップで説明を開き、もう一度で閉じる", () =>
   const { context, send } = runWebviewScript();
   const tool = {
     name: "my-skill", kind: "skill", scope: "user", agents: ["claude"], origin: "user",
-    enabled: true, hasUpdate: false, summary: "what it does", detail: "/home/me/.agents/skills/my-skill",
+    enabled: true, hasUpdate: false, summary: "what it does",
+    sourcePath: "/home/me/.agents/skills/my-skill",
   };
   send({ type: "inventory", items: [tool], projects: [], issues: [] });
 
@@ -340,7 +362,7 @@ test("導入の結果を Webview に返す", async () => {
   const { stub, state } = stubVscode();
   const { context } = activateWith(stub, fakeEnv().appSupport, {
     inventory: async () => ({ items: [], issues: [] }), mcpStatus: async () => ({}),
-    projects: () => [],
+    watchPaths: () => [], scanPath: async () => [], projects: () => [],
   });
   const settle = () => new Promise(resolve => setImmediate(resolve));
   const request = { type: "installTool", url: "https://github.com/o/r", kind: "skill", name: "x" };
@@ -356,6 +378,78 @@ test("導入の結果を Webview に返す", async () => {
     state.onMessage(request);
     await settle();
     assert.deepEqual(lastDone(), { type: "installDone", ok: false });
+  } finally {
+    for (const entry of context.subscriptions) entry.dispose?.();
+  }
+});
+
+/** 監視は View の表示中だけ。閉じたら watcher を手放す（設計決定 D-6）。 */
+test("ファイル監視は View の表示中だけ動かす", () => {
+  const { stub, state } = stubVscode();
+  const { context } = activateWith(stub, fakeEnv().appSupport, {
+    inventory: async () => ({ items: [], issues: [] }), mcpStatus: async () => ({}),
+    watchPaths: () => ["/a", "/b"], scanPath: async () => [], projects: () => [],
+  });
+  try {
+    const view = showView(state);
+    assert.equal(state.watchers, 2);
+    view.visible = false;
+    state.onVisibility();
+    assert.equal(state.watchers, 0);
+  } finally {
+    for (const entry of context.subscriptions) entry.dispose?.();
+  }
+});
+
+test("更新があるときだけ Status Bar にバッジを出す", async () => {
+  const { stub, state } = stubVscode();
+  const item = hasUpdate => ({
+    name: "pdf", kind: "skill", scope: "user", agents: ["claude"], origin: "managed",
+    enabled: true, hasUpdate,
+  });
+  let updates = false;
+  const { context } = activateWith(stub, fakeEnv().appSupport, {
+    inventory: async () => ({ items: [item(updates)], issues: [] }), mcpStatus: async () => ({}),
+    watchPaths: () => [], scanPath: async () => [], projects: () => [],
+  });
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  try {
+    showView(state);
+    await settle();
+    assert.equal(state.badge.shown, false);
+    updates = true;
+    await state.commands.get("agent-tool.refreshInventory")();
+    await settle();
+    assert.equal(state.badge.shown, true);
+  } finally {
+    for (const entry of context.subscriptions) entry.dispose?.();
+  }
+});
+
+/** クリップボードは読むだけ。対応外の文字列では何も提案しない。 */
+test("クリップボードの対応 URL だけを 1 回提案する", async () => {
+  const { stub, state } = stubVscode();
+  stub.env.clipboard = { readText: async () => "  https://github.com/o/r  " };
+  const { context } = activateWith(stub, fakeEnv().appSupport, {
+    inventory: async () => ({ items: [], issues: [] }), mcpStatus: async () => ({}),
+    watchPaths: () => [], scanPath: async () => [], projects: () => [],
+    isSupportedUrl: url => url.startsWith("https://github.com/"),
+  });
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  try {
+    const view = showView(state);
+    await settle();
+    const offers = state.posted.filter(message => message.type === "clipboard");
+    assert.equal(offers.length, 1);
+    assert.equal(offers[0].url, "https://github.com/o/r");
+
+    // 同じ内容では二度提案しない
+    view.visible = false;
+    state.onVisibility();
+    view.visible = true;
+    state.onVisibility();
+    await settle();
+    assert.equal(state.posted.filter(message => message.type === "clipboard").length, 1);
   } finally {
     for (const entry of context.subscriptions) entry.dispose?.();
   }

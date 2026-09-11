@@ -61,7 +61,7 @@ AGENT TOOL                                    [＋ Add] [⟳ Refresh]
 
 ## 2. Environment セクション
 
-`scanPath()` の結果を表示する（拡張の `activate` 時に 1 回実行）。
+`scanPath()` の結果を一覧の上に折りたたみで表示する（View 表示時に 1 回、手動更新で引き直す）。
 
 ```
 ▾ 🌐 Environment
@@ -71,9 +71,9 @@ AGENT TOOL                                    [＋ Add] [⟳ Refresh]
     ○ gemini     —        not found  [インストール方法を見る ↗]
 ```
 
-- `not found` の CLI にはドキュメントリンクを表示する
+- 折りたたみの見出しに「検出済み / 全体」を出す。開くと未検出の CLI も並ぶ
+- 1 つも見つからないときは一覧の上に警告バナーを出す（§8.4）
 - 手動更新ボタンで再スキャンできる
-- PATH の解決元（`$SHELL -l -c 'echo $PATH'` の結果）をツールチップで確認できる
 
 ---
 
@@ -90,15 +90,12 @@ AGENT TOOL                                    [＋ Add] [⟳ Refresh]
 | 有効・更新なし | `✓ my-skill                [⊘] [🗑]` |
 | 有効・更新あり | `✓ my-skill  ⬆             [⬆] [⊘] [🗑]` |
 | 無効 | `✗ my-skill                [⊘] [🗑]` |
-| ピン留め | `✓ my-skill  📌            [⊘] [🗑]` |
+| ピン留め | `✓ my-skill · 📌 固定中` — 更新を追わない。`•••` から切り替える |
 
-ホバー時ツールチップ:
-```
-my-skill
-ソース: https://github.com/example/my-skill
-SHA: abc123
-最終使用: 2026-09-09
-```
+カードを開くと、説明・使い方・場所・取得元を出す。
+
+**最終使用は出さない。** 使用実績は `~/.claude/projects`（129 MB）や `logs_*.sqlite` を読まないと
+分からず、一覧表示の応答目標を壊す。走査ホワイトリストにも入れない（`src/source.ts`）。
 
 説明・使い方・場所・取得元は、カードそのものをクリックするとカードの直下に開き、
 もう一度クリックすると閉じる（Enter / Space も同じ）。`•••` は管理操作だけを出す。
@@ -265,15 +262,19 @@ Tree View 上部に候補カードを表示する:
 
 | コマンド ID | タイトル（日本語） | 説明 |
 |---|---|---|
-| `agent-tool.addTool` | Skill を追加 | URL を入力してインストール |
-| `agent-tool.refreshInventory` | 一覧を更新 | キャッシュを破棄して再走査 |
-| `agent-tool.rescanPath` | CLI を再検出 | `scanPath()` を再実行 |
-| `agent-tool.toggleTool` | ツールを有効化/無効化 | 選択中アイテムをトグル |
-| `agent-tool.removeTool` | ツールを削除 | 選択中アイテムを削除（確認あり） |
+| `agent-tool.addSkill` | GitHubからSkillを追加 | URL を入力してインストール（スコープを選ぶ） |
+| `agent-tool.addMcp` | MCPサーバーを追加 | JSON・HTTP URL・起動コマンドから追加 |
+| `agent-tool.refreshInventory` | ツールを再読み込み | キャッシュを破棄して再走査 |
+| `agent-tool.checkUpdates` | 更新を確認 | 取得元の最新 SHA を引き、更新バッジを立てる |
+| `agent-tool.toggleTool` | ツールの有効・無効を切り替え | user スコープのみ |
+| `agent-tool.togglePin` | 更新の固定を切り替え | 固定中は更新を追わない |
+| `agent-tool.removeTool` | ツールを削除 | 確認あり |
 | `agent-tool.previewUpdate` | 更新をプレビュー | Diff Editor を開く |
-| `agent-tool.applyUpdate` | 更新を適用 | 選択中アイテムを更新（確認あり） |
-| `agent-tool.showMcpStatus` | MCP ステータスを表示 | 選択サーバーのプロセス情報 |
-| `agent-tool.openDocs` | ドキュメントを開く | GitHub リポジトリを開く |
+| `agent-tool.applyUpdate` | 更新を適用 | 確認あり |
+| `agent-tool.openToolActions` | ツールを管理 | カードの `•••` から呼ぶ操作一覧 |
+
+CLI の再検出は手動更新（`refreshInventory`）に含める。MCP のプロセス情報は表示中の
+3 秒ポーリングで出すので、専用コマンドは持たない。
 
 ---
 
@@ -285,9 +286,10 @@ Cursor の Status Bar 右端に更新件数バッジを表示する。
 [⬆ 3 updates]
 ```
 
-- クリックで Tree View にフォーカスし、更新があるアイテムまでスクロール
+- クリックで Dashboard にフォーカスする（`agent-tool.inventory.focus`）
 - 更新なしのときは非表示
-- `inventory` コマンドの `hasUpdate: true` な件数をカウント
+- `inventory` の `hasUpdate: true` な件数をカウントする。件数が立つのは
+  `checkUpdates` を実行したあと（`registry.repos` に `latestSha` が入ったとき）
 
 ---
 
@@ -295,7 +297,7 @@ Cursor の Status Bar 右端に更新件数バッジを表示する。
 
 ### 8.1 Remote 環境（SSH / Dev Container / Codespaces）
 
-Tree View 全体を無効化し、上部にバナーを表示する:
+一覧の上にバナーを表示する。書き込み操作は実行時にも拒否する:
 
 ```
 ╔═════════════════════════════════════════════╗
@@ -306,7 +308,7 @@ Tree View 全体を無効化し、上部にバナーを表示する:
 
 ### 8.2 未信頼ワークスペース
 
-書き込みボタン（追加・削除・更新・トグル）を無効化し、バナーを表示する:
+一覧の上にバナーを表示する。書き込み操作は実行時にも拒否する:
 
 ```
 ╔══════════════════════════════════════════════╗
@@ -328,7 +330,7 @@ Tree View 全体を無効化し、上部にバナーを表示する:
 | `SYMLINK_OUTSIDE_STORE` | `<path> は Agent Tool が張ったリンクではありません` |
 | `LOCK_TIMEOUT` | `書き込みロックを取得できませんでした（他のウィンドウが操作中の可能性があります）` |
 
-### 8.4 CLI 未検出（`scanPath()` が何も返さない）
+### 8.4 CLI 未検出（`scanPath()` が 1 つも見つけない）
 
 ```
 ╔══════════════════════════════════════════════╗
