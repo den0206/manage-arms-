@@ -1,5 +1,5 @@
 {
-  "extension.description": "Manage AI agent skills, subagents, MCP servers, and plugins from your editor.",
+  "extension.description": "Find Skills, Install Easily!",
   "command.toggleTool": "Enable or Disable Tool",
   "command.addSkill": "Add Skill from GitHub",
   "command.removeTool": "Remove Tool",

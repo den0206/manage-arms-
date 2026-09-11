@@ -2,6 +2,8 @@
   <img src="media/icon.png" width="160" alt="Agent Tool アイコン">
 </p>
 
+**Skillを見つけて、かんたん導入！**
+
 # Agent Tool
 
 [![CI](https://github.com/den0206/agent-tool/actions/workflows/ci.yml/badge.svg)](https://github.com/den0206/agent-tool/actions/workflows/ci.yml)

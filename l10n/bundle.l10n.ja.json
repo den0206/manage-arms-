@@ -1,5 +1,5 @@
 {
-  "extension.description": "AIエージェントのSkill、Subagent、MCPサーバー、Pluginをエディタから管理します。",
+  "extension.description": "Skillを見つけて、かんたん導入！",
   "command.toggleTool": "ツールを有効化または無効化",
   "command.addSkill": "GitHubからSkillを追加",
   "command.removeTool": "ツールを削除",
