@@ -165,6 +165,31 @@ test("dispose でタイマーとキャッシュを手放す", () => {
   assert.ok(context.subscriptions.length > 0);
 });
 
+test("遅い MCP 状態確認を重ねて起動しない", async () => {
+  const { stub } = stubVscode();
+  let calls = 0;
+  let finish;
+  const { DashboardProvider } = loadExtension(stub, {
+    mcpStatus: () => {
+      calls += 1;
+      return new Promise(resolve => { finish = resolve; });
+    },
+  }) && require("../out/dashboard.js");
+  const provider = new DashboardProvider(fakeEnv().appSupport);
+  const view = {
+    webview: { options: {}, cspSource: "vscode-resource:", html: "", onDidReceiveMessage: () => ({ dispose() {} }), postMessage: () => Promise.resolve(true) },
+    visible: false, onDidChangeVisibility: () => ({ dispose() {} }),
+  };
+  provider.resolveWebviewView(view);
+  view.visible = true;
+  const first = provider.refreshStatus();
+  const second = provider.refreshStatus();
+  assert.equal(calls, 1);
+  finish({});
+  await Promise.all([first, second]);
+  provider.dispose();
+});
+
 /** 表示中の Webview を用意して、一覧の再読み込みが届いたかを見る。 */
 function showView(state) {
   const view = {
