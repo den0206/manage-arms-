@@ -6,6 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- Dashboard rows now show an "Updates available" marker, so it is clear which tools the update count refers to.
+- Clicking the "Updates available" count filters the list down to the tools that have an update; clicking it again clears the filter.
+
 ## [0.1.0] — 2026-09-11
 
 ### Added
