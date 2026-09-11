@@ -1,7 +1,8 @@
 # CLAUDE.md — Agent Tool 作業ガイド
 
 AI エージェントの周辺リソース（MCP / Skills / Subagents / Plugins）を管理する
-Cursor 拡張 **Agent Tool**。実装は TypeScript に統一し、macOS / Linux / Windows で全機能を提供する。
+Cursor 拡張 **Agent Tool** と、Skill / Subagent を検知して導入するブラウザ拡張。
+実装は TypeScript に統一し、macOS / Linux / Windows で全機能を提供する。
 
 ## 設計の正本
 
@@ -23,9 +24,12 @@ Agent Tool の判断では `docs/agent-tool-*.md` を優先する。仕様を複
 - 製品・拡張名は **Agent Tool**、拡張 ID は `agent-tool`。
 - リポジトリとローカルディレクトリは`agent-tool`とする。
 - macOSアプリ、旧CHANGELOG、配布・署名・公証資産は置かない。
-- TypeScriptはルートの`src/`と`test/`、スクリプトは`scripts/`に置く。
+- TypeScript は `ide/` `browser/` `core/`、テストはルートの `test/`、スクリプトは `scripts/` に置く。
 - サブプロセスの CLI は持たない。外部コマンドはプロセス一覧取得と PATH 解決だけに限る。
-- 走査・判定・書き込み・WriteGuard は `src/` のモジュールが担当する。
+- 走査・判定・書き込み・WriteGuard は `ide/` のモジュールが担当する。
+- `core/` は OS にもブラウザにも依存しない判定と取得だけを置く。MCP と Plugin は上げない。
+- ブラウザ拡張は Chrome / Edge 対象。書き込みは File System Access API だけで行い、
+  扱うのは Skill と Subagent に限る。IDE 拡張の導入も起動も前提にしない。
 - OS 分岐は `process.platform` で行い、リンクは macOS / Linux が symlink、Windows が junction / hardlink。
 
 ## 完了の定義
@@ -43,13 +47,15 @@ CI はローカルと同じスクリプトを呼び、別ロジックを持た�
 
 1. ファイル書き込みは3経路だけに置く。Skill / Subagent の実体とリンクは `writeGuard.ts`、
    `registry.json` は `registry.ts`、Cursor の `mcp.json` は `mcpScanner.ts` が扱う。
+   ブラウザ拡張が残した取得元の台帳の削除も `writeGuard.ts` の専用パスを通す。
 2. 削除・移動・リンク作成は `writeGuard.ts` を通す。作成前に `assertValidName`、
    親ディレクトリの symlink / junction は `assertSafeCreation` で検証する。
 3. 走査対象は `Source` のホワイトリストだけにする。ホームやワークスペース全体を再帰走査しない。
 4. 壊れた registry の上で書き込みを始めない。read-modify-write はプロセス間ロック内で行い、
    registry はアトミックに保存する。
 5. 未信頼ワークスペースでは一覧だけを許可し、Remote 環境では書き込みを行わない。
-6. UI 文言は `l10n/` の英語・日本語を同時に更新する。
+6. UI 文言は `l10n/` と `browser/_locales/` の英語・日本語を同時に更新する。
+7. ブラウザ拡張は利用者が許可したディレクトリの外へ書き込まない。`<all_urls>` を要求しない。
 
 不変条件スクリプトの許可リストを広げる場合は、ユーザーデータへ到達しない理由を
 スクリプト内に記す。
@@ -69,6 +75,8 @@ CI はローカルと同じスクリプトを呼び、別ロジックを持た�
 - 一時ダウンロード・展開・staging は OS の一時領域に置き、成功・失敗・キャンセルの全経路で削除する。
 - 一覧では frontmatter の先頭4 KBだけを読む。本文は詳細表示中だけ保持し、閉じたら破棄する。
 - Tree View は表示に必要な DTO だけを保持し、Inventory や本文を複製して常駐させない。
+- ブラウザ拡張が永続化するのは IndexedDB のディレクトリハンドルと収集一覧だけ。件数上限を持つ。
+  閲覧した URL、ログ、診断履歴は保持しない。上限値は `core/` で IDE 拡張と共有する。
 - 目標は一覧表示300 ms未満（メモリキャッシュ時）、常駐増分65 MB未満、VSIX 20 MB未満。
 
 上限を緩めるのは、実測で不足が確認され、新しい上限と回収経路をテストできる場合だけにする。
@@ -93,7 +101,9 @@ CI はローカルと同じスクリプトを呼び、別ロジックを持た�
 
 ## ローカライズ・コミット
 
-- 拡張の英語・日本語文言は `l10n/` で管理する。パス・コマンド・差分は verbatim で表示する。
+- IDE 拡張の文言は `l10n/`、ブラウザ拡張は `browser/_locales/{en,ja}/` で管理する。
+  形式は揃えず、英日のキーが揃っているかを `check-invariants.sh` が検査する。
+- パス・コマンド・差分は verbatim で表示する。
 - 日本語の Conventional Commits を使う。コミットと push はユーザーが求めた場合だけ行う。
 - 利用者に見える変更は `CHANGELOG.md` の `[Unreleased]` に英語で追加する。
 - README を変える場合は英語版と日本語版を同時に更新する。
@@ -105,5 +115,7 @@ CI はローカルと同じスクリプトを呼び、別ロジックを持た�
 - Secondary Simulator と同じくNode 20、npm、`package-lock.json`、Node標準 `node:test`を使う。
 - 依存は必要最小限の正確な版に固定し、`ignore-scripts=true`、第三者Actionのcommit SHA固定を守る。
 - Publisherは`yuuki-sakai`。alpha / betaはGitHub Releases、安定版は同じVSIXをOpen VSXからGitHubの順に公開する。
+- 版は拡張ごとに独立させ、タグの接頭辞（`ide-v*` / `browser-v*`）でリリースを分岐する。
+- ブラウザ拡張はChrome Web StoreとEdge Add-onsへ同じzipを出す。
 - VSIXにバイナリを同梱せず、署名・公証も行わない。最初の公開前と配布経路変更時に、配布VSIXからの初回起動を実機確認する。
 - 定期canaryは設けない。リリース前にRSSとAgent Tool自身の保存容量を計測する。
