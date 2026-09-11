@@ -7,7 +7,7 @@ Node.js `node:test` で TypeScript モジュールと VS Code API モックを�
 
 | 対象 | 確認内容 |
 |---|---|
-| WriteGuard / Registry | パス検証、原子的書き込み、ロック |
+| WriteGuard / Registry | パス検証、原子的書き込み、ロック、設定・registry の読込上限 |
 | 走査 | ホワイトリスト外を読まない |
 | 追加・更新・削除 | 実体、リンク、設定の変更先 |
 | Plugin | CLI コマンドと scope |

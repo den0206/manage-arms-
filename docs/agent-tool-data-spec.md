@@ -40,3 +40,6 @@ macOS/Linux では symlink、Windows では junction または hardlink を使�
 - 一覧キャッシュはメモリだけに保持し、手動更新、書き込み後、View 非表示で破棄する。
 - ダウンロード、展開、staging は OS の一時ディレクトリに作り、`finally` で削除する。
 - HTTP キャッシュ、ログ、診断履歴、Undo スナップショットを保存しない。
+- registry、GitHub API 応答、差分本文の合計は 2 MB を上限とする。
+- 読み取る設定ファイルは単一ファイルと同じ 20 MB を上限とする。`~/.claude.json` は履歴で育つ。
+- MCP の状態確認は前回の確認中には重ねて実行しない。非表示・破棄後の結果は保持しない。

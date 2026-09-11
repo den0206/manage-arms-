@@ -3,7 +3,7 @@ const { readdirSync, readFileSync, utimesSync, writeFileSync } = require("node:f
 const { join } = require("node:path");
 const { test } = require("node:test");
 const { registryFile } = require("../out/env.js");
-const { decode, empty, entry, load, read, save, update, upsert, withRegistryLock } =
+const { REGISTRY_SIZE_LIMIT, decode, empty, entry, load, read, save, update, upsert, withRegistryLock } =
   require("../out/registry.js");
 const { fakeEnv, makeDir, writeFileIn } = require("./helpers.js");
 
@@ -33,6 +33,13 @@ test("壊れた registry は read では投げ、load では空になる", () =>
 
 test("registry が無ければ空を返す", () => {
   assert.deepEqual(read(fakeEnv()).resources, []);
+});
+
+test("大きすぎる registry は読み込まない", () => {
+  const env = fakeEnv();
+  seed(env, Buffer.alloc(REGISTRY_SIZE_LIMIT + 1, 0x20));
+  assert.throws(() => read(env), error => error.code === "OPERATION_FAILED");
+  assert.deepEqual(load(env).resources, []);
 });
 
 test("自分より新しいスキーマは拒否する", () => {

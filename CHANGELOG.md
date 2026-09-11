@@ -13,6 +13,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - The Dashboard shows a loading indicator until the first scan finishes, instead of looking like an empty or failed list.
 - The tool list is posted before the agent CLI scan, so the first view no longer waits on spawning login shells.
 
+### Fixed
+
+- Update previews, configuration files, registry reads, and GitHub API responses are now bounded, so a single large input cannot grow the extension host's memory without limit.
+
 ## [0.1.0] — 2026-09-11
 
 ### Added

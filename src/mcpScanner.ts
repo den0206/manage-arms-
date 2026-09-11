@@ -7,6 +7,17 @@ import { MCPScope, MCPServer, parse, parseAll } from "./mcpServer";
 import { sourcePath } from "./source";
 import { assertSafeCreation } from "./writeGuard";
 
+/** 設定ファイルの読み込み上限。`~/.claude.json` は履歴で数 MB まで育つので、
+ *  単一ファイルの上限（20 MB）に合わせる。ここを絞ると読めた設定が黙って消える。 */
+export const CONFIG_SIZE_LIMIT = 20 * 1024 * 1024;
+
+const readConfigText = (path: string): string => {
+  if (statSync(path).size > CONFIG_SIZE_LIMIT) {
+    throw new AgentToolError("OPERATION_FAILED", `${basename(path)} is too large to read (limit 20 MB)`);
+  }
+  return readFileSync(path, "utf8");
+};
+
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -25,7 +36,7 @@ export const stripComments = (text: string): string =>
  * 利用者に要るのは、どのファイルをどう直せばいいかの 1 行だけ。
  */
 export function readJsonc(path: string): unknown {
-  const text = readFileSync(path, "utf8");
+  const text = readConfigText(path);
   try {
     return JSON.parse(text);
   } catch {
@@ -235,7 +246,7 @@ export function editCursor(env: Env, mutate: (servers: Record<string, unknown>) 
   let mode: number | undefined;
 
   if (existsSyncSafe(path)) {
-    const text = readFileSync(path, "utf8");
+    const text = readConfigText(path);
     original = text;
     mode = statSync(path).mode & 0o777;
     try {
@@ -272,7 +283,7 @@ export function editCursor(env: Env, mutate: (servers: Record<string, unknown>) 
   assertSafeCreation(path, join(env.home, ".cursor"), env.home);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   // 読んだ後に他のプロセスが書いていたら、その変更を潰さない。
-  if (original !== undefined && readFileSync(path, "utf8") !== original) {
+  if (original !== undefined && readConfigText(path) !== original) {
     throw new AgentToolError("OPERATION_FAILED",
       "the Cursor settings changed in another process; the edit was cancelled");
   }
