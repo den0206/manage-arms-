@@ -11,7 +11,9 @@
 
 Agent Toolは、AIコーディングエージェントのSkill、Subagent、MCPサーバー、Pluginを横断管理するCursor拡張です。
 
-![Plugin導入デモ](https://raw.githubusercontent.com/den0206/agent-tool/main/media/demo.gif)
+<p align="center">
+  <img src="media/demo.gif" width="1200" alt="Pluginを導入する動作">
+</p>
 
 ## 概要
 
@@ -47,10 +49,10 @@ code --install-extension agent-tool-X.Y.Z.vsix
 
 次のサイトのURLを拡張のURL欄に貼り付けられます。
 
-| サイト | URLの例 | 取得元の決め方 |
-|---|---|---|
-| [GitHub](https://github.com/) | `https://github.com/owner/repo/tree/main/skills/pdf` | URLから決まります。 |
-| [skills.sh](https://skills.sh/) | `https://skills.sh/anthropics/skills/frontend-design` | URLから決まります（パスに`owner/repo`を含みます）。 |
+| サイト                                           | URLの例                                               | 取得元の決め方                                                                 |
+| ------------------------------------------------ | ----------------------------------------------------- | ------------------------------------------------------------------------------ |
+| [GitHub](https://github.com/)                    | `https://github.com/owner/repo/tree/main/skills/pdf`  | URLから決まります。                                                            |
+| [skills.sh](https://skills.sh/)                  | `https://skills.sh/anthropics/skills/frontend-design` | URLから決まります（パスに`owner/repo`を含みます）。                            |
 | [Agents Directory](https://agentsdirectory.dev/) | `https://agentsdirectory.dev/skills/frontend-design/` | ページを1回読み、schema.orgのJSON-LDメタデータだけからリポジトリを特定します。 |
 
 サイトは`src/github.ts`の`CATALOG_SITES`で宣言し、追加・削除は1エントリで済みます。ページのHTMLは走査しません。URLに`owner/repo`を含まないサイトは、JSON-LDの`codeRepository`または`url`を公開している必要があります。
