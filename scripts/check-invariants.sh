@@ -44,7 +44,7 @@ done
 echo "✓ 取得物の名前と可変性は作成前に検査されています"
 
 # 走査はホワイトリストだけを見る。ホームやワークスペース全体を再帰走査しない。
-LEAKS=$(grep -rnE '\breaddirSync\(' src/ --include='*.ts' \
+LEAKS=$(grep -rnE '\b(readdirSync|opendirSync|globSync)\(' src/ --include='*.ts' \
         | grep -vE '/(source|skillScanner|projectScan|fetcher|updater)\.ts:')
 if [ -n "$LEAKS" ]; then
     fail "走査がホワイトリストの外に漏れています" "$LEAKS"
