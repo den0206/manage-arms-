@@ -95,5 +95,6 @@
   "Delegate to it from the agent's subagent feature.": "Delegate to it from the agent's subagent feature.",
   "Available as an MCP tool in the matching agent.": "Available as an MCP tool in the matching agent.",
   "Use it from the matching agent's plugin feature.": "Use it from the matching agent's plugin feature.",
-  "Show only tools with updates": "Show only tools with updates"
+  "Show only tools with updates": "Show only tools with updates",
+  "Loading tools…": "Loading tools…"
 }

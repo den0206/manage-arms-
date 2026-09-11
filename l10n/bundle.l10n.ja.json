@@ -95,5 +95,6 @@
   "Delegate to it from the agent's subagent feature.": "対応するエージェントの委譲機能から指定して使います。",
   "Available as an MCP tool in the matching agent.": "対応するエージェントのMCPツールとして利用できます。",
   "Use it from the matching agent's plugin feature.": "対応するエージェントのPlugin機能から利用します。",
-  "Show only tools with updates": "更新のあるツールだけ表示"
+  "Show only tools with updates": "更新のあるツールだけ表示",
+  "Loading tools…": "ツールを読み込んでいます…"
 }

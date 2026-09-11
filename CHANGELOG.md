@@ -10,6 +10,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Dashboard rows now show an "Updates available" marker, so it is clear which tools the update count refers to.
 - Clicking the "Updates available" count filters the list down to the tools that have an update; clicking it again clears the filter.
+- The Dashboard shows a loading indicator until the first scan finishes, instead of looking like an empty or failed list.
+- The tool list is posted before the agent CLI scan, so the first view no longer waits on spawning login shells.
 
 ## [0.1.0] — 2026-09-11
 
