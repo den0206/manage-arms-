@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-09-11
+
 ### Added
 
 - Windows and Linux support: every feature now runs on macOS, Linux, and Windows.
@@ -53,3 +55,4 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Unused registry fields (`usage`, `projects`, `excludedProjects`, per-agent `enabled`). Nothing read or wrote them; usage history would require scanning the agents' log directories, which the scan whitelist deliberately excludes.
 
 - Deleting a tool no longer moves it to the Trash and no longer offers a 30-second undo; the confirmation dialog states that the removal is permanent.
+
