@@ -10,6 +10,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Windows and Linux support: every feature now runs on macOS, Linux, and Windows.
 - Commands for previewing and applying tool updates and refreshing the inventory.
+- Skills and subagents can now be installed into the current project instead of the user profile. The install flow asks where to put it when a workspace is open; project items live in the project's own `.claude/skills` or `.claude/agents`, are tracked separately from same-named user items, and can be removed and updated from the list. Enable/disable stays user-only, since nothing is parked inside a project.
 - Skill pages on Agents Directory (`agentsdirectory.dev`) can now be pasted into the URL field. The page is read once and only its schema.org JSON-LD metadata is used to find the repository. Supported sites are listed in the README and declared in one place, so adding or removing one is a single entry.
 - An "Other projects" dropdown below the User Global list: pick any project Claude Code has opened that actually holds tools to see its Skills, Subagents, MCP servers, and plugins with their descriptions and locations. Only the selected project is scanned, and the list is read-only.
 

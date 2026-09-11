@@ -4,7 +4,7 @@ const { join } = require("node:path");
 const { test } = require("node:test");
 const { agentStore, claudeSkills, disabledStore, skillStore } = require("../out/env.js");
 const { install } = require("../out/installer.js");
-const { disable, enable, layout, remove } = require("../out/skillManager.js");
+const { disable, enable, layout, remove, removeUnmanaged } = require("../out/skillManager.js");
 const { empty, upsert } = require("../out/registry.js");
 const { isManagedLink } = require("../out/writeGuard.js");
 const { fakeEnv, makeDir, writeFileIn } = require("./helpers.js");
@@ -180,4 +180,79 @@ test("同名の Skill があっても Plugin の削除で巻き込まない", ()
 
   assert.throws(() => remove("ponytail", "plugin", env, registry), code("OPERATION_FAILED"));
   assert.ok(existsSync(join(skillStore(env), "ponytail", "SKILL.md")), "Skill の実体は残る");
+});
+
+// --- project スコープ ---
+
+const project = env => makeDir(join(env.home, "workspace"));
+const at = path => ({ scope: "project", path });
+
+test("project スコープはプロジェクト内に置き、user 側には作らない", () => {
+  const env = fakeEnv();
+  const registry = empty();
+  const workspace = project(env);
+  const { staging, candidate } = stagedSkill(env, "pdf");
+  install(candidate, staging, env, registry, at(workspace));
+
+  assert.ok(existsSync(join(workspace, ".claude/skills/pdf/SKILL.md")));
+  // user の置き場にもリンク先にも触らない。同名の user スキルと混ざらない。
+  assert.equal(existsSync(join(skillStore(env), "pdf")), false);
+  assert.equal(existsSync(join(claudeSkills(env), "pdf")), false);
+  assert.equal(registry.resources.find(item => item.name === "pdf").project, workspace);
+});
+
+test("同名の user と project は別の実体として扱う", () => {
+  const env = fakeEnv();
+  const registry = empty();
+  const workspace = project(env);
+  install(stagedSkill(env, "pdf").candidate, stagedSkill(env, "pdf").staging, env, registry);
+  const second = stagedSkill(env, "pdf");
+  install(second.candidate, second.staging, env, registry, at(workspace));
+  assert.equal(registry.resources.filter(item => item.name === "pdf").length, 2);
+
+  // プロジェクトのものを消しても user の実体は残る。
+  remove("pdf", "skill", env, registry, at(workspace));
+  assert.equal(existsSync(join(workspace, ".claude/skills/pdf")), false);
+  assert.ok(existsSync(join(skillStore(env), "pdf")));
+  assert.equal(registry.resources.filter(item => item.name === "pdf").length, 1);
+  assert.equal(registry.resources[0].project, undefined);
+});
+
+test("user の有効化・無効化は同名 project を変更しない", () => {
+  const env = fakeEnv();
+  const registry = empty();
+  const workspace = project(env);
+  const projectSkill = stagedSkill(env, "pdf");
+  install(projectSkill.candidate, projectSkill.staging, env, registry, at(workspace));
+  const userSkill = stagedSkill(env, "pdf");
+  install(userSkill.candidate, userSkill.staging, env, registry);
+
+  disable("pdf", "skill", env, registry);
+  assert.equal(registry.resources.find(item => item.project === workspace).disabled, false);
+  assert.equal(registry.resources.find(item => item.project === undefined).disabled, true);
+
+  enable("pdf", "skill", env, registry);
+  assert.equal(registry.resources.find(item => item.project === workspace).disabled, false);
+  assert.equal(registry.resources.find(item => item.project === undefined).disabled, false);
+});
+
+/** プロジェクト内に隠しの退避先を作らない。 */
+test("project スコープは有効化・無効化できない", () => {
+  const env = fakeEnv();
+  const registry = empty();
+  const workspace = project(env);
+  const plan = layout("pdf", "skill", env, at(workspace));
+  assert.equal(plan.parked, undefined);
+  assert.deepEqual(plan.links, []);
+});
+
+test("プロジェクトの .claude/skills 直下以外は消さない", () => {
+  const env = fakeEnv();
+  const workspace = project(env);
+  writeFileIn(join(workspace, ".claude/skills/nested/deep/SKILL.md"), "---\nname: deep\n---\n");
+  writeFileIn(join(workspace, "src/evil/SKILL.md"), "---\nname: evil\n---\n");
+  assert.throws(() => removeUnmanaged("evil", "skill", env, at(workspace)), code("NOT_FOUND"));
+  // 直下にあるものは消せる
+  assert.deepEqual(removeUnmanaged("nested", "skill", env, at(workspace)),
+    [join(workspace, ".claude/skills/nested")]);
 });

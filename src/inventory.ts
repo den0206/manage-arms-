@@ -43,15 +43,23 @@ export function hasUpdate(entry: Entry | undefined, registry: Registry): boolean
  * スキルの出どころ。エージェント同梱ルートにしか無いものだけを bundled にする —
  * ユーザーが同名のものを自分の置き場にも持っていれば、それは自分のもの。
  */
-function origin(name: string, kind: KindId, roots: string[], registry: Registry):
-  InventoryItem["origin"] {
+function origin(name: string, kind: KindId, roots: string[], registry: Registry,
+                project?: string): InventoryItem["origin"] {
   const visible = roots.filter(root => root !== PARKED);
   if (visible.length > 0 && visible.every(root => BUNDLED_SKILL_ROOTS.has(root))) return "bundled";
-  return registry.resources.some(e => e.name === name && e.kind === kind) ? "managed" : "user";
+  return entryOf(registry, name, kind, project) !== undefined ? "managed" : "user";
 }
 
+/**
+ * 同じ名前・種別が user と project の両方にありうる。`project` まで見ないと、
+ * プロジェクトのものに user の取得元や更新バッジを出してしまう。
+ */
+const entryOf = (registry: Registry, name: string, kind: KindId, project?: string):
+  Entry | undefined => registry.resources.find(e =>
+    e.name === name && e.kind === kind && e.project === project);
+
 function group(found: Skill[], kind: KindId, scope: ScopeId, registry: Registry,
-               rootsFor: (agent: AgentId) => string[]): InventoryItem[] {
+               rootsFor: (agent: AgentId) => string[], project?: string): InventoryItem[] {
   const groups = new Map<string, Skill[]>();
   for (const item of found) groups.set(item.name, [...(groups.get(item.name) ?? []), item]);
 
@@ -59,12 +67,12 @@ function group(found: Skill[], kind: KindId, scope: ScopeId, registry: Registry,
     // リンク切れ・SKILL.md 欠落は「有効」にしない。退避中はどこからも見えない。
     const visible = new Set(items.filter(item => isLoadable(item.status) && item.root !== PARKED)
       .map(item => item.root));
-    const entry = registry.resources.find(e => e.name === name && e.kind === kind);
+    const entry = entryOf(registry, name, kind, project);
     return {
       name, kind, scope,
       agents: AGENT_IDS.filter(agent => rootsFor(agent).some(root => visible.has(root))),
       enabled: !items.some(item => item.root === PARKED),
-      origin: origin(name, kind, items.map(item => item.root), registry),
+      origin: origin(name, kind, items.map(item => item.root), registry, project),
       sourcePath: items[0].path,
       repoUrl: entry?.repo,
       hasUpdate: hasUpdate(entry, registry),
@@ -96,8 +104,8 @@ function projectItems(project: string, registry: Registry): InventoryItem[] {
       .map(skill => prefix === "" ? skill : { ...skill, name: `${prefix}:${skill.name}` }));
   const subagents = scanSubagentRoot(projectSubagentRoot(project), ".claude/agents");
   return [
-    ...group(skills, "skill", "project", registry, skillRoots),
-    ...group(subagents, "subagent", "project", registry, subagentRoots),
+    ...group(skills, "skill", "project", registry, skillRoots, project),
+    ...group(subagents, "subagent", "project", registry, subagentRoots, project),
   ];
 }
 

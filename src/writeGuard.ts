@@ -210,6 +210,23 @@ export function userRoots(kind: KindId, env: Env): string[] {
  * ただしリンクは辿らない。辿ると、リンク先の管理外ファイルまで消しにいく。
  */
 export function assertUserArtifact(path: string, kind: KindId, env: Env): void {
+  assertArtifact(path, kind, userRoots(kind, env), env.home, env);
+}
+
+/** プロジェクト内の Skill / Subagent の置き場。一覧が読む場所と同じにする。 */
+export const projectRoots = (kind: KindId, project: string): string[] =>
+  [join(project, ".claude", kind === "subagent" ? "agents" : "skills")];
+
+/**
+ * プロジェクト内の実体を触ってよいか。信頼の根はワークスペースで、
+ * `.claude/skills` / `.claude/agents` の**直下**だけを許す。
+ * ホームの管理ルートとは別の根なので、`assertMutable` ではなくこちらを通す。
+ */
+export function assertProjectArtifact(path: string, kind: KindId, project: string, env: Env): void {
+  assertArtifact(path, kind, projectRoots(kind, project), project, env);
+}
+
+function assertArtifact(path: string, kind: KindId, roots: string[], anchor: string, env: Env): void {
   if (kind !== "skill" && kind !== "subagent") {
     throw new AgentToolError("WRITE_GUARD_DENIED", `${kind} is managed by the agent`);
   }
@@ -222,12 +239,12 @@ export function assertUserArtifact(path: string, kind: KindId, env: Env): void {
     throw new AgentToolError("WRITE_GUARD_DENIED", `${target} is not a subagent file`);
   }
   const parent = dirname(target);
-  if (!userRoots(kind, env).some(root => isSame(parent, root))) {
+  if (!roots.some(root => isSame(parent, root))) {
     throw new AgentToolError("WRITE_GUARD_DENIED",
       `${target} is not directly inside a known ${kind} root`);
   }
-  // 既知ルートまでの経路がホームの外へ張り替えられていないことを確かめる。
-  assertSafeCreation(target, parent, env.home);
+  // 既知ルートまでの経路が信頼の根の外へ張り替えられていないことを確かめる。
+  assertSafeCreation(target, parent, anchor);
 }
 
 /** 同梱スキルとプラグインは、誰が入れたものでも触らない。 */

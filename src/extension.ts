@@ -7,10 +7,28 @@ import { DashboardItem, DashboardProvider } from "./dashboard";
 
 type ToolNode = { tool: DashboardItem; scope: DashboardItem["scope"]; agent?: string };
 
+/** 開いているワークスペース。project スコープの実体の置き場はここで決まる。 */
+const workspacePath = (): string | undefined =>
+  vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+
 const selectorOf = (node: ToolNode): agentTool.Selector => ({
   name: node.tool.name, kind: node.tool.kind as KindId, scope: node.scope,
   agent: node.agent as AgentId, sourcePath: node.tool.sourcePath,
+  projectPath: node.scope === "project" ? workspacePath() : undefined,
 });
+
+/** 追加先の選択。ワークスペースが無ければ選ばせずに user へ入れる。 */
+async function pickScope(): Promise<{ scope: "user" | "project"; projectPath?: string } | undefined> {
+  const folder = workspacePath();
+  if (folder === undefined) return { scope: "user" };
+  const picked = await vscode.window.showQuickPick([
+    { label: vscode.l10n.t("User Global"), description: vscode.l10n.t("Available in every project"),
+      value: "user" as const },
+    { label: vscode.l10n.t("Current Project"), description: folder, value: "project" as const },
+  ], { placeHolder: vscode.l10n.t("Where should it be installed?") });
+  if (picked === undefined) return undefined;
+  return picked.value === "project" ? { scope: "project", projectPath: folder } : { scope: "user" };
+}
 
 const message = (error: unknown): string =>
   error instanceof AgentToolError || error instanceof Error ? error.message : String(error);
@@ -73,8 +91,10 @@ export function activate(context: vscode.ExtensionContext): void {
       ignoreFocusOut: true,
     });
     if (!url) return;
+    const target = await pickScope();
+    if (target === undefined) return;
     const result = await withProgress(vscode.l10n.t("Agent Tool: Adding Skill"),
-      () => agentTool.add({ storagePath, url, kind: "skill", scope: "user" }));
+      () => agentTool.add({ storagePath, url, kind: "skill", ...target }));
     if (result.ok) void dashboard.refresh(true);
   });
 
@@ -116,11 +136,14 @@ export function activate(context: vscode.ExtensionContext): void {
         { modal: true, detail: commands.map(argv => argv.join(" ")).join("\n") }, vscode.l10n.t("Install"));
       if (choice !== vscode.l10n.t("Install")) return false;
     }
+    // Plugin の置き場はエージェントの CLI が決める。選ばせられるのは Skill / Subagent だけ。
+    const target = input.kind === "plugin" ? { scope: "user" as const } : await pickScope();
+    if (target === undefined) return false;
     const result = await withProgress(vscode.l10n.t("Agent Tool: Installing Tool"), () =>
       input.kind === "plugin"
         ? agentTool.pluginAdd({ storagePath, agent: agent!, name: input.selector ?? input.name!, url: input.url })
         : agentTool.add({
-          storagePath, url: input.url!, scope: "user",
+          storagePath, url: input.url!, ...target,
           kind: input.kind as "skill" | "subagent" | "plugin", name: input.name,
         }));
     if (result.ok) void dashboard.refresh(true);
@@ -208,7 +231,8 @@ export function activate(context: vscode.ExtensionContext): void {
         && (item.kind === "mcp"
           || (item.kind === "plugin" && (agent === "claude" || agent === "codex"))));
     const actions = [
-      ...(manageable ? [{ label: vscode.l10n.t("Enable or disable"), value: "agent-tool.toggleTool" }] : []),
+      ...(agentTool.isTogglable(selectorOf(node))
+        ? [{ label: vscode.l10n.t("Enable or disable"), value: "agent-tool.toggleTool" }] : []),
       ...(manageable && item.hasUpdate
         ? [{ label: vscode.l10n.t("Preview update"), value: "agent-tool.previewUpdate" },
            { label: vscode.l10n.t("Apply update"), value: "agent-tool.applyUpdate" }] : []),

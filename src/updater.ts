@@ -6,7 +6,7 @@ import { AgentToolError } from "./errors";
 import { Candidate, discard, stage, Staging } from "./fetcher";
 import { GitHubSource } from "./github";
 import { Entry, Registry, update as updateRegistry, upsert } from "./registry";
-import { layout } from "./skillManager";
+import { layout, Place, USER } from "./skillManager";
 import * as guard from "./writeGuard";
 
 /** Diff Editor に渡す 1 ファイル分。 */
@@ -56,8 +56,9 @@ export async function resolveSha(source: GitHubSource, http: Http = defaultHttp,
   return sha;
 }
 
-function managedEntry(registry: Registry, name: string, kind: KindId): Entry {
-  const entry = registry.resources.find(item => item.name === name && item.kind === kind);
+function managedEntry(registry: Registry, name: string, kind: KindId, project?: string): Entry {
+  const entry = registry.resources.find(item =>
+    item.name === name && item.kind === kind && item.project === project);
   if (!entry || entry.repo === undefined) {
     throw new AgentToolError("NOT_IN_REGISTRY", `${name} has no known source, so it cannot be updated`);
   }
@@ -85,9 +86,14 @@ async function stageEntry(entry: Entry, registry: Registry, options: {
   return { staging, candidate, sha };
 }
 
+/** registry の `project` が実体の置き場を決める。未設定なら user。 */
+const placeOf = (entry: Entry): Place =>
+  entry.project === undefined ? USER : { scope: "project", path: entry.project };
+
 const destinationFor = (entry: Entry, env: Env): string => {
-  const plan = layout(entry.name, entry.kind, env);
-  return entry.disabled ? plan.parked : plan.store;
+  const plan = layout(entry.name, entry.kind, env, placeOf(entry));
+  // project は退避先を持たないので、実体はつねに置き場にある。
+  return entry.disabled && plan.parked !== undefined ? plan.parked : plan.store;
 };
 
 /** 実体の相対パスを集める。ディレクトリでなければそれ自身だけ。 */
@@ -121,10 +127,10 @@ const readText = (path: string): string => {
  * 一時展開はこの関数の中で片付ける — 適用は同じ SHA を掴み直して取り直す。
  */
 export async function updatePreview(params: {
-  env: Env; registry: Registry; name: string; kind: KindId;
+  env: Env; registry: Registry; name: string; kind: KindId; project?: string;
   http?: Http; fetchImpl?: typeof fetch;
 }): Promise<UpdateDiff> {
-  const entry = managedEntry(params.registry, params.name, params.kind);
+  const entry = managedEntry(params.registry, params.name, params.kind, params.project);
   const { staging, candidate, sha } = await stageEntry(entry, params.registry, params);
   try {
     const current = destinationFor(entry, params.env);
@@ -151,11 +157,11 @@ export async function updatePreview(params: {
  * 復元にも失敗したときは控えを消さない — 旧実体はそこにしか残っていない。
  */
 export async function updateApply(params: {
-  env: Env; registry: Registry; name: string; kind: KindId;
+  env: Env; registry: Registry; name: string; kind: KindId; project?: string;
   http?: Http; fetchImpl?: typeof fetch;
 }): Promise<{ appliedSha: string }> {
   const { env } = params;
-  const entry = managedEntry(params.registry, params.name, params.kind);
+  const entry = managedEntry(params.registry, params.name, params.kind, params.project);
   const { staging, candidate, sha } = await stageEntry(entry, params.registry, params);
   const destination = destinationFor(entry, env);
   const backup = join(staging.root, "previous");
@@ -163,16 +169,23 @@ export async function updateApply(params: {
   let keepBackup = false;
 
   try {
-    guard.assertMutable(destination, env, params.registry);
-    guard.prepare(destination, join(destination, ".."),
-      guard.isInside(destination, env.home) ? env.home : env.appSupport);
+    // プロジェクトの実体はホームの管理ルートの外にある。信頼の根が違うので別のガードを通す。
+    const place = placeOf(entry);
+    if (place.scope === "project") {
+      guard.assertProjectArtifact(destination, entry.kind, place.path, env);
+    } else {
+      guard.assertMutable(destination, env, params.registry);
+    }
+    guard.prepare(destination, join(destination, ".."), place.scope === "project" ? place.path
+      : guard.isInside(destination, env.home) ? env.home : env.appSupport);
 
     const hadExisting = guard.exists(destination);
     try {
       if (hadExisting) guard.move(destination, backup);
       guard.copy(candidate.localPath, destination);
       await updateRegistry(env, latest => {
-        const current = latest.resources.find(item => item.name === entry.name && item.kind === entry.kind);
+        const current = latest.resources.find(item =>
+          item.name === entry.name && item.kind === entry.kind && item.project === entry.project);
         if (!current) throw new AgentToolError("NOT_IN_REGISTRY", `${entry.name} is no longer managed`);
         if (current.pinned) throw new AgentToolError("OPERATION_FAILED", `${entry.name} is pinned`);
         upsert(latest, { ...current, sha });

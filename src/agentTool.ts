@@ -13,8 +13,8 @@ import * as mcp from "./mcpScanner";
 import { MCPScope, MCPServer } from "./mcpServer";
 import { mcpStatus as pollMcpStatus } from "./processScanner";
 import { knownProjects } from "./projectScan";
-import { cliOverrides, load, read, Registry, save, update } from "./registry";
-import { disable, enable, remove as removeManaged, removeUnmanaged } from "./skillManager";
+import { cliOverrides, entry, load, read, Registry, save, update } from "./registry";
+import { disable, enable, Place, remove as removeManaged, removeUnmanaged, USER } from "./skillManager";
 import { updateApply as applyUpdate, updatePreview as previewUpdate, UpdateDiff } from "./updater";
 
 export { AgentToolError } from "./errors";
@@ -30,6 +30,8 @@ export type Selector = {
   scope: ScopeId;
   agent: AgentId;
   sourcePath?: string;
+  /** project スコープのときのワークスペース。実体の置き場がここで決まる。 */
+  projectPath?: string;
 };
 
 export type PreviewCandidate = {
@@ -130,8 +132,11 @@ export async function add(params: {
   url: string;
   kind: "skill" | "subagent" | "plugin";
   scope: ScopeId;
+  /** project スコープで必須。無いまま project を指定したら user へは落とさず失敗させる。 */
+  projectPath?: string;
   name?: string;
 }): Promise<void> {
+  const place = placeFor(params.scope, params.projectPath);
   const url = await resolveUrl(params.url);
   const source = parseUrl(url);
   if (source === null) {
@@ -146,22 +151,50 @@ export async function add(params: {
     if (candidate === undefined) {
       throw new AgentToolError("NOT_FOUND", `no ${params.kind} was found at that URL`);
     }
-    await mutate(params.storagePath, (registry, env) => install(candidate, staging, env, registry));
+    await mutate(params.storagePath, (registry, env) =>
+      install(candidate, staging, env, registry, place));
   } finally {
     discard(staging);
   }
 }
 
+/** 追加先の置き場。project を頼まれてワークスペースが無いときは、黙って user に落とさない。 */
+function placeFor(scope: ScopeId, projectPath?: string): Place {
+  if (scope !== "project") return USER;
+  if (projectPath === undefined) {
+    throw new AgentToolError("OPERATION_FAILED", "no workspace folder is open to install into");
+  }
+  return { scope: "project", path: projectPath };
+}
+
+/** 実体の置き場。project はワークスペースが分からなければ組めない。 */
+const placeOf = (selector: Selector): Place =>
+  selector.scope === "project" && selector.projectPath !== undefined
+    ? { scope: "project", path: selector.projectPath }
+    : USER;
+
 /**
- * 実体を触ってよい対象か。`skillManager.layout` は user スコープの置き場しか組まないので、
- * project スコープや Plugin を渡すと**同名の user スコープ実体**を消してしまう。
+ * 実体を触ってよい対象か。MCP と Plugin はこちらの管理ストアに実体を持たず、
+ * `layout` に渡すと**同名の Skill の置き場**を指してしまう。
  * D-5 によりゴミ箱を経由しないため、取り違えは復旧できない。ここで先に落とす。
  *
- * ponytail: project スコープの実体管理は未実装。入れるなら `layout` に
- * `projectPath` を渡し、`.claude/skills` 直下だけを対象にする。
+ * project スコープはワークスペースが分かるときだけ。`apps/web:deploy` のような
+ * 修飾名はサブディレクトリのもので、`.claude/skills` 直下ではないので扱わない。
  */
 export const isManageable = (selector: Selector): boolean =>
-  selector.scope === "user" && (selector.kind === "skill" || selector.kind === "subagent");
+  (selector.kind === "skill" || selector.kind === "subagent")
+  && !selector.name.includes(":")
+  && (selector.scope === "user" || selector.projectPath !== undefined);
+
+/** registry に載せる `project`。user スコープでは必ず undefined にする。 */
+const projectOf = (selector: Selector): string | undefined => {
+  const place = placeOf(selector);
+  return place.scope === "project" ? place.path : undefined;
+};
+
+/** 有効化・無効化は退避先がある user だけ。プロジェクト内に隠し退避先を作らない。 */
+export const isTogglable = (selector: Selector): boolean =>
+  isManageable(selector) && selector.scope === "user";
 
 function assertManageable(selector: Selector): void {
   if (isManageable(selector)) return;
@@ -173,22 +206,28 @@ function assertManageable(selector: Selector): void {
 export async function remove(params: { storagePath: string; selector: Selector }): Promise<void> {
   assertManageable(params.selector);
   const { name, kind } = params.selector;
+  const place = placeOf(params.selector);
+  const project = place.scope === "project" ? place.path : undefined;
   return mutate(params.storagePath, (registry, env) => {
     // registry に載っていれば管理下の実体。載っていないものは他のツールが入れた資産で、
     // 既知ルート直下にあるものだけを削除する。
-    const managed = registry.resources.some(item => item.name === name && item.kind === kind);
-    if (managed) removeManaged(name, kind, env, registry);
-    else removeUnmanaged(name, kind, env);
+    const managed = registry.resources.some(item =>
+      item.name === name && item.kind === kind && item.project === project);
+    if (managed) removeManaged(name, kind, env, registry, place);
+    else removeUnmanaged(name, kind, env, place);
   });
 }
 
 export async function toggle(params: { storagePath: string; selector: Selector }):
   Promise<{ enabled: boolean }> {
   assertManageable(params.selector);
+  if (!isTogglable(params.selector)) {
+    throw new AgentToolError("OPERATION_FAILED",
+      `${params.selector.name} belongs to the project; enable and disable are not available there`);
+  }
   const { name, kind } = params.selector;
   const env = envOf(params.storagePath);
-  const wasEnabled = read(env).resources
-    .find(item => item.name === name && item.kind === kind)?.disabled !== true;
+  const wasEnabled = entry(read(env), name, kind)?.disabled !== true;
   await mutate(params.storagePath, (registry, scoped) =>
     wasEnabled ? disable(name, kind, scoped, registry) : enable(name, kind, scoped, registry));
   return { enabled: !wasEnabled };
@@ -196,14 +235,16 @@ export async function toggle(params: { storagePath: string; selector: Selector }
 
 export function updatePreview(params: { storagePath: string; selector: Selector }): Promise<UpdateDiff> {
   const env = envOf(params.storagePath);
-  return previewUpdate({ env, registry: read(env), name: params.selector.name, kind: params.selector.kind });
+  return previewUpdate({ env, registry: read(env), name: params.selector.name,
+    kind: params.selector.kind, project: projectOf(params.selector) });
 }
 
 export async function updateApply(params: { storagePath: string; selector: Selector }):
   Promise<{ appliedSha: string }> {
   const env = envOf(params.storagePath);
   const registry = read(env);
-  const result = await applyUpdate({ env, registry, name: params.selector.name, kind: params.selector.kind });
+  const result = await applyUpdate({ env, registry, name: params.selector.name,
+    kind: params.selector.kind, project: projectOf(params.selector) });
   return result;
 }
 

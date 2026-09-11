@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { KindId } from "./agent";
 import { agentStore, claudeSkills, disabledAgentStore, disabledStore, Env, skillStore } from "./env";
 import { AgentToolError } from "./errors";
-import { Entry, Registry, upsert } from "./registry";
+import { entry, Entry, Registry, upsert } from "./registry";
 import * as guard from "./writeGuard";
 
 /**
@@ -11,23 +11,39 @@ import * as guard from "./writeGuard";
  * 有効/無効は全エージェント一括。Cursor と Codex は `~/.agents/skills/` を直読みするので、
  * エージェント別の on/off は原理的に不可能。
  */
+/**
+ * 実体をどこに置くか。project はプロジェクト内に直接置き、リンクを張らない —
+ * プロジェクトのファイルは git で共有されるもので、リンクでは他の人の手元で切れる。
+ */
+export type Place =
+  | { readonly scope: "user" }
+  | { readonly scope: "project"; readonly path: string };
+
+export const USER: Place = { scope: "user" };
+
 export type Layout = {
   /** 実体の置き場。 */
   readonly store: string;
-  /** 無効化したときの退避先。実体は消さない。 */
-  readonly parked: string;
+  /** 無効化したときの退避先。project は退避しないので持たない。 */
+  readonly parked?: string;
   /** 各エージェントから見えるようにするリンク。 */
   readonly links: string[];
   /** リンクの種別。Skill はディレクトリ、Subagent は単一ファイル。 */
   readonly linkKind: "dir" | "file";
 };
 
-export function layout(name: string, kind: KindId, env: Env): Layout {
+export function layout(name: string, kind: KindId, env: Env, place: Place = USER): Layout {
   // MCP と Plugin はこちらの管理ストアに実体を持たない。ここを素通りさせると
   // `~/.agents/skills/<name>` を指してしまい、同名の Skill を消しにいく。
   if (kind !== "skill" && kind !== "subagent") {
     throw new AgentToolError("OPERATION_FAILED",
       `${kind} is managed by the agent, not by Agent Tool`);
+  }
+  if (place.scope === "project") {
+    // 一覧が読む場所にそのまま置く（`projectSkillRoots` / `projectSubagentRoot`）。
+    return kind === "subagent"
+      ? { store: join(place.path, ".claude", "agents", `${name}.md`), links: [], linkKind: "file" }
+      : { store: join(place.path, ".claude", "skills", name), links: [], linkKind: "dir" };
   }
   if (kind === "subagent") {
     return {
@@ -48,6 +64,15 @@ export function layout(name: string, kind: KindId, env: Env): Layout {
   };
 }
 
+/** 有効化・無効化は退避先がある user だけ。プロジェクト内に隠し退避先を作らない。 */
+const parkedOf = (plan: Layout, name: string): string => {
+  if (plan.parked === undefined) {
+    throw new AgentToolError("OPERATION_FAILED",
+      `${name} belongs to the project; enable and disable are not available there`);
+  }
+  return plan.parked;
+};
+
 const notFound = (name: string): never => {
   throw new AgentToolError("NOT_FOUND", `${name} was not found`);
 };
@@ -58,7 +83,7 @@ const rollbackFailed = (original: unknown, rollback: unknown): never => {
 };
 
 const entryFor = (registry: Registry, name: string, kind: KindId): Entry =>
-  registry.resources.find(item => item.name === name && item.kind === kind)
+  entry(registry, name, kind)
   ?? { name, kind, pinned: false, disabled: false };
 
 /** 実体へのリンクを張り直す。既に別のものがある位置は上書きしない。 */
@@ -106,14 +131,15 @@ export function link(name: string, kind: KindId, env: Env, registry: Registry): 
 export function enable(name: string, kind: KindId, env: Env, registry: Registry): void {
   guard.assertValidName(name);
   const plan = layout(name, kind, env);
+  const parked = parkedOf(plan, name);
   const wasParked = !guard.exists(plan.store);
 
   if (wasParked) {
-    if (!guard.exists(plan.parked)) notFound(name);
-    guard.assertMutable(plan.parked, env, registry);
+    if (!guard.exists(parked)) notFound(name);
+    guard.assertMutable(parked, env, registry);
     guard.prepare(plan.store, join(plan.store, ".."),
       guard.isInside(plan.store, env.home) ? env.home : env.appSupport);
-    guard.move(plan.parked, plan.store);
+    guard.move(parked, plan.store);
   }
   try {
     link(name, kind, env, registry);
@@ -123,8 +149,8 @@ export function enable(name: string, kind: KindId, env: Env, registry: Registry)
       for (const path of plan.links) {
         if (guard.isManagedLink(path, plan.store)) guard.removeLink(path);
       }
-      if (wasParked && guard.exists(plan.store) && !guard.exists(plan.parked)) {
-        guard.move(plan.store, plan.parked);
+      if (wasParked && guard.exists(plan.store) && !guard.exists(parked)) {
+        guard.move(plan.store, parked);
       }
     } catch (rollback) {
       rollbackFailed(error, rollback);
@@ -143,25 +169,26 @@ export function enable(name: string, kind: KindId, env: Env, registry: Registry)
 export function disable(name: string, kind: KindId, env: Env, registry: Registry): void {
   guard.assertValidName(name);
   const plan = layout(name, kind, env);
+  const parked = parkedOf(plan, name);
 
   if (!guard.exists(plan.store)) notFound(name);
   guard.assertMutable(plan.store, env, registry);
-  if (guard.exists(plan.parked)) {
-    throw new AgentToolError("ALREADY_EXISTS", `${plan.parked} already holds something else; not overwriting`);
+  if (guard.exists(parked)) {
+    throw new AgentToolError("ALREADY_EXISTS", `${parked} already holds something else; not overwriting`);
   }
   const links = plan.links.filter(path => guard.isManagedLink(path, plan.store));
   for (const path of links) guard.assertMutable(path, env, registry);
 
   try {
-    guard.prepare(plan.parked, join(plan.parked, ".."),
-      guard.isInside(plan.parked, env.home) ? env.home : env.appSupport);
-    guard.move(plan.store, plan.parked);
+    guard.prepare(parked, join(parked, ".."),
+      guard.isInside(parked, env.home) ? env.home : env.appSupport);
+    guard.move(plan.store, parked);
     for (const path of links) guard.removeLink(path);
     upsert(registry, { ...entryFor(registry, name, kind), disabled: true });
   } catch (error) {
     try {
-      if (guard.exists(plan.parked) && !guard.exists(plan.store)) {
-        guard.move(plan.parked, plan.store);
+      if (guard.exists(parked) && !guard.exists(plan.store)) {
+        guard.move(parked, plan.store);
       }
       for (const path of links) {
         if (!guard.exists(path)) guard.createLink(plan.store, path, plan.linkKind);
@@ -177,19 +204,27 @@ export function disable(name: string, kind: KindId, env: Env, registry: Registry
  * リンクと実体を消し、registry から外す。
  * ゴミ箱へは送らないので、呼び出し前に必ず確認ダイアログを出す（設計決定 D-5）。
  */
-export function remove(name: string, kind: KindId, env: Env, registry: Registry): void {
+export function remove(name: string, kind: KindId, env: Env, registry: Registry,
+                       place: Place = USER): void {
   guard.assertValidName(name);
-  const plan = layout(name, kind, env);
+  const plan = layout(name, kind, env, place);
 
   // `disable` と同じ理由で、検査を全部先に済ませてから壊す。
   const links = plan.links.filter(path => guard.isManagedLink(path, plan.store) || guard.isLink(path));
-  const bodies = [plan.store, plan.parked].filter(guard.exists);
+  const bodies = [plan.store, plan.parked]
+    .filter((path): path is string => path !== undefined && guard.exists(path));
   if (bodies.length === 0) notFound(name);
-  for (const path of [...links, ...bodies]) guard.assertMutable(path, env, registry);
+  // プロジェクトの実体はホームの管理ルートの外にある。信頼の根が違うので別のガードを通す。
+  for (const path of [...links, ...bodies]) {
+    if (place.scope === "project") guard.assertProjectArtifact(path, kind, place.path, env);
+    else guard.assertMutable(path, env, registry);
+  }
 
   for (const path of links) guard.removeLink(path);
   for (const path of bodies) guard.remove(path);
-  registry.resources = registry.resources.filter(item => !(item.name === name && item.kind === kind));
+  const project = place.scope === "project" ? place.path : undefined;
+  registry.resources = registry.resources.filter(item =>
+    !(item.name === name && item.kind === kind && item.project === project));
 }
 
 /**
@@ -199,21 +234,28 @@ export function remove(name: string, kind: KindId, env: Env, registry: Registry)
  * 同じ名前が複数のルートに現れる（実体 + 各エージェントへのリンク）ので、
  * 走査ホワイトリストの全ルートを見て一括で消す。消した位置を返す。
  */
-export function removeUnmanaged(name: string, kind: KindId, env: Env): string[] {
+export function removeUnmanaged(name: string, kind: KindId, env: Env,
+                                place: Place = USER): string[] {
   guard.assertValidName(name);
   if (kind !== "skill" && kind !== "subagent") {
     throw new AgentToolError("OPERATION_FAILED",
       `${kind} is managed by the agent, not by Agent Tool`);
   }
   const leaf = kind === "subagent" ? `${name}.md` : name;
+  const roots = place.scope === "project"
+    ? guard.projectRoots(kind, place.path)
+    : guard.userRoots(kind, env);
   // リンク切れは `exists` が false になるので、リンクかどうかも見る。
-  const targets = guard.userRoots(kind, env)
+  const targets = roots
     .map(root => join(root, leaf))
     .filter(path => guard.exists(path) || guard.isLink(path));
   if (targets.length === 0) notFound(name);
 
   // `disable` と同じ理由で、検査を全部先に済ませてから壊す。
-  for (const path of targets) guard.assertUserArtifact(path, kind, env);
+  for (const path of targets) {
+    if (place.scope === "project") guard.assertProjectArtifact(path, kind, place.path, env);
+    else guard.assertUserArtifact(path, kind, env);
+  }
   for (const path of targets) guard.remove(path);
   return targets;
 }

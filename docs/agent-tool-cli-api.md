@@ -64,6 +64,7 @@ export type Selector = {
   scope: ScopeId;
   agent: AgentId;
   sourcePath?: string;
+  projectPath?: string;     // scope === 'project' のときのワークスペース
 };
 
 export type InventoryItem = {
@@ -186,6 +187,7 @@ export function remove(params: {
 
 - Undo は廃止。呼び出し前に確認ダイアログを表示する（拡張側の責務）
 - WriteGuard を通す。失敗時は `AgentToolError` を throw して何も変更しない
+- `scope === 'project'` は `projectPath` が要る。user と project の同名は別の実体として扱う
 
 ---
 
@@ -197,6 +199,8 @@ export function toggle(params: {
   selector: Selector;
 }): Promise<{ enabled: boolean }>;
 ```
+
+- user スコープだけ。project は退避先を持たないので `isTogglable` が false になる
 
 ---
 

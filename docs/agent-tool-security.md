@@ -56,6 +56,20 @@ Skill / Subagent の実体とリンクに対する書き込み・削除は、す
 
 二重ガード: ホワイトリストを通過しても `deniedNames` / `deniedExtensions` で拒否する。
 
+### 2.2.1 プロジェクト内の実体（`assertProjectArtifact`）
+
+project スコープの実体は `managedRoots` の外（ワークスペース内）にあるので `assertMutable` は通らない。
+代わりに置き場で決める:
+
+- `<workspace>/.claude/skills` または `<workspace>/.claude/agents` の**直下**にあること
+- 信頼の根はワークスペース。そこまでの経路にワークスペース外を指すリンクが無いこと（`assertSafeCreation`）
+- 隠しファイル・拒否ファイル名・同梱ルートは `assertUserArtifact` と同じく拒否する
+
+`apps/web:deploy` のような修飾名はサブディレクトリのもので直下ではない。`assertValidName` が `:` を
+拒否するため、そもそも作成・削除の対象にならない（一覧では `isManageable` が false になる）。
+
+プロジェクト内には退避先を作らない。したがって project スコープに有効化・無効化は無い。
+
 ### 2.3 作成ガード（`assertSafeCreation`）
 
 作成先の親ディレクトリに含まれる symlink / junction が管理ルート外を指していないか検査する。

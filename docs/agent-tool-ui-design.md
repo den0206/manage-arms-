@@ -132,8 +132,8 @@ User Global の一覧の下にドロップダウンを置き、現在のワー�
 - 走査するのは選ばれた 1 件だけ（`inventory` の `user: false`）。Webview から届くパスは信頼せず、候補に載っているものだけ受け付ける。
 - Plugin は `projectPath` が選んだパスと一致するものだけ。他プロジェクト分は載せない。
 - 走査失敗は空一覧にせず、理由を出す（メイン一覧の `issues` と同じ）。
-- 表示は読み取り専用。project スコープの実体はプロジェクトのファイルが持ち、
-  `isManageable` が user スコープの Skill / Subagent しか許さないので、削除・有効化は出さない。
+- 表示は読み取り専用。管理できるのは開いているワークスペースの project スコープだけで、
+  他プロジェクトの実体には `projectPath` を渡さない（`isManageable` が false になる）。
 - MCP の起動状態は出さない。ポーリングは user スコープの登録だけを見ている。
 - 結果は Webview 側にだけ置き、View を閉じたら捨てる。
 
@@ -150,9 +150,9 @@ User Global の一覧の下にドロップダウンを置き、現在のワー�
 2. Quick Input が開く
    "GitHub URL を貼り付けてください"
    > https://github.com/example/my-skill
-3. スコープ選択 Quick Pick
-   ● User Global  (~/.claude/)
-   ○ Current Project  (.claude/)
+3. スコープ選択 Quick Pick（ワークスペースが開いていないときは出さず user に入れる）
+   ● User Global       すべてのプロジェクトで使えます
+   ○ Current Project   /path/to/project
 4. 取得・インストール中（プログレスバー）
 5. 完了 → Tree View が自動更新
 ```

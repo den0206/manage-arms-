@@ -17,6 +17,8 @@ export type Entry = {
   pinned: boolean;
   /** 無効化されている（実体が退避ディレクトリにある）。 */
   disabled: boolean;
+  /** project スコープで入れたプロジェクトの絶対パス。未設定は user スコープ。 */
+  project?: string;
 };
 
 export type RepoState = { etag?: string; latestSha?: string; checkedAt?: string };
@@ -88,6 +90,7 @@ export function decode(raw: unknown): Registry {
         repo: str(entry.repo), branch: str(entry.branch),
         subdir: str(entry.subdir), sha: str(entry.sha),
         pinned: entry.pinned === true, disabled: entry.disabled === true,
+        project: str(entry.project),
       }];
     }),
     projects: strings(root.projects),
@@ -205,11 +208,18 @@ export const save = (env: Env, registry: Registry): Promise<Registry> =>
     return registry;
   });
 
-export const entry = (registry: Registry, name: string, kind?: KindId): Entry | undefined =>
-  registry.resources.find(e => e.name === name && (kind === undefined || e.kind === kind));
+/**
+ * 同じ名前・種別が user と project の両方にありうる。`project` まで一致を見ないと、
+ * プロジェクトのものを消したつもりで user のものを消す。
+ */
+const same = (e: Entry, name: string, kind: KindId | undefined, project?: string): boolean =>
+  e.name === name && (kind === undefined || e.kind === kind) && e.project === project;
+
+export const entry = (registry: Registry, name: string, kind?: KindId, project?: string):
+  Entry | undefined => registry.resources.find(e => same(e, name, kind, project));
 
 export function upsert(registry: Registry, value: Entry): void {
-  const index = registry.resources.findIndex(e => e.name === value.name && e.kind === value.kind);
+  const index = registry.resources.findIndex(e => same(e, value.name, value.kind, value.project));
   if (index >= 0) registry.resources[index] = value;
   else registry.resources.push(value);
 }

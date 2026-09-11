@@ -176,3 +176,24 @@ test("Windows で shell 構文を含むコマンドは実行しない", () => {
   assert.equal(hasShellSyntax(["claude", "mcp", "add", "-s", "user", "probe", "--", "npx", "-y", "pkg"]), false);
   assert.equal(hasShellSyntax(["C:\\Program Files\\claude\\claude.cmd", "--version"]), false);
 });
+
+// --- 追加先スコープ ---
+
+test("project スコープはワークスペースが分かるときだけ管理できる", () => {
+  const selector = extra => ({ name: "pdf", kind: "skill", scope: "project", agent: "claude", ...extra });
+  assert.equal(agentTool.isManageable(selector()), false);
+  assert.equal(agentTool.isManageable(selector({ projectPath: "/w" })), true);
+  // 退避先を持たないので、有効化・無効化は出さない。
+  assert.equal(agentTool.isTogglable(selector({ projectPath: "/w" })), false);
+  // サブディレクトリのスキルは `.claude/skills` 直下ではない。
+  assert.equal(agentTool.isManageable(selector({ projectPath: "/w", name: "apps/web:deploy" })), false);
+  assert.equal(agentTool.isTogglable({ name: "pdf", kind: "skill", scope: "user", agent: "claude" }), true);
+});
+
+/** 黙って user に入れると、プロジェクトに入れたつもりのものが全プロジェクトへ漏れる。 */
+test("ワークスペースが無いまま project を指定したら user へ落とさない", async () => {
+  const env = fakeEnv();
+  await assert.rejects(agentTool.add({
+    storagePath: env.appSupport, url: "https://github.com/o/r", kind: "skill", scope: "project",
+  }), code("OPERATION_FAILED"));
+});
