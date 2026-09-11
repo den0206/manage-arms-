@@ -1,8 +1,47 @@
+<p align="center">
+  <img src="media/icon.png" width="160" alt="Agent Tool icon">
+</p>
+
 # Agent Tool
+
+[![CI](https://github.com/den0206/agent-tool/actions/workflows/ci.yml/badge.svg)](https://github.com/den0206/agent-tool/actions/workflows/ci.yml)
+[![GitHub Release](https://img.shields.io/github/v/release/den0206/agent-tool?include_prereleases&sort=semver)](https://github.com/den0206/agent-tool/releases)
+[![Open VSX](https://img.shields.io/open-vsx/v/yuuki-sakai/agent-tool)](https://open-vsx.org/extension/yuuki-sakai/agent-tool)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Agent Tool is a Cursor extension for managing Skills, Subagents, MCP servers, and Plugins across AI coding agents.
 
-Agent Tool is a local editor extension for managing AI agent resources. It runs on macOS, Linux, and Windows.
+![Plugin installation demo](https://raw.githubusercontent.com/den0206/agent-tool/main/media/demo.gif)
+
+## Overview
+
+Agent Tool keeps the resources used by your coding agents discoverable from one editor view. It scans the agents' supported locations and delegates agent-owned operations to their official CLI.
+
+## Features
+
+- See Skills, Subagents, MCP servers, and Plugins in one dashboard.
+- Install Skills and Subagents from GitHub and supported catalogs.
+- Install Claude Code and Codex Plugins, including Plugins in GitHub subdirectories.
+- Preview descriptions, locations, scopes, enabled state, and available updates.
+- Work across user and project resources without copying managed files.
+- Run on macOS, Linux, and Windows.
+
+## Requirements
+
+- Cursor with extension support for Node.js 20 or later.
+- The agent CLI you want to inspect or manage, such as Claude Code or Codex.
+- Internet access when fetching a remote source or registering a Plugin Marketplace.
+
+## Installation
+
+Download the `.vsix` file from the [GitHub Releases](https://github.com/den0206/agent-tool/releases) page, then install it with:
+
+```bash
+code --install-extension agent-tool-X.Y.Z.vsix
+# or use: cursor --install-extension agent-tool-X.Y.Z.vsix
+```
+
+You can also use **Install from VSIX…** in the Extensions view. Stable releases are published to [Open VSX](https://open-vsx.org/extension/yuuki-sakai/agent-tool) as well.
 
 ## Supported sources
 
@@ -16,9 +55,15 @@ Paste a URL from any of these into the extension's URL field.
 
 Sites are declared in `CATALOG_SITES` in `src/github.ts`; adding or removing one is a single entry. The page HTML is never scraped — a site whose URL does not carry `owner/repo` must publish a JSON-LD `codeRepository` or `url`.
 
-## Status
+## Usage
 
-Every operation runs inside the TypeScript extension. See [the release plan](docs/agent-tool-release-plan.md).
+1. Open Cursor and activate Agent Tool from the Activity Bar.
+2. Review the User Global and project sections in the dashboard.
+3. Use the add action to paste a supported GitHub or catalog URL.
+4. Select a detected Skill, Subagent, MCP server, or Plugin and confirm the operation.
+5. Use the refresh and update actions when you want to rescan sources or check remote revisions.
+
+Plugin installation is delegated to Claude Code or Codex. For Claude Code, a Marketplace is registered before the Plugin is installed.
 
 ## Development
 
@@ -31,6 +76,12 @@ npm run package
 ```
 
 The extension uses only in-memory caches. Its only mutable metadata file is `registry.json` under Cursor's `globalStorageUri`; temporary downloads and extraction directories are removed on every exit path.
+
+Press F5 in Cursor or VS Code to launch an Extension Development Host.
+
+## Release
+
+Create and push a branch named `release/Ver_X.Y.Z`. GitHub Actions runs the checks, creates one VSIX, records its SHA-256 checksum, and attaches it to the GitHub Release. Stable releases are also published to Open VSX when the `OVSX_PAT` secret is configured.
 
 ## Documentation
 

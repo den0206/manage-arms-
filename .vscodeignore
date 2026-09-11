@@ -7,6 +7,7 @@ scripts/**
 test/**
 src/**
 vsix/**
+media/demo.gif
 .gitignore
 .npmrc
 .vscodeignore

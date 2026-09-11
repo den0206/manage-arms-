@@ -22,8 +22,8 @@ Cursor Stable の E2E を実行し、VSIX のサイズが 20 MB 未満である�
 ## 配布
 
 1. `release/Ver_<semver>` ブランチで検査を通す。
-2. VSIX を一度だけ組み立て、SHA-256 を記録する。
-3. Open VSX に公開する。
-4. 同じ VSIX を GitHub Release に添付する。
+2. push時に `.github/workflows/release.yml` が検査し、VSIXを一度だけ組み立ててSHA-256を記録する。
+3. 安定版は `OVSX_PAT` が設定されている場合だけOpen VSXに公開する。
+4. 同じVSIXとSHA-256をGitHub Releaseに添付する。
 
-Open VSX への公開に失敗した場合は GitHub Release を作らない。
+Open VSX の公開を実行して失敗した場合は、Workflowを停止してGitHub Releaseを作らない。alpha / betaはGitHub Releasesだけに公開する。

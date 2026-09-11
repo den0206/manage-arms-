@@ -103,6 +103,7 @@
     "menus": {}
   },
   "main": "./out/extension.js",
+  "icon": "media/icon.png",
   "l10n": "./l10n",
   "scripts": {
     "vscode:prepublish": "npm run compile",

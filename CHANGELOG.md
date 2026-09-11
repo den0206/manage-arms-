@@ -22,6 +22,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Added a color extension icon for the Extensions view and Marketplace.
+- Added production installation instructions and a GitHub Actions release workflow for VSIX distribution.
+- Added the Plugin installation demo to the project documentation while keeping the large GIF out of the VSIX package.
 - The management core runs inside the TypeScript extension, so the VSIX no longer ships a platform binary.
 - Skills and subagents are now shared through junctions and hard links on Windows, and through symbolic links on macOS and Linux.
 - Replaced the extension sidebar icon with a hexagonal hub design.

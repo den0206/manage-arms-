@@ -1,8 +1,47 @@
+<p align="center">
+  <img src="media/icon.png" width="160" alt="Agent Tool アイコン">
+</p>
+
 # Agent Tool
+
+[![CI](https://github.com/den0206/agent-tool/actions/workflows/ci.yml/badge.svg)](https://github.com/den0206/agent-tool/actions/workflows/ci.yml)
+[![GitHub Release](https://img.shields.io/github/v/release/den0206/agent-tool?include_prereleases&sort=semver)](https://github.com/den0206/agent-tool/releases)
+[![Open VSX](https://img.shields.io/open-vsx/v/yuuki-sakai/agent-tool)](https://open-vsx.org/extension/yuuki-sakai/agent-tool)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Agent Toolは、AIコーディングエージェントのSkill、Subagent、MCPサーバー、Pluginを横断管理するCursor拡張です。
 
-AIエージェント用リソースを管理するローカルのエディタ拡張です。macOS / Linux / Windowsで動作します。
+![Plugin導入デモ](https://raw.githubusercontent.com/den0206/agent-tool/main/media/demo.gif)
+
+## 概要
+
+コーディングエージェントが使うリソースを、エディタ内の1つの画面から確認・管理できます。各エージェントが対応する配置場所を走査し、エージェントが所有する操作は公式CLIへ委譲します。
+
+## 主な機能
+
+- Skill、Subagent、MCPサーバー、Pluginを1つのダッシュボードで確認
+- GitHubと対応カタログからSkill / Subagentを導入
+- GitHubサブディレクトリ内のPluginを含むClaude Code / Codex Pluginの導入
+- 説明、場所、スコープ、有効状態、更新の確認
+- 管理対象ファイルをコピーせず、ユーザー領域とプロジェクト領域を管理
+- macOS / Linux / Windowsで動作
+
+## 必要環境
+
+- Node.js 20以降に対応するCursor
+- 確認・管理したいエージェントのCLI（Claude Code、Codexなど）
+- リモート取得またはPlugin Marketplace登録時のインターネット接続
+
+## インストール
+
+[GitHub Releases](https://github.com/den0206/agent-tool/releases)から`.vsix`ファイルをダウンロードし、次のコマンドでインストールできます。
+
+```bash
+code --install-extension agent-tool-X.Y.Z.vsix
+# または Cursor で: cursor --install-extension agent-tool-X.Y.Z.vsix
+```
+
+拡張機能ビューの「VSIXからのインストール…」も使えます。安定版は[Open VSX](https://open-vsx.org/extension/yuuki-sakai/agent-tool)にも公開します。
 
 ## 対応サイト
 
@@ -16,9 +55,15 @@ AIエージェント用リソースを管理するローカルのエディタ拡
 
 サイトは`src/github.ts`の`CATALOG_SITES`で宣言し、追加・削除は1エントリで済みます。ページのHTMLは走査しません。URLに`owner/repo`を含まないサイトは、JSON-LDの`codeRepository`または`url`を公開している必要があります。
 
-## 状態
+## 使い方
 
-すべての操作をTypeScript拡張内で実行します。進捗は[リリース計画](docs/agent-tool-release-plan.md)を参照してください。
+1. CursorでAgent Toolを起動し、Activity Barから開きます。
+2. ダッシュボードのユーザー全体・プロジェクト欄を確認します。
+3. 追加操作から対応するGitHubまたはカタログURLを貼り付けます。
+4. 検出されたSkill、Subagent、MCP、Pluginを選び、操作を確認します。
+5. 再走査やリモート更新の確認には更新操作を使います。
+
+Pluginの導入はClaude CodeまたはCodexへ委譲します。Claude CodeではMarketplaceを登録してからPluginを導入します。
 
 ## 開発
 
@@ -31,6 +76,12 @@ npm run package
 ```
 
 拡張のキャッシュはメモリだけに保持します。可変メタデータはCursorの`globalStorageUri`に置く`registry.json`だけとし、一時ダウンロード・展開物は成功・失敗を問わず削除します。
+
+CursorまたはVS CodeでF5を押すと、拡張機能開発ホストを起動できます。
+
+## リリース
+
+`release/Ver_X.Y.Z`という名前のブランチを作成してpushします。GitHub Actionsが検査を実行し、VSIXを1回だけ生成してSHA-256を記録し、GitHub Releaseへ添付します。`OVSX_PAT` Secretを設定した場合、安定版はOpen VSXにも公開します。
 
 ## ドキュメント
 

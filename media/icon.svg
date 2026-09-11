@@ -1,3 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
-  <path fill="currentColor" d="M8 1L13.5 4.25v7.5L8 15 2.5 11.75v-7.5L8 1zm0 1.5L4 4.87v6.26L8 13.5l4-2.37V4.87L8 2.5zm0 2.5a3 3 0 110 6 3 3 0 010-6zm0 1.5a1.5 1.5 0 100 3 1.5 1.5 0 000-3z"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <path fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2" d="m12 12-5-5m5 5 5-5m-5 5-5 5m5-5 5 5"/>
+  <circle cx="12" cy="12" r="3" fill="currentColor"/>
+  <circle cx="6" cy="6" r="2" fill="currentColor"/>
+  <circle cx="18" cy="6" r="2" fill="currentColor"/>
+  <circle cx="6" cy="18" r="2" fill="currentColor"/>
+  <circle cx="18" cy="18" r="2" fill="currentColor"/>
 </svg>
