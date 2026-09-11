@@ -11,7 +11,7 @@ Node.js `node:test` で TypeScript モジュールと VS Code API モックを�
 | 走査 | ホワイトリスト外を読まない |
 | 追加・更新・削除 | 実体、リンク、設定の変更先 |
 | Plugin | CLI コマンドと scope |
-| Dashboard | 表示中のみポーリングし、非表示時に解放 |
+| Dashboard | 表示中のみポーリングし、重複実行せず非表示時に解放 |
 
 ## CI
 

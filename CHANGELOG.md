@@ -12,6 +12,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Clicking the "Updates available" count filters the list down to the tools that have an update; clicking it again clears the filter.
 - The Dashboard shows a loading indicator until the first scan finishes, instead of looking like an empty or failed list.
 - The tool list is posted before the agent CLI scan, so the first view no longer waits on spawning login shells.
+- MCP status checks no longer start a new round while the previous one is still running.
 
 ### Fixed
 

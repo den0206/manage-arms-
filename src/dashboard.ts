@@ -33,6 +33,7 @@ export class DashboardProvider
   /** 直前に提案した URL。再表示のたびに同じ提案を出さないためだけに持つ。 */
   private offered = '';
   private pollTimer?: NodeJS.Timeout;
+  private statusPending = false;
   private watchers: vscode.FileSystemWatcher[] = [];
   private watchTimer?: NodeJS.Timeout;
   /** 更新件数のバッジ。0 件のときは出さない。 */
@@ -114,6 +115,8 @@ export class DashboardProvider
         storagePath: this.storagePath,
         projectPath: folder,
       });
+      // 待っている間に View が隠れたら、解放したはずの状態を書き戻さない。
+      if (!this.view?.visible) return;
       const found = items as DashboardItem[];
       this.snapshot = {at: Date.now(), items: found};
       // 走査に失敗したエージェントは黙って 0 件にしない。「未検出」と
@@ -122,10 +125,12 @@ export class DashboardProvider
       // CLI の検出はログインシェルを起こすので一覧より遅い。待たせると初期表示が
       // 止まって見えるため、一覧を出してから引き直して差分だけ送り直す。
       if (force || this.environment === undefined) {
-        this.environment = await agentTool
+        const environment = await agentTool
           .scanPath({storagePath: this.storagePath})
           .catch(() => []);
-        if (this.view?.visible) this.post(found, issues);
+        if (!this.view?.visible) return;
+        this.environment = environment;
+        this.post(found, issues);
       }
     } catch (error) {
       this.post([], [], error instanceof Error ? error.message : String(error));
@@ -236,13 +241,18 @@ export class DashboardProvider
     this.status.clear();
   }
 
+  /** 3 秒ごとの状態確認。遅い確認が終わる前に次を重ねない。 */
   private async refreshStatus(): Promise<void> {
-    if (!this.view?.visible) return;
+    if (this.statusPending || !this.view?.visible) return;
+    this.statusPending = true;
     try {
       const status = await agentTool.mcpStatus({storagePath: this.storagePath});
+      if (!this.view?.visible) return;
       this.status = new Map(Object.entries(status));
       if (this.snapshot) this.post(this.snapshot.items, this.issues);
-    } catch { /* keep previous status */ }
+    } catch { /* keep previous status */ } finally {
+      this.statusPending = false;
+    }
   }
 
   private post(items: DashboardItem[], issues: string[] = [], error?: string): void {
@@ -339,7 +349,8 @@ const webviewText = (): Record<string, string> => ({
  * `renderOthers` は他プロジェクトの欄で、User Global を見ているときだけ出し、
  * 選ばれた 1 件だけを拡張ホストに読ませる。
  * `onlyUpdates` は更新件数のクリックで立つ絞り込み。件数を全体で数えているので、
- * 一覧もエージェントとスコープを跨いで出す。そうしないと数字と一覧が食い違う。
+ * 一覧もエージェントとスコープを跨いで出し、件数に入らない他プロジェクト欄は畳む。
+ * そうしないと数字と一覧が食い違う。
  */
 function dashboardHtml(webview: vscode.Webview): string {
   const nonce = String(Date.now());
@@ -396,13 +407,13 @@ function dashboardHtml(webview: vscode.Webview): string {
   function rowsHtml(rows, other) { return '<div class="list">'+rows.map((x,i)=>{ const meta=esc(x.agents.join(' · '))+' · '+kinds[x.kind]+(!other&&x.kind==='mcp'?' · '+esc(x.running?T.running:T.stopped):'')+(x.pinned?' · 📌 '+esc(T.pinned):'')+(x.hasUpdate?' · <span class="state update">'+esc(T.updates)+'</span>':''); const tail=other?'':'<button class="icon action" data-index="'+items.indexOf(x)+'" title="'+esc(T.actions)+'">•••</button>'; const at=other?' data-other="'+i+'"':' data-index="'+items.indexOf(x)+'"'; return '<div class="item"'+at+' role="button" tabindex="0" aria-expanded="'+(selected===keyOf(x))+'"><div class="glyph" data-kind="'+x.kind+'">'+icons[x.kind]+'</div><div><div class="name">'+esc(x.name)+'</div><div class="meta">'+meta+'</div></div>'+tail+'</div>'+(selected===keyOf(x)?detailHtml(x):''); }).join('')+'</div>'; }
   function bindRows(nodes, pick) { nodes.forEach(node=>{ const open=()=>toggleDetail(pick(node)); node.onclick=open; node.onkeydown=e=>{ if(e.key==='Enter'||e.key===' ') { e.preventDefault(); open(); } }; }); }
   const shortName = p => String(p).split(/[\\\\/]/).filter(Boolean).pop() || String(p);
-  function renderOthers() { const box=document.querySelector('#others'); if(scope!=='user'||!projects.length) { box.innerHTML=''; box.dataset.list=''; return; }
+  function renderOthers() { const box=document.querySelector('#others'); if(scope!=='user'||!projects.length||onlyUpdates) { box.innerHTML=''; box.dataset.list=''; return; }
     const listKey=projects.join('|');
     if(box.dataset.list!==listKey) { box.innerHTML='<div class="section">'+esc(T.otherProjects)+'</div><select id="other-project" aria-label="'+esc(T.otherProjects)+'"><option value="">'+esc(T.chooseProject)+'</option>'+projects.map(p=>'<option value="'+esc(p)+'">'+esc(shortName(p))+'</option>').join('')+'</select><p id="other-path"></p><div id="other-body"></div>'; box.dataset.list=listKey;
       document.querySelector('#other-project').onchange=e=>{ otherPath=e.target.value; otherItems=[]; otherError=''; otherIssues=[]; otherLoading=otherPath!==''; renderOthers(); if(otherPath) vscode.postMessage({type:'selectProject',path:otherPath}); }; }
     document.querySelector('#other-project').value=otherPath;
     document.querySelector('#other-path').textContent=otherPath;
-    const rows=otherItems.filter(x=>x.agents.includes(agent)&&(!onlyUpdates||x.hasUpdate));
+    const rows=otherItems.filter(x=>x.agents.includes(agent));
     const body=document.querySelector('#other-body');
     const warnHtml=otherError?'<div class="empty">'+esc(otherError)+'</div>':otherIssues.length?'<div class="empty">'+esc(T.loadFailed)+'<br>'+otherIssues.map(esc).join('<br>')+'</div>':'';
     body.innerHTML=!otherPath?'':otherLoading?'<div class="loading"><span class="spinner"></span>'+esc(T.readingProject)+'</div>':warnHtml+(rows.length?rowsHtml(rows,true):(warnHtml?'':'<div class="empty">'+esc(T.projectEmpty)+'</div>'));
