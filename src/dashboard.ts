@@ -127,8 +127,9 @@ export class DashboardProvider
   private async analyze(url: string): Promise<void> {
     this.view?.webview.postMessage({type: 'analysisStart', loading: true});
     try {
-      const candidates = await agentTool.preview({url});
-      this.view?.webview.postMessage({type: 'preview', url, candidates});
+      // 解決後の URL を返す。導入のときに同じカタログページをもう一度読まない。
+      const result = await agentTool.preview({url});
+      this.view?.webview.postMessage({type: 'preview', ...result});
     } catch (error) {
       this.view?.webview.postMessage({type: 'preview', url, candidates: [],
         error: error instanceof Error ? error.message : vscode.l10n.t('The URL could not be analyzed.')});

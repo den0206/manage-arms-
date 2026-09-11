@@ -5,8 +5,8 @@ import { AgentInfo, scanPath as detectAgents } from "./detector";
 import { Env, Run } from "./env";
 import { AgentToolError } from "./errors";
 import { run as runCommand } from "./exec";
-import { Candidate, discard, stage } from "./fetcher";
-import { parseUrl, skillHint } from "./github";
+import { Candidate, discard, fetchPage, stage } from "./fetcher";
+import { fromJsonLd, needsPage, parseUrl, skillHint } from "./github";
 import { install } from "./installer";
 import { inventory as buildInventory, InventoryItem } from "./inventory";
 import * as mcp from "./mcpScanner";
@@ -82,18 +82,37 @@ export function scanPath(params: { storagePath: string }): Promise<AgentInfo[]> 
   return detectAgents(env, runnerFor(env), cliOverrides(load(env)));
 }
 
-/** 取得した候補を返すだけ。入れるかどうかは確認画面で決める。 */
-export async function preview(params: { url: string }): Promise<PreviewCandidate[]> {
-  const source = parseUrl(params.url);
+/**
+ * URL だけで取得元が決まらないカタログは、ページを 1 回だけ読んで取得元の URL に置き換える。
+ * 本文は JSON-LD の抽出に使うだけで、読み終えたら捨てる。
+ */
+async function resolveUrl(url: string): Promise<string> {
+  const page = needsPage(url);
+  if (page === null) return url;
+  const target = fromJsonLd(await fetchPage(page));
+  if (target === null) {
+    throw new AgentToolError("NOT_FOUND", "that page does not name a public GitHub repository");
+  }
+  return target;
+}
+
+/**
+ * 取得した候補を返すだけ。入れるかどうかは確認画面で決める。
+ * 解決後の URL も返す。導入のときに同じページをもう一度読まないため。
+ */
+export async function preview(params: { url: string }):
+  Promise<{ url: string; candidates: PreviewCandidate[] }> {
+  const url = await resolveUrl(params.url);
+  const source = parseUrl(url);
   if (source === null) {
     throw new AgentToolError("NOT_FOUND", "that URL is not a public GitHub repository");
   }
   const staging = await stage(source);
   try {
-    const hint = skillHint(params.url);
-    const candidates = hint === undefined ? staging.candidates
+    const hint = skillHint(url);
+    const found = hint === undefined ? staging.candidates
       : staging.candidates.filter(item => item.name === hint);
-    return (candidates.length > 0 ? candidates : staging.candidates).map(toPreview);
+    return { url, candidates: (found.length > 0 ? found : staging.candidates).map(toPreview) };
   } finally {
     discard(staging);
   }
@@ -113,13 +132,14 @@ export async function add(params: {
   scope: ScopeId;
   name?: string;
 }): Promise<void> {
-  const source = parseUrl(params.url);
+  const url = await resolveUrl(params.url);
+  const source = parseUrl(url);
   if (source === null) {
     throw new AgentToolError("NOT_FOUND", "that URL is not a public GitHub repository");
   }
   const staging = await stage(source);
   try {
-    const wanted = params.name ?? skillHint(params.url);
+    const wanted = params.name ?? skillHint(url);
     const candidate = staging.candidates.find(item =>
       item.kind === params.kind && (wanted === undefined || item.name === wanted))
       ?? staging.candidates.find(item => item.kind === params.kind);

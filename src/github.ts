@@ -103,18 +103,96 @@ const RESERVED: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * GitHub 以外で Skill を案内しているサイト。追加・削除はこの配列の 1 エントリで済む。
+ *
+ * `fromPath` を持つサイトは URL だけで取得元が決まり、ネットワークに触れない。
+ * 持たないサイトはページを 1 回読む必要がある（`needsPage` / `fromJsonLd`）。
+ */
+export type CatalogSite = {
+  readonly host: string;
+  readonly fromPath?: (parts: string[]) => { source: GitHubSource; skill?: string } | null;
+};
+
+export const CATALOG_SITES: readonly CatalogSite[] = [
+  {
+    // skills.sh/owner/repo/skill。3 番目はディレクトリ名であってパスではない
+    // （`grilling` の実体は `skills/productivity/grilling`）ので subdir にはできない。
+    host: "skills.sh",
+    fromPath: parts => {
+      if (parts.length < 2 || RESERVED.has(parts[0].toLowerCase())) return null;
+      if (!isRepoPath(parts[0], parts[1])) return null;
+      return { source: { repo: `${parts[0]}/${parts[1]}` }, skill: parts[2] };
+    },
+  },
+  // agentsdirectory.dev/skills/<slug>。slug だけで owner/repo が決まらないので、
+  // 取得元はページの JSON-LD から読む。
+  { host: "agentsdirectory.dev" },
+];
+
+const CATALOG_HOSTS = CATALOG_SITES.map(site => site.host);
+
+const siteOf = (url: URL): CatalogSite | undefined => {
+  const host = url.hostname.toLowerCase().replace(/^www\./, "");
+  return CATALOG_SITES.find(site => site.host === host);
+};
+
+/**
  * カタログページ。配布しているのは GitHub なので owner/repo を採る。
- * 3 番目はディレクトリ名であってパスではない（`grilling` の実体は
- * `skills/productivity/grilling`）ので subdir にはできない。候補の絞り込みヒントに使う。
- * ページの HTML から GitHub リンクを拾う方法は採らない — 構造の変更で静かに壊れる。
+ * ページの HTML を漁る方法は採らない — 構造の変更で静かに壊れる。
+ * 読むのは URL か、`fromJsonLd` が扱う schema.org のメタデータだけ。
  */
 export function catalog(raw: string): { source: GitHubSource; skill?: string } | null {
-  const url = toUrl(raw, ["skills.sh"]);
+  const url = toUrl(raw, CATALOG_HOSTS);
   if (url === null) return null;
-  const parts = url.pathname.split("/").filter(part => part !== "");
-  if (parts.length < 2 || RESERVED.has(parts[0].toLowerCase())) return null;
-  if (!isRepoPath(parts[0], parts[1])) return null;
-  return { source: { repo: `${parts[0]}/${parts[1]}` }, skill: parts[2] };
+  const site = siteOf(url);
+  if (site?.fromPath === undefined) return null;
+  return site.fromPath(url.pathname.split("/").filter(part => part !== ""));
+}
+
+/**
+ * URL だけでは取得元が決まらないカタログ URL か。決まらなければ読みに行く URL を返す。
+ * 対応外のサイトと、URL だけで決まるサイトは null。
+ */
+export function needsPage(raw: string): string | null {
+  const url = toUrl(raw, CATALOG_HOSTS);
+  if (url === null) return null;
+  const site = siteOf(url);
+  return site !== undefined && site.fromPath === undefined ? url.toString() : null;
+}
+
+/**
+ * カタログページから取得元の URL を拾う。HTML の構造には依存せず、
+ * schema.org の JSON-LD にある `codeRepository` / `url` だけを読む。
+ * 拾えるのは、こちらが既に解釈できる URL（GitHub かカタログ）に限る。
+ */
+export function fromJsonLd(html: string): string | null {
+  const blocks = html.match(/<script[^>]+type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi) ?? [];
+  for (const block of blocks) {
+    const body = block.slice(block.indexOf(">") + 1, block.lastIndexOf("<"));
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      continue;                                   // 壊れたブロックで打ち切らない
+    }
+    for (const node of flatten(parsed)) {
+      for (const key of ["codeRepository", "url"] as const) {
+        const value = node[key];
+        if (typeof value !== "string") continue;
+        // 自分自身を指す url は解決にならない。取得元として読めるものだけ返す。
+        if (parseUrl(value) !== null) return value;
+      }
+    }
+  }
+  return null;
+}
+
+/** JSON-LD は単体・配列・`@graph` のどれでも来る。 */
+function flatten(value: unknown): Record<string, unknown>[] {
+  if (Array.isArray(value)) return value.flatMap(flatten);
+  if (typeof value !== "object" || value === null) return [];
+  const node = value as Record<string, unknown>;
+  return [node, ...flatten(node["@graph"])];
 }
 
 /** カタログ URL に含まれるスキル名。候補一覧の初期絞り込みに使う。 */

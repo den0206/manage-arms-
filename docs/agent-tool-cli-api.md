@@ -280,8 +280,13 @@ export function mcpStatus(params: {
 ```typescript
 export function preview(params: {
   url: string;
-}): Promise<PreviewCandidate[]>;
+}): Promise<{ url: string; candidates: PreviewCandidate[] }>;
 ```
+
+- 受ける URL は `src/github.ts` の `CATALOG_SITES` が宣言するサイトと GitHub。追加・削除は 1 エントリ
+- `owner/repo` を URL に含まないカタログはページを 1 回読み、schema.org の JSON-LD にある
+  `codeRepository` / `url` だけを使って取得元を決める。HTML は走査しない（ページ上限 2 MB）
+- 返す `url` は解決後のもの。`add` に渡すと同じページを読み直さない
 
 ---
 

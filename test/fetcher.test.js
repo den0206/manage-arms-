@@ -3,8 +3,8 @@ const { existsSync, readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const { tmpdir } = require("node:os");
 const { test } = require("node:test");
-const { extract, identify, safeJoin, singleTopLevel, stage } = require("../out/fetcher.js");
-const { archiveUrl, parseUrl } = require("../out/github.js");
+const { extract, fetchPage, identify, PAGE_LIMIT, safeJoin, singleTopLevel, stage } = require("../out/fetcher.js");
+const { archiveUrl, catalog, fromJsonLd, needsPage, parseUrl, skillHint } = require("../out/github.js");
 const { fakeEnv, makeDir, writeFileIn } = require("./helpers.js");
 const { writeZip } = require("./zipFixture.js");
 
@@ -31,6 +31,68 @@ test("GitHub 以外と壊れた URL は受け取らない", () => {
   assert.equal(parseUrl("https://github.com/owner/repo/raw/main"), null);
   assert.equal(parseUrl("https://github.com/own er/repo"), null);
   assert.equal(parseUrl("not a url"), null);
+});
+
+// --- カタログサイト ---
+
+test("URL に owner/repo を含むカタログはネットワークに触れず解決する", () => {
+  assert.deepEqual(parseUrl("https://www.skills.sh/anthropics/skills/frontend-design"),
+    { repo: "anthropics/skills" });
+  assert.equal(skillHint("https://skills.sh/anthropics/skills/frontend-design"), "frontend-design");
+  assert.equal(needsPage("https://skills.sh/anthropics/skills/frontend-design"), null);
+  assert.equal(catalog("https://skills.sh/agent/claude-code"), null);   // 予約パス
+});
+
+test("URL だけで決まらないカタログはページの URL を返す", () => {
+  assert.equal(needsPage("https://agentsdirectory.dev/skills/frontend-design/"),
+    "https://agentsdirectory.dev/skills/frontend-design/");
+  assert.equal(needsPage("agentsdirectory.dev/skills/frontend-design"),
+    "https://agentsdirectory.dev/skills/frontend-design");
+  assert.equal(catalog("https://agentsdirectory.dev/skills/frontend-design/"), null);
+  assert.equal(needsPage("https://example.com/skills/x"), null);        // 対応外のサイト
+});
+
+/** HTML の構造は見ない。読むのは schema.org の codeRepository / url だけ。 */
+test("JSON-LD から取得元の URL を拾う", () => {
+  const block = body => `<script type="application/ld+json">${body}</script>`;
+  assert.equal(
+    fromJsonLd(block(JSON.stringify([{ "@type": "SoftwareApplication",
+      url: "https://www.skills.sh/anthropics/skills/frontend-design" }]))),
+    "https://www.skills.sh/anthropics/skills/frontend-design");
+  assert.equal(
+    fromJsonLd(block(JSON.stringify({ "@graph": [{ codeRepository: "https://github.com/o/r" }] }))),
+    "https://github.com/o/r");
+  // 壊れたブロックで打ち切らず、後ろのブロックを読む
+  assert.equal(fromJsonLd(block("{ broken") + block(JSON.stringify({ url: "https://github.com/o/r" }))),
+    "https://github.com/o/r");
+  // 自分自身や対応外の URL は解決にならない
+  assert.equal(fromJsonLd(block(JSON.stringify({ url: "https://agentsdirectory.dev/skills/x" }))), null);
+  assert.equal(fromJsonLd("<html>https://github.com/o/r</html>"), null);
+});
+
+test("カタログページは上限を超えたら読まない", async () => {
+  const oversize = { ok: true, headers: { get: () => String(PAGE_LIMIT + 1) }, body: { cancel: async () => {} } };
+  await assert.rejects(fetchPage("https://agentsdirectory.dev/skills/x", async () => oversize),
+    code("FETCH_FAILED"));
+  const missing = { ok: false, status: 404, headers: { get: () => null } };
+  await assert.rejects(fetchPage("https://agentsdirectory.dev/skills/x", async () => missing),
+    code("FETCH_FAILED"));
+});
+
+test("Content-Length がなくても読み込み中にページ上限を打ち切る", async () => {
+  let cancelled = false;
+  const chunk = new Uint8Array(1024 * 1024);
+  const response = {
+    ok: true,
+    headers: new Map(),
+    body: {
+      cancel: async () => { cancelled = true; },
+      async *[Symbol.asyncIterator]() { yield chunk; yield chunk; yield chunk; },
+    },
+  };
+  await assert.rejects(fetchPage("https://agentsdirectory.dev/skills/x", async () => response),
+    code("FETCH_FAILED"));
+  assert.equal(cancelled, true);
 });
 
 test("zipball の URL を組み立てる", () => {

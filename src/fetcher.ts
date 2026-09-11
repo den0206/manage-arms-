@@ -37,6 +37,8 @@ export const SIZE_LIMIT = 50 * 1024 * 1024;
 export const EXTRACTED_SIZE_LIMIT = 200 * 1024 * 1024;
 export const SINGLE_FILE_LIMIT = 20 * 1024 * 1024;
 export const ENTRY_LIMIT = 10_000;
+/** カタログページの上限。取得元の URL を 1 つ読むだけなので小さくてよい。 */
+export const PAGE_LIMIT = 2 * 1024 * 1024;
 
 const fail = (message: string): never => {
   throw new AgentToolError("FETCH_FAILED", message);
@@ -45,6 +47,35 @@ const fail = (message: string): never => {
 /** 一時領域だけを使う。成功・失敗・キャンセルの全経路で消す。 */
 export const discard = (staging: { root: string }): void =>
   rmSync(staging.root, { recursive: true, force: true });
+
+/**
+ * カタログページを 1 枚読む。呼び出し側は本文を JSON-LD の抽出にだけ使い、
+ * 読み終えたら捨てる（ファイルにも registry にも残さない）。
+ */
+export async function fetchPage(url: string, fetchImpl: typeof fetch = fetch): Promise<string> {
+  const response = await fetchImpl(url, { redirect: "follow", cache: "no-store" });
+  if (!response.ok) fail(`the page could not be read: HTTP ${response.status}`);
+  const declared = Number(response.headers.get("content-length") ?? "0");
+  if (declared > PAGE_LIMIT) {
+    await response.body?.cancel();
+    fail("the page is too large to read (limit 2 MB)");
+  }
+  if (!response.body) fail("the page could not be read: empty response");
+  const body = response.body!;
+
+  let size = 0;
+  let text = "";
+  const decoder = new TextDecoder();
+  for await (const chunk of body as unknown as AsyncIterable<Uint8Array>) {
+    size += chunk.byteLength;
+    if (size > PAGE_LIMIT) {
+      await body.cancel();
+      fail("the page is too large to read (limit 2 MB)");
+    }
+    text += decoder.decode(chunk, { stream: true });
+  }
+  return text + decoder.decode();
+}
 
 /** zip を落として展開し、中身から種別を判定する。`git clone` は使わない。 */
 export async function stage(source: GitHubSource, options: {
