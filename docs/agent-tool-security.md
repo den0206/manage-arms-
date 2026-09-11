@@ -29,6 +29,7 @@ Agent Tool が守る対象:
 
 Skill / Subagent の実体とリンクに対する書き込み・削除は、すべて `writeGuard.ts` を通す。
 `registry.json` は `registry.ts`、`mcp.json` は `mcpScanner.ts` が扱う（§3）。この 3 ファイル以外は `node:fs` の書き込み系 API を呼ばない。
+ブラウザ拡張が残した取得元の台帳の削除も `writeGuard.ts` の専用パスを通す（§2.2.2）。
 
 ### 2.1 名前検証（`assertValidName`）
 
@@ -70,6 +71,17 @@ project スコープの実体は `managedRoots` の外（ワークスペース�
 
 プロジェクト内には退避先を作らない。したがって project スコープに有効化・無効化は無い。
 
+### 2.2.2 取得元の台帳（`assertLedger`）
+
+ブラウザ拡張が残した `<導入先ルート>/.agent-tool/<name>.json` を、取り込み後に削除する。
+
+- 親ディレクトリが走査ホワイトリスト上のルート直下の `.agent-tool` であること
+- ファイル名が `<name>.json` で、`<name>` が `assertValidName` を通ること
+- 実体（`<name>/` または `<name>.md`）が同じルートに存在すること
+- 削除するのは台帳ファイル 1 件だけ。`.agent-tool` ディレクトリごとの再帰削除は行わない
+
+台帳が指す実体そのものには触れない。取り込みで消えるのは台帳だけである。
+
 ### 2.3 作成ガード（`assertSafeCreation`）
 
 作成先の親ディレクトリに含まれる symlink / junction が管理ルート外を指していないか検査する。
@@ -96,6 +108,7 @@ project スコープの実体は `managedRoots` の外（ワークスペース�
 | Skill / Subagent の追加・削除・更新 | `writeGuard.ts` 経由のみ | `writeGuard.ts` の外から `fs.writeFile` / `fs.rename` しない |
 | MCP 設定の追加・削除 | `mcpScanner.ts` の専用パスのみ | `mcp.json` の直接上書き禁止 |
 | `registry.json` の書き込み | `registry.ts` のみ | 他モジュールは `registry.ts` の API 経由で読み書きする |
+| 取得元の台帳の削除 | `writeGuard.ts` の専用パスのみ | 台帳が指す実体には触れない。`.agent-tool` の再帰削除をしない |
 | 一時ファイル | `try/finally` で確実に削除 | 残骸を残さない |
 
 全操作の `storagePath` は絶対パスとして検証する。破壊的操作では `selector.sourcePath` を
@@ -210,3 +223,70 @@ Bearer <value>        → Bearer [REDACTED]
 - テレメトリ: 一切収集しない
 
 ---
+
+## 10. ブラウザ拡張
+
+### 10.1 信頼境界
+
+ブラウザ拡張はファイルシステムへの既定の到達権を持たない。書けるのは、利用者が
+`showDirectoryPicker()` で選んで許可したディレクトリの配下だけである。
+
+| 資産 | 守り方 |
+|---|---|
+| 許可外のディレクトリ | ハンドルを持たないため到達できない |
+| ホームディレクトリ直下 | Chromium が選択を拒否する（`kDontBlockChildren`） |
+| `~/Library`（macOS）・システム領域 | Chromium が全面的に拒否する |
+| 利用者が自分で置いた実体 | 導入時の実体ツリー SHA-256 と一致しないため削除対象にならない |
+
+信頼しない入力源は IDE 拡張と同じ（frontmatter の `name`、貼り付けた URL）に加え、
+**閲覧中のページの DOM**（JSON-LD）を含む。JSON-LD から採るのは `codeRepository` と `url` だけで、
+既に解釈できる URL に限って受け入れる。ページの HTML 構造には依存しない。
+
+### 10.2 権限スコープ
+
+```json
+{
+  "manifest_version": 3,
+  "host_permissions": [
+    "https://github.com/*",
+    "https://skills.sh/*",
+    "https://agentsdirectory.dev/*",
+    "https://raw.githubusercontent.com/*",
+    "https://codeload.github.com/*"
+  ],
+  "permissions": ["unlimitedStorage"]
+}
+```
+
+- `<all_urls>` を要求しない。検知は上記 3 サイトだけで動く。
+- 取得のために `raw.githubusercontent.com` と `codeload.github.com` への通信を行う。
+- 閲覧中の URL を外部サービスへ送らない。実在確認に投げるのは GitHub のパスだけである。
+- テレメトリは一切収集しない。
+
+### 10.3 書き込みと削除
+
+- 作成前に `assertValidName`（`core/`）を通す。zip の各エントリにも同じ検証を適用する。
+- 書く直前に同名の実体を確認し、あれば上書きの確認を求める。記録ではなく実態を見る。
+- 削除前に収集一覧の実体ツリー SHA-256 を再計算し、一致する場合だけ削除する。手動変更・
+  IDE 管理下への移行を含め、一致しなければ何も削除しない。
+- `removeEntry({ recursive: true })` は実体 1 件に対してのみ呼ぶ。導入先ルートと `.agent-tool` を対象にしない。
+- 台帳は取得元の引き渡しだけに使い、削除の可否判定には使わない（判定は実体ツリー SHA-256）。
+- 拒否ファイル名・拒否拡張子は IDE 拡張と同じリストを `core/` で共有する。
+
+### 10.4 取得
+
+- 公開リポジトリのみ・未認証。`fetch` に `cache: 'no-store'` を指定する。
+- codeload の `tar.gz` を `DecompressionStream('gzip')` でストリーム展開する。tar の各エントリは
+  `assertValidName`、種別（通常ファイルまたはディレクトリ）、各上限を検査し、リンクと特殊ファイルを拒否する。
+- アーカイブ 50 MB、展開後 200 MB、単一ファイル 20 MB の上限は `core/` で IDE 拡張と共有する。
+- 取得と展開は専用タブで行う。MV3 の service worker はアイドルで停止するため使わない。
+
+### 10.5 残存リスク
+
+| リスク | 扱い |
+|---|---|
+| スクリプトを同梱した配布物で Safe Browsing の確認が出る | 利用者に確認を委ねる。回避しない |
+| ブラウザ再起動後に再許可が 1 回必要 | 仕様。専用タブの操作に組み込む |
+| IDE 拡張が張った symlink を辿れない | 相互に不可視。D-13 の通り受け入れる |
+| 隠しディレクトリをピッカーで選べない | OS 別の手順を、ピッカーを開く前に表示する |
+| 導入先の取り違え | ハンドルから basename しか得られず、`~/.cursor/skills` と `~/.claude/skills` を区別できない。検出しない。ピッカーを開く前に期待するパスを示すに留める |

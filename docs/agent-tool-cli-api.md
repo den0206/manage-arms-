@@ -3,26 +3,26 @@
 > 設計の前提は [vscode-cursor-extension-design-questions.md](vscode-cursor-extension-design-questions.md) を参照。
 > プロダクト要件は [product-requirements.md](product-requirements.md) を参照。
 
-実装の入口は `src/agentTool.ts`。
+実装の入口は `ide/agentTool.ts`。
 
 ---
 
 ## 呼び出し規約
 
-すべての操作は `src/agentTool.ts` が export する非同期関数として提供する。
+すべての操作は `ide/agentTool.ts` が export する非同期関数として提供する。
 
 - **入出力**: TypeScript の型付きオブジェクト（JSON シリアライズ不要）
 - **失敗**: `AgentToolError` を throw する（`code` フィールドで種別を判定）
 - **storagePath**: `context.globalStorageUri.fsPath` を渡す（OS 別パスは VS Code API が解決）
 - **バージョン**: プロセス境界が無いので拡張とロジックの版ずれは起きない。
-  互換判定は `registry.json` の `schemaVersion` だけが持つ（`src/registry.ts`）
+  互換判定は `registry.json` の `schemaVersion` だけが持つ（`ide/registry.ts`）
 
 ---
 
 ## エラー型
 
 ```typescript
-// src/agentTool.ts
+// ide/agentTool.ts
 export type ErrorCode =
   | 'WRITE_GUARD_DENIED'    // WriteGuard がパス・名前を拒否した
   | 'INVALID_NAME'          // ツール名に ../  など不正な要素が含まれる
@@ -52,7 +52,7 @@ export class AgentToolError extends Error {
 ## 型定義
 
 ```typescript
-// src/agentTool.ts
+// ide/agentTool.ts
 
 export type AgentId  = 'claude' | 'cursor' | 'codex' | 'gemini';
 export type KindId   = 'skill' | 'subagent' | 'mcp' | 'plugin';
@@ -339,7 +339,7 @@ export function preview(params: {
 }): Promise<{ url: string; candidates: PreviewCandidate[] }>;
 ```
 
-- 受ける URL は `src/github.ts` の `CATALOG_SITES` が宣言するサイトと GitHub。追加・削除は 1 エントリ
+- 受ける URL は `core/github.ts` の `CATALOG_SITES` が宣言するサイトと GitHub。追加・削除は 1 エントリ
 - `owner/repo` を URL に含まないカタログはページを 1 回読み、schema.org の JSON-LD にある
   `codeRepository` / `url` だけを使って取得元を決める。HTML は走査しない（ページ上限 2 MB）
 - 返す `url` は解決後のもの。`add` に渡すと同じページを読み直さない
@@ -380,11 +380,39 @@ Claude の削除には一覧から取得した `scope` をそのまま渡す。M
 
 - `storagePath` は `context.globalStorageUri.fsPath` で得る。OS 別パスは VS Code API が解決する（手動分岐不要）
 - 180 秒キャッシュは拡張のメモリのみ。手動更新・書き込み直後・View 非表示で破棄する
-- ファイル書き込みは `src/writeGuard.ts`（実体・リンク）、`src/registry.ts`（`registry.json`）、
-  `src/mcpScanner.ts`（`mcp.json`）の 3 経路だけに置く（設計決定 D-9）
-- Registry の read-modify-write は `src/registry.ts` の `withRegistryLock()` 内で行う（設計決定 D-7）
+- ファイル書き込みは `ide/writeGuard.ts`（実体・リンク）、`ide/registry.ts`（`registry.json`）、
+  `ide/mcpScanner.ts`（`mcp.json`）の 3 経路だけに置く（設計決定 D-9）
+- Registry の read-modify-write は `ide/registry.ts` の `withRegistryLock()` 内で行う（設計決定 D-7）
 - zip 展開・ダウンロードの一時ファイルは `os.tmpdir()` に置き、`try/finally` で確実に削除する
 
 ---
 
 ---
+
+## モジュールの配置
+
+| ディレクトリ | 置くもの |
+|---|---|
+| `core/` | OS にもブラウザにも依存しない判定と取得。IDE 拡張とブラウザ拡張が共有する |
+| `ide/` | VS Code API と `node:fs` を触るモジュール。実装の入口は `ide/agentTool.ts` |
+| `browser/` | MV3 の manifest、content script、専用タブ、File System Access API の呼び出し |
+| `test/` | 上記 3 つのテスト。ルートに集約する |
+
+`core/` に置くのは次の 2 種類とする。
+
+1. **純粋関数** — URL 解析（`github.ts`）、frontmatter の読み取り（`frontmatter.ts`）、
+   エージェントの定義（`agent.ts`）、名前検証と拒否リスト、エラー型（`errors.ts`）、
+   貼り付け入力の判別（`pasteInput.ts`）、種別判定と配置先の決定、台帳の生成と解釈
+2. **取得ポリシー** — URL、各上限、展開後エントリの検証。IDE は zip、ブラウザは tar.gz の
+   読み取りをそれぞれの層に置く
+
+I/O を伴うものは `core/` に入れない。実体ツリー hash はパスと内容の一覧を受け取って値を返し、
+収集一覧の退避は一覧を受け取って捨てる対象を返す。ツリーの走査と IndexedDB の読み書きは
+`ide/` と `browser/` が担う。どちらも `node:test` で検証できる形にする。
+
+取得と展開は書き込み先を引数で受け取る。`core/` は `node:fs` も
+File System Access API も直接は呼ばない。`ide/` は `node:fs`、`browser/` は
+`FileSystemDirectoryHandle` を渡す。実装が 1 つの interface や class は作らない。
+
+`core/` は MCP と Plugin を扱う関数を持たない。ブラウザ拡張が使わないものを
+共有層に上げない。これらは `ide/` に残す。

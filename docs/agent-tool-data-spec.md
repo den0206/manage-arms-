@@ -43,3 +43,59 @@ macOS/Linux では symlink、Windows では junction または hardlink を使�
 - registry、GitHub API 応答、差分本文の合計は 2 MB を上限とする。
 - 読み取る設定ファイルは単一ファイルと同じ 20 MB を上限とする。`~/.claude.json` は履歴で育つ。
 - MCP の状態確認は前回の確認中には重ねて実行しない。非表示・破棄後の結果は保持しない。
+
+## ブラウザ拡張の保存先
+
+| 保存先 | 内容 |
+|---|---|
+| IndexedDB | 許可済みディレクトリハンドル（エージェント別）と、導入した Skill / Subagent の収集一覧 |
+
+収集一覧の上限は `core/` の `MAX_BROWSER_COLLECTION_ENTRIES = 100` とし、超えた分は古い順に捨てる。各項目は取得元、commit SHA、導入先、日時、
+導入直後に計算した実体ツリーの SHA-256 だけを持つ。ログ、診断履歴、閲覧した URL は保持しない。
+ハンドルは `requestPermission()` の再取得が必要になるため、ブラウザ再起動後の初回操作で
+利用者の操作を1回求める。
+
+## 取得元の台帳
+
+ブラウザ拡張は実体を書いた導入先ルートに、エントリごとの台帳を置く。
+
+```
+<導入先ルート>/.agent-tool/<name>.json
+```
+
+| キー | 内容 |
+|---|---|
+| `name` | 実体の名前（ディレクトリ名または `.md` のファイル名） |
+| `kind` | `skill` または `subagent` |
+| `repo` / `branch` / `subdir` | 取得元 |
+| `sha` | 導入時点の commit SHA |
+
+エントリごとに 1 ファイルとし、read-modify-write を行わない。ブラウザ拡張はプロセス間ロックを
+取れないため、共有ファイルへの追記や部分削除を避ける。`pinned` / `disabled` は利用者が IDE 拡張で
+決める状態なので台帳には持たない。実体ツリー SHA-256 も持たない（用途が違う。下記）。
+
+IDE 拡張は走査時に未取り込みの台帳を見つけると、`registry.json` へ `Entry` として追加し、
+読み終えた台帳ファイルを削除する。走査は `.` で始まる名前を除外するので、台帳が Skill として
+誤検出されることはない。
+
+| 記録 | 置き場 | 用途 |
+|---|---|---|
+| 台帳（取得元・commit SHA） | 導入先ルートの `.agent-tool/` | ブラウザ拡張から IDE 拡張への片方向の引き渡し |
+| 実体ツリー SHA-256 | IndexedDB の収集一覧 | ブラウザ拡張自身が削除してよいかの判定 |
+
+## 実体の置き場（ブラウザ拡張）
+
+| 導入先 | 置き場 |
+|---|---|
+| Claude Code | `~/.claude/skills/<name>/`、`~/.claude/agents/<name>.md` |
+| Cursor / Codex | `~/.agents/skills/<name>/`（無ければ `~/.cursor/skills` `~/.codex/skills`） |
+| Cursor の Subagent | `~/.cursor/agents/<name>.md` |
+
+`~/.agents/skills` は Cursor と Codex の両方が読むため、存在する環境では実体を 1 つに保てる。
+Claude は読まないので常に `~/.claude` 側へ直接置く。ブラウザ拡張は symlink を作れない。
+
+## 実体を失った entry
+
+IDE 拡張は走査のたび、**走査できたルートに属する entry** だけを実体と照合し、実体が無ければ
+`registry.json` から除く。走査できなかったルートの entry は残す。開いていないプロジェクトの
+project スコープ entry を巻き込まないための条件である。

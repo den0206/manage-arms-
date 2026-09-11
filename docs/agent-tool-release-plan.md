@@ -3,8 +3,19 @@
 ## 現在の構成
 
 - 拡張機能と管理ロジックは TypeScript で実装する。
+- `ide/` `browser/` `core/` に分け、`test/` はルートに集約する。
+- ルートの `package.json` は 1 つ。ブラウザ拡張は `browser/manifest.json` を持つ。
 - VSIX は Node.js 依存だけを含み、サイズ上限は 20 MB とする。
 - `scripts/` にローカルと CI で共通の検査スクリプトを置く。
+
+版は拡張ごとに独立させる。リリースはタグの接頭辞で分岐する。
+
+| タグ | 対象 |
+|---|---|
+| `ide-v<semver>` | VSIX を組み立てて Open VSX と GitHub Release へ |
+| `browser-v<semver>` | ブラウザ拡張の zip を組み立てて GitHub Release へ |
+
+`CHANGELOG.md` は 1 つのまま、`[Unreleased]` の中で対象ごとに見出しを分ける。
 
 ## リリース前の確認
 
@@ -27,3 +38,13 @@ Cursor Stable の E2E を実行し、VSIX のサイズが 20 MB 未満である�
 4. 同じVSIXとSHA-256をGitHub Releaseに添付する。
 
 Open VSX の公開を実行して失敗した場合は、Workflowを停止してGitHub Releaseを作らない。alpha / betaはGitHub Releasesだけに公開する。
+
+## ブラウザ拡張の配布
+
+1. `browser-v<semver>` のタグで zip を組み立て、SHA-256 を記録する。
+2. Chrome Web Store へ提出する。
+3. Edge Add-ons へ同じ zip を提出する。
+4. 同じ zip と SHA-256 を GitHub Release に添付する。
+
+ストア審査は `host_permissions` の用途説明を求められる。要求するのは github.com /
+skills.sh / agentsdirectory.dev の 3 つだけで、`<all_urls>` は要求しない。
