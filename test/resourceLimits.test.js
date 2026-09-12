@@ -2,7 +2,7 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { gzipSync } = require("node:zlib");
 const { ArchiveError, readTarGz } = require("../out/core/archive.js");
-const { readTree, TreeReadLimitError } = require("../out/browser/fs.js");
+const { readTree, TreeReadLimitError } = require("../out/web/browser/fs.js");
 
 const BLOCK = 512;
 function header(name, size, flag) {
