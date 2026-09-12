@@ -146,7 +146,7 @@ export async function install(request: InstallRequest): Promise<Collected> {
   const { lead, placement, root } = request;
   const taken = await exists(root, placement.entry);
   if (!request.overwrite && taken) {
-    throw new InstallError("notFound", "it already exists");
+    throw new InstallError("blocked", placement.entry);
   }
 
   // 既にあるものは触らずに、まず取得できることを確かめる。取得に失敗したときに

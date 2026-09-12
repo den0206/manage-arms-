@@ -21,6 +21,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Choosing a folder in Brave reported what went wrong instead of doing nothing: Brave turns the File System Access API off by default, and the extension now says so and walks through enabling it in brave://flags.
 - The "Installed here" list drops entries that were removed from the IDE extension. It could not read the folder to check, so it kept showing them.
 - The browser extension's dropdown menus and dialogs stay legible in dark mode; some text could render unreadable against the page's own dark styling before.
+- Pasting a link that is not a skill or subagent says so in the browser extension. The message was wired up but its visibility was inverted, so nothing appeared.
 - The browser extension's "paste a URL" label no longer folds the "Supported sites" link into the input's accessible name, the install-succeeded banner is announced to screen readers and keeps focus while visible, and the URL error message is now associated with its field.
 
 ## [0.1.2] — 2026-09-12
