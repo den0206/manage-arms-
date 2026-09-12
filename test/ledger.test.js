@@ -237,7 +237,7 @@ test("実体の無い台帳は取り込まない", () => {
   assert.deepEqual(scan(f.env).map(item => item.ledger.name), ["pdf"]);
 });
 
-test("読めないルートがあるときは entry を落とさない", async () => {
+test("読めないルートがあるときは entry を落とさない", { skip: process.platform === "win32" }, async () => {
   // 権限・退避されたクラウド同期・切れたネットワークホームでは走査が空になる。
   // これを「消えた」と扱うと、実体が残っているのに pinned / disabled / 取得元を失う。
   const f = fixture();
