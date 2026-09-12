@@ -1,5 +1,5 @@
 import { readTarGz } from "../core/archive.js";
-import { Collected } from "../core/collection.js";
+import { Collected, isRemovable } from "../core/collection.js";
 import { ToolLead } from "../core/detect.js";
 import { GitHubSource } from "../core/github.js";
 import { treeHash, TreeFile } from "../core/hash.js";
@@ -156,7 +156,7 @@ export async function remove(
     await forget(item);
     return "missing";
   }
-  if (await treeHash(current) !== item.treeHash) return "changed";
+  if (!isRemovable(item, await treeHash(current))) return "changed";
 
   await removeEntry(root, entry, isDirectory);
   // 未取り込みの台帳が残っていると、IDE 拡張が消えた実体を登録してしまう。

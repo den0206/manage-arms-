@@ -39,15 +39,6 @@ export function add(
   return next.slice(Math.max(0, next.length - limit));
 }
 
-/** 捨てられる件。呼び出し側が実体に触る必要は無い（記録だけを落とす）。 */
-export const evicted = (
-  list: readonly Collected[], item: Collected,
-  limit = MAX_BROWSER_COLLECTION_ENTRIES,
-): Collected[] => {
-  const next = add(list, item, limit);
-  return list.filter(entry => !next.includes(entry) && !same(entry, item));
-};
-
 export const find = (list: readonly Collected[], item: Pick<Collected,
   "name" | "kind" | "root" | "agent">): Collected | undefined =>
   list.find(entry => same(entry, item as Collected));

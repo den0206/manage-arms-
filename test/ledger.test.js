@@ -81,7 +81,7 @@ test("取り込むと registry に載り、台帳は消える", () => {
   const file = f.skill("pdf");
   const registry = empty();
 
-  assert.equal(absorb(f.env, registry, scan(f.env)), 1);
+  absorb(f.env, registry, scan(f.env));
   assert.deepEqual(registry.resources, [{
     name: "pdf", kind: "skill", repo: "owner/repo", sha: "abc",
     pinned: false, disabled: false,
@@ -157,30 +157,25 @@ test("走査したルートで実体が無い entry を落とす", () => {
   const registry = empty();
   upsert(registry, managed("kept"));
   upsert(registry, managed("gone"));
-  const removed = prune(registry, {
+  prune(registry, {
     seen: new Set([key("kept", "skill")]),
     scannedUser: true, scannedProject: null,
   });
-  assert.equal(removed, 1);
   assert.deepEqual(registry.resources.map(item => item.name), ["kept"]);
 });
 
 test("走査していない user スコープは落とさない", () => {
   const registry = empty();
   upsert(registry, managed("gone"));
-  assert.equal(prune(registry, {
-    seen: new Set(), scannedUser: false, scannedProject: null,
-  }), 0);
+  prune(registry, { seen: new Set(), scannedUser: false, scannedProject: null });
+  assert.deepEqual(registry.resources.map(item => item.name), ["gone"]);
 });
 
 test("開いていないプロジェクトの entry を巻き込まない", () => {
   const registry = empty();
   upsert(registry, managed("here", "/work/a"));
   upsert(registry, managed("elsewhere", "/work/b"));
-  const removed = prune(registry, {
-    seen: new Set(), scannedUser: false, scannedProject: "/work/a",
-  });
-  assert.equal(removed, 1);
+  prune(registry, { seen: new Set(), scannedUser: false, scannedProject: "/work/a" });
   assert.deepEqual(registry.resources.map(item => item.name), ["elsewhere"]);
 });
 

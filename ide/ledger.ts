@@ -64,18 +64,15 @@ const toEntry = (ledger: Ledger): Entry => ({
  * registry へ足して台帳を消す。呼び出し側がロックの中で呼ぶ。
  * 台帳の削除に失敗しても registry の更新は残す — 次回に同じものを入れ直すだけで害はない。
  */
-export function absorb(env: Env, registry: Registry, found: readonly Found[]): number {
-  let taken = 0;
+export function absorb(env: Env, registry: Registry, found: readonly Found[]): void {
   for (const item of found) {
     upsert(registry, toEntry(item.ledger));
-    taken += 1;
     try {
       removeLedger(item.file, item.root, env);
     } catch {
       /* 消せなくても取り込みは済んでいる。次回の走査でもう一度上書きする */
     }
   }
-  return taken;
 }
 
 export const key = (name: string, kind: KindId, project?: string): string =>
@@ -93,8 +90,7 @@ export function prune(registry: Registry, params: {
   readonly scannedUser: boolean;
   /** 走査したプロジェクトの絶対パス。開いていなければ null。 */
   readonly scannedProject: string | null;
-}): number {
-  const before = registry.resources.length;
+}): void {
   registry.resources = registry.resources.filter(item => {
     const scanned = item.project === undefined
       ? params.scannedUser
@@ -102,5 +98,4 @@ export function prune(registry: Registry, params: {
     if (!scanned) return true;
     return params.seen.has(key(item.name, item.kind, item.project));
   });
-  return before - registry.resources.length;
 }
