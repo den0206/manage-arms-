@@ -1,18 +1,43 @@
-import { lead, proofUrls, ToolLead } from "../core/detect.js";
-import { fromJsonLd, needsPage } from "../core/github.js";
+import { detectPage, proofUrls, ToolLead } from "../core/detect.js";
 import { rootStateOf, splitRoot } from "../core/placement.js";
+import { MAX_BROWSER_COLLECTION_ENTRIES } from "../core/collection.js";
 import { autoOpenEnabled, knownRoots, loadCollection, loadHandle } from "./store.js";
+import { isExtractable } from "./install.js";
 
 /**
  * 検知の判定はここで行う。content script は URL を送るだけにする
  * （content script は ES モジュールを読み込めない）。
  *
- * 見た URL は保存しない。**タブごと**の候補と、この起動中に断られたものだけをメモリに持つ。
- * タブを移ったり別のページへ行けば候補は消える — 前のページの検知結果を出し続けない。
+ * 見た URL は保存しない。持つのは**タブごと**の候補だけで、タブを移ったり別のページへ
+ * 行けば消える — 前のページの検知結果を出し続けない。
+ *
+ * 「今はしない」も覚えない。断るのは**その表示**に対してであって、そのページに対して
+ * ではない。覚えると、いつ解除されるのか利用者から見て決まらない状態ができる
+ * （service worker が停止するまで、という拡張の都合でしかない基準になる）。
+ * 同じページをもう一度開けば、もう一度出る。
  */
 const candidates = new Map<number, string>();
-const dismissed = new Set<string>();
-const installed = new Set<string>();
+
+/**
+ * カタログは実体パスを約束しないので、展開して中身を確かめるしかない。
+ * アーカイブを 1 本落とすので **1 URL につき 1 回だけ**にし、結果はこの起動中の
+ * メモリにだけ置く。覚えるのは**答えが出たときだけ**で、取得に失敗しただけのものは
+ * 覚えない — 通信が戻れば出るはずのものを、出ないまま固定してしまう。
+ */
+const extracted = new Map<string, boolean>();
+
+async function extractable(found: ToolLead): Promise<boolean> {
+  if (found.proofs.length > 0) return true;             // 実在確認で足りる
+  const cached = extracted.get(found.url);
+  if (cached !== undefined) return cached;
+  const ok = await isExtractable(found);
+  if (ok !== null) {
+    const oldest = extracted.keys().next().value;
+    if (extracted.size >= MAX_BROWSER_COLLECTION_ENTRIES && oldest !== undefined) extracted.delete(oldest);
+    extracted.set(found.url, ok);
+  }
+  return ok === true;
+}
 
 /** 実在確認。**どれか 1 つでも 200 なら本物**。404 と通信失敗は黙る。 */
 async function exists(found: ToolLead): Promise<boolean> {
@@ -65,11 +90,13 @@ async function visit(url: string, tabId: number | undefined, jsonLd?: string): P
   if (candidates.get(tabId) !== url) await clear(tabId);
   if (!await autoOpenEnabled()) return;
 
-  const resolved = needsPage(url) === null ? url : fromJsonLd(jsonLd ?? "");
-  const found = resolved === null ? null : lead(resolved);
+  // 展開確認はアーカイブを 1 本丸ごと落とす（実測で数 MB）。ネットワークに触れない
+  // 判定を全部先に通し、**出すと決まったものだけ**確かめる。導入済みのものを
+  // 見るたびに落とし直さない。
+  const found = detectPage(url, jsonLd ?? "");
   if (found === null) return;
-  if (dismissed.has(found.url) || installed.has(`${found.kind}:${found.name}`)) return;
   if (!await exists(found) || await alreadyInstalled(found)) return;
+  if (!await extractable(found)) return;
 
   candidates.set(tabId, found.url);
   await chrome.action.setBadgeText({ text: "1", tabId }).catch(() => { /* タブが閉じた */ });
@@ -85,28 +112,22 @@ async function activeCandidate(): Promise<string> {
   return tab?.id === undefined ? "" : candidates.get(tab.id) ?? "";
 }
 
-async function forgetActive(): Promise<void> {
+/** 今の表示をやめる。「今はしない」と導入後の両方が呼ぶ。次に開けばまた出る。 */
+async function clearActive(): Promise<void> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tab?.id === undefined) return;
-  const url = candidates.get(tab.id);
-  if (url !== undefined) dismissed.add(url);
-  await clear(tab.id);
+  if (tab?.id !== undefined) await clear(tab.id);
 }
 
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
-  const payload = message as
-    { type?: string; url?: string; jsonLd?: string; name?: string; kind?: string };
+  const payload = message as { type?: string; url?: string; jsonLd?: string };
 
   if (payload.type === "visited" && payload.url !== undefined) {
     void visit(payload.url, sender.tab?.id, payload.jsonLd);
     return false;
   }
-  if (payload.type === "dismiss") { void forgetActive(); return false; }
-  if (payload.type === "installed" && payload.name !== undefined && payload.kind !== undefined) {
-    installed.add(`${payload.kind}:${payload.name}`);
-    void forgetActive();
-    return false;
-  }
+  // 導入後も「今はしない」と同じ。導入済みかどうかは収集一覧が持っているので
+  // （`alreadyInstalled`）、service worker が別に覚える必要が無い。
+  if (payload.type === "dismiss") { void clearActive(); return false; }
   if (payload.type === "candidate") {
     void activeCandidate().then(respond);
     return true;                                 // 非同期に返す

@@ -28,7 +28,11 @@
     </header>
 
     <main>
-      <p id="done" class="done" hidden></p>
+      <!-- 導入直後だけ出る。一覧は設定の中にあるので、そこまでの導線をここに置く。 -->
+      <p id="done" class="done" hidden>
+        <span id="done-text"></span>
+        <button id="done-open" class="link" type="button" data-i18n="tabOpenCollection"></button>
+      </p>
 
       <!-- 検知したとき。出すのは種類と名前だけ。取得元と導入先は次の段で見せる。 -->
       <section id="found" hidden>
@@ -58,24 +62,14 @@
       </section>
 
       <section id="url-section">
-        <label for="url" data-i18n="tabUrlLabel"></label>
+        <label id="url-label" for="url"></label>
         <input id="url" type="url" autocomplete="off" spellcheck="false">
         <p id="url-error" class="error" hidden data-i18n="tabUrlUnsupported"></p>
-      </section>
-
-      <section id="collection-section">
-        <div class="section-head">
-          <h2 data-i18n="tabCollection"></h2>
-          <button id="verify" type="button" hidden data-i18n="tabVerify"></button>
-        </div>
-        <ul id="collection"></ul>
-        <p id="collection-empty" class="empty" data-i18n="tabCollectionEmpty"></p>
       </section>
 
       <!-- 設定。別タブへ飛ばさず、ここで完結させる。 -->
       <section id="settings-view" hidden>
         <h2 data-i18n="settingsTitle"></h2>
-        <p class="lead" data-i18n="settingsText"></p>
         <p id="hint" class="hint"></p>
         <div id="roots"></div>
         <p id="settings-status" class="status" role="status"></p>
@@ -84,8 +78,25 @@
           <input id="auto-open" type="checkbox">
           <span data-i18n="tabAutoOpenToggle"></span>
         </label>
+
+        <!-- ここから導入したもの。普段は畳んでおく。開閉は `details` に任せる。 -->
+        <details id="collection-section">
+          <summary data-i18n="tabCollection"></summary>
+          <button id="verify" type="button" hidden data-i18n="tabVerify"></button>
+          <ul id="collection"></ul>
+          <p id="collection-empty" class="empty" data-i18n="tabCollectionEmpty"></p>
+        </details>
       </section>
     </main>
+
+    <dialog id="supported-sites" aria-labelledby="supported-sites-title">
+      <div class="dialog-head">
+        <h2 id="supported-sites-title" data-i18n="tabSupportedSites"></h2>
+        <button id="close-sites" class="clear" type="button" data-i18n="close"></button>
+      </div>
+      <p class="lead" data-i18n="tabSupportedSitesText"></p>
+      <ul id="sites-list" class="sites-list"></ul>
+    </dialog>
     <script type="module" src="tab.js"></script>
   </body>
 </html>

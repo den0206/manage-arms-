@@ -113,6 +113,8 @@ const RESERVED: ReadonlySet<string> = new Set([
  */
 export type CatalogSite = {
   readonly host: string;
+  /** 利用者に表示するサイト名。対応サイトの導線もこの宣言に追随させる。 */
+  readonly label: string;
   readonly fromPath?: (parts: string[]) => { source: GitHubSource; skill?: string } | null;
 };
 
@@ -121,6 +123,7 @@ export const CATALOG_SITES: readonly CatalogSite[] = [
     // skills.sh/owner/repo/skill。3 番目はディレクトリ名であってパスではない
     // （`grilling` の実体は `skills/productivity/grilling`）ので subdir にはできない。
     host: "skills.sh",
+    label: "skills.sh",
     fromPath: parts => {
       if (parts.length < 2 || RESERVED.has(parts[0].toLowerCase())) return null;
       if (!isRepoPath(parts[0], parts[1])) return null;
@@ -129,7 +132,13 @@ export const CATALOG_SITES: readonly CatalogSite[] = [
   },
   // agentsdirectory.dev/skills/<slug>。slug だけで owner/repo が決まらないので、
   // 取得元はページの JSON-LD から読む。
-  { host: "agentsdirectory.dev" },
+  { host: "agentsdirectory.dev", label: "Agents Directory" },
+];
+
+/** URL 入力とブラウザ拡張の案内に出す、利用者が開ける対応サイト。 */
+export const SUPPORTED_SITES: readonly { readonly label: string; readonly url: string }[] = [
+  { label: "GitHub", url: "https://github.com/" },
+  ...CATALOG_SITES.map(site => ({ label: site.label, url: `https://${site.host}/` })),
 ];
 
 const CATALOG_HOSTS = CATALOG_SITES.map(site => site.host);

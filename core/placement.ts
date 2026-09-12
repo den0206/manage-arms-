@@ -86,16 +86,8 @@ export type RootState =
 
 /**
  * @param savedName 設定ディレクトリのキーで覚えているハンドルの名前。無ければ null。
- * @param legacy    `<configDir>/skills` のように下位フォルダを覚えていた旧版の記録。
  */
-export function rootStateOf(
-  configDir: string, savedName: string | null, legacy: readonly string[] = [],
-): RootState {
-  if (savedName !== null) {
-    return savedName === configDir ? { kind: "ok" } : { kind: "mismatch", chosen: savedName };
-  }
-  // 旧版は下位フォルダも覚えていた。`skills` という名前はどのエージェントにもあるので、
-  // どこを指しているのか確かめられない。設定し直してもらう。
-  const stale = legacy.find(name => name !== "");
-  return stale === undefined ? { kind: "unset" } : { kind: "mismatch", chosen: stale };
-}
+export const rootStateOf = (configDir: string, savedName: string | null): RootState =>
+  savedName === null ? { kind: "unset" }
+    : savedName === configDir ? { kind: "ok" }
+    : { kind: "mismatch", chosen: savedName };

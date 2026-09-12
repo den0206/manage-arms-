@@ -65,6 +65,16 @@ else
     echo "✓ 英語と日本語の文言キーが揃っています"
 fi
 
+# 不変条件7。ブラウザ拡張の書き込みはbrowser/fs.tsだけに置く。File System Access APIは
+# WriteGuardを通れないので、名前の検査（safeSegments）を通る口が1つであることを機械で数える。
+LEAKS=$(grep -rnE 'createWritable\(|\.removeEntry\(|get(Directory|File)Handle\(.*create' \
+        browser/ --include='*.ts' | grep -v '^browser/fs\.ts:')
+if [ -n "$LEAKS" ]; then
+    fail "ブラウザ拡張の書き込みがbrowser/fs.tsの外に漏れています" "$LEAKS"
+else
+    echo "✓ ブラウザ拡張の書き込みはbrowser/fs.tsに限定されています"
+fi
+
 # core/はOSにもブラウザにも依存しない。node:の読み込み自体を持たせない。
 LEAKS=$(grep -rn "from \"node:" core/ --include='*.ts')
 if [ -n "$LEAKS" ]; then

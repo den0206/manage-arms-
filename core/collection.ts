@@ -22,9 +22,12 @@ export type Collected = {
 /** 収集一覧の上限。超えた分は古い順に捨てる。 */
 export const MAX_BROWSER_COLLECTION_ENTRIES = 100;
 
+/** 同じ導入先の同じ名前を 1 件に畳むキー。突き合わせはすべてこれを通す。 */
+export const keyOf = (item: Pick<Collected, "name" | "kind" | "root" | "agent">): string =>
+  `${item.agent}\n${item.root}\n${item.kind}\n${item.name}`;
+
 /** 同じ導入先に同じ名前のものは 1 件だけ持つ。 */
-const same = (a: Collected, b: Collected): boolean =>
-  a.name === b.name && a.kind === b.kind && a.root === b.root && a.agent === b.agent;
+const same = (a: Collected, b: Collected): boolean => keyOf(a) === keyOf(b);
 
 /**
  * 1 件足したあとの一覧を返す。上限を超えたら古い順に捨てる。
@@ -38,10 +41,6 @@ export function add(
   const next = [...kept, item].sort((a, b) => a.installedAt - b.installedAt);
   return next.slice(Math.max(0, next.length - limit));
 }
-
-export const find = (list: readonly Collected[], item: Pick<Collected,
-  "name" | "kind" | "root" | "agent">): Collected | undefined =>
-  list.find(entry => same(entry, item as Collected));
 
 /**
  * 削除してよいか。導入時の実体ツリー hash と一致するときだけ許す。

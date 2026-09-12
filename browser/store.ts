@@ -1,4 +1,6 @@
-import { Collected, add as addCollected, MAX_BROWSER_COLLECTION_ENTRIES } from "../core/collection.js";
+import {
+  Collected, add as addCollected, keyOf, MAX_BROWSER_COLLECTION_ENTRIES,
+} from "../core/collection.js";
 
 /**
  * 永続化するのはディレクトリハンドルと収集一覧だけ（設計決定 D-11）。
@@ -60,13 +62,20 @@ export async function collect(item: Collected): Promise<Collected[]> {
   return next;
 }
 
-export async function forget(item: Collected): Promise<Collected[]> {
-  const next = (await loadCollection()).filter(entry =>
-    !(entry.name === item.name && entry.kind === item.kind
-      && entry.root === item.root && entry.agent === item.agent));
+/**
+ * まとめて落とす。1 件ずつ呼ぶと、件数ぶん一覧全体の read-modify-write が走る。
+ * 0 件なら何も書かない。
+ */
+export async function forgetAll(items: readonly Collected[]): Promise<Collected[]> {
+  const list = await loadCollection();
+  if (items.length === 0) return list;
+  const gone = new Set(items.map(keyOf));
+  const next = list.filter(entry => !gone.has(keyOf(entry)));
   await saveCollection(next);
   return next;
 }
+
+export const forget = (item: Collected): Promise<Collected[]> => forgetAll([item]);
 
 /** バナーの ON / OFF。設定は 1 つだけなので chrome.storage を使わず既定値と往復する。 */
 export const autoOpenEnabled = async (): Promise<boolean> =>

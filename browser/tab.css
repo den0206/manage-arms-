@@ -70,10 +70,8 @@ section + section { margin-top: 14px; padding-top: 14px; border-top: 1px solid v
 
 /* 画面は 3 つ。検知・通常・設定のどれか 1 つだけを出す。 */
 body.detected #url-section,
-body.detected #collection-section,
 body.settings #found,
 body.settings #url-section,
-body.settings #collection-section,
 body.settings #done { display: none; }
 
 /* 戻るは設定のときだけ。歯車は設定と検知のときに引っ込める。 */
@@ -183,16 +181,50 @@ button.chip {
 button.chip:hover { border-color: var(--accent); color: var(--accent); }
 button.chip svg { flex: none; }
 
+/* 対応サイトは導入設定と混ぜず、元の画面を保ったまま一覧だけ重ねる。 */
+dialog {
+  width: min(330px, calc(100% - 28px));
+  max-height: calc(100vh - 24px);
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: 0 12px 30px color-mix(in srgb, var(--ink) 22%, transparent);
+}
+
+/*
+ * popup の高さは中身で決まる。通常画面は低いので、そのまま modal を出すと viewport に
+ * 合わせて潰され、一覧が下で切れて見えない。開いている間だけ土台を伸ばして高さを作り、
+ * それでも入らなければ一覧の中をスクロールさせる。
+ */
+body.dialog { min-height: 330px; }
+dialog[open] { display: flex; flex-direction: column; }
+.sites-list { flex: 1; min-height: 0; overflow-y: auto; }
+
+dialog::backdrop { background: color-mix(in srgb, var(--ink) 30%, transparent); }
+.dialog-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.dialog-head h2 { margin: 0; font-size: 14px; }
+.dialog-head .clear { padding: 4px 8px; font-size: 12px; }
+dialog .lead { margin: 12px 14px 0; }
+.sites-list { margin: 10px 14px 14px; }
+.dialog-head, dialog .lead { flex: none; }
+.sites-list li { padding: 8px 0; }
+.sites-list a { color: var(--accent); font-weight: 600; }
+
 /* --- 状態の知らせ ------------------------------------------------------ */
 
 .hint:empty, .status:empty { display: none; }
-/* 利用者が手を動かすための案内。読み飛ばされると詰まるので太字にする。 */
-.hint { margin: 10px 0 0; color: var(--muted); font-size: 11.5px; font-weight: 600; }
+/* 利用者が手を動かすための案内。 */
+.hint { margin: 10px 0 0; color: var(--muted); font-size: 11.5px; }
 .hint.error, code.error { color: var(--danger); }
 .status { margin: 10px 0 0; color: var(--muted); font-size: 12px; }
 .status.error, .error { color: var(--danger); }
 
 .done {
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
   margin: 0 0 12px;
   padding: 9px 11px;
   border-left: 3px solid var(--accent);
@@ -200,6 +232,23 @@ button.chip svg { flex: none; }
   background: var(--accent-wash);
   font-size: 12px;
 }
+
+/* `display` は出ているときだけ。`.done` に直接置くと作者スタイルが UA の
+   `[hidden] { display: none }` に勝ち、空の箱が出たままになる。 */
+.done:not([hidden]) { display: flex; }
+
+/* 文中のリンク。ボタンに見せない — 主役は貼る操作の方。 */
+.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* --- 入力 -------------------------------------------------------------- */
 
@@ -220,11 +269,29 @@ input[type=url]:focus-visible { border-color: var(--accent); outline: none; }
 
 .error { margin: 6px 0 0; font-size: 12px; }
 
-/* --- 導入したもの ------------------------------------------------------ */
+/* --- 導入したもの。設定の最下部に畳んで置く ---------------------------- */
 
-.section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.section-head h2 { margin: 0; font-size: 12px; font-weight: 600; color: var(--muted); }
-.section-head button { padding: 4px 9px; font-size: 11.5px; }
+#collection-section {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+/* 開閉は `details` に任せる。三角は既定のものをそのまま使う。 */
+#collection-section summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+#collection-section summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* 件数が増えても設定画面そのものは伸ばさない。一覧の中だけをスクロールさせる。 */
+#collection { max-height: 260px; overflow-y: auto; }
+
+/* 許可を取り直す。行の実態が確かめられないときだけ出る。 */
+#verify { margin-top: 10px; padding: 4px 9px; font-size: 11.5px; }
 
 ul { margin: 8px 0 0; padding: 0; list-style: none; }
 
@@ -238,12 +305,14 @@ li {
 
 li:first-child { border-top: 0; }
 li .name { flex: 1; min-width: 0; }
-li .name > div { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+li .name > div:first-child
+  { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 li code { display: block; color: var(--muted); font-size: 11.5px; overflow-wrap: anywhere; }
 li button { padding: 4px 9px; font-size: 11.5px; }
 
 /* 許可が無くて実態を確かめられない行。消えたとも残っているとも言わない。 */
-li.unverified .name { opacity: 0.6; }
+li.unverified .name > div:first-child, li.unverified code { opacity: 0.6; }
+li .why { margin-top: 3px; color: var(--muted); font-size: 11px; line-height: 1.45; }
 
 .empty { margin: 10px 0 0; color: var(--muted); font-size: 12px; }
 #collection:empty + .empty { display: block; }

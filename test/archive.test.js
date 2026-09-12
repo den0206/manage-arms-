@@ -1,7 +1,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { gzipSync } = require("node:zlib");
-const { readTarGz, safeSegments, ArchiveError } =
+const { firstUnwritable, readTarGz, safeSegments, unportableName, ArchiveError } =
   require("../out/core/archive.js");
 
 // --- tar を組み立てる（テスト用。実装側は読むだけ） ---------------------
@@ -166,4 +166,27 @@ test("上限を超えたら読むのをやめる", async () => {
 test("途中で切れたアーカイブを黙って受け入れない", async () => {
   const whole = Buffer.concat([header("a/b.txt", 1000, "0"), Buffer.alloc(200, 0x78)]);
   await rejects(gzipSync(whole), "ended in the middle");
+});
+
+// --- 書ける名前か（脱出防止とは別の検査） -------------------------------
+
+test("3 OS のどこかで作れない名前を落とす", () => {
+  for (const name of ["aux", "aux.md", "CON", "com1.txt", "lpt9",
+                      "faq?.md", "a<b", "a>b", 'a"b', "a|b", "a*b",
+                      "trailing.", "trailing ", "", "a\u0001b"]) {
+    assert.equal(unportableName(name), true, name);
+  }
+});
+
+test("実在する形の名前は通す", () => {
+  for (const name of ["SKILL.md", "auxiliary.md", "console.md", "com.md", "日本語",
+                      "a-1_2.v3", ".gitignore", "README"]) {
+    assert.equal(unportableName(name), false, name);
+  }
+});
+
+test("書けない名前を持つ最初のパスを返す", () => {
+  assert.equal(firstUnwritable(["SKILL.md", "docs/ok.md"]), null);
+  assert.equal(firstUnwritable(["SKILL.md", "docs/aux.md"]), "docs/aux.md");
+  assert.equal(firstUnwritable(["a/b?/c.md"]), "a/b?/c.md");
 });

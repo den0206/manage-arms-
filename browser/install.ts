@@ -1,12 +1,12 @@
-import { ArchiveError, readTarGz } from "../core/archive.js";
+import { ArchiveError, firstUnwritable, readTarGz } from "../core/archive.js";
 import { Collected, isRemovable } from "../core/collection.js";
 import { locateSkill, ToolLead } from "../core/detect.js";
 import { GitHubSource } from "../core/github.js";
 import { treeHash, TreeFile } from "../core/hash.js";
-import { ledger, LEDGER_DIR, ledgerPath } from "../core/ledger.js";
+import { ledger, ledgerPath } from "../core/ledger.js";
 import { CATALOG_EXTRACT_LIMIT, ENTRY_LIMIT, SINGLE_FILE_LIMIT, SIZE_LIMIT } from "../core/limits.js";
 import { Placement, rootOf } from "../core/placement.js";
-import { exists, readTree, removeEntry, reserve, writeTree } from "./fs.js";
+import { exists, readTree, removeEntry, removeLedgerFile, reserve, writeTree } from "./fs.js";
 import { collect, forget } from "./store.js";
 
 /**
@@ -36,7 +36,7 @@ export async function commitSha(source: GitHubSource): Promise<string | undefine
 
 export class InstallError extends Error {
   constructor(
-    readonly kind: "tooLarge" | "fetchFailed" | "notFound" | "blocked",
+    readonly kind: "tooLarge" | "fetchFailed" | "notFound" | "blocked" | "unusableName",
     message: string,
   ) {
     super(message);
@@ -52,7 +52,10 @@ export class InstallError extends Error {
  */
 export async function download(lead: ToolLead): Promise<{ files: TreeFile[]; sha?: string }> {
   const sha = await commitSha(lead.source);
-  const response = await fetch(archiveUrl(lead.source, sha), { cache: "no-store" });
+  const response = await fetch(archiveUrl(lead.source, sha), { cache: "no-store" }).catch(() => null);
+  if (response === null) {
+    throw new InstallError("fetchFailed", "the archive could not be fetched");
+  }
   if (response.status === 404) {
     throw new InstallError("notFound", `${lead.source.repo} was not found on GitHub`);
   }
@@ -110,6 +113,22 @@ export async function download(lead: ToolLead): Promise<{ files: TreeFile[]; sha
   return { files, sha };
 }
 
+/**
+ * カタログ候補を表示してよいか。取得物は保持も書き込みもしない。
+ *
+ * `null` は「判定できなかった」。取得そのものに失敗しただけなら、そのリポジトリに
+ * 入っていないと分かったわけではない。false と混ぜると、通信が一瞬こけただけの候補を
+ * 覚え込んで出さなくなる。
+ */
+export async function isExtractable(lead: ToolLead): Promise<boolean | null> {
+  try {
+    await download(lead);
+    return true;
+  } catch (error) {
+    return error instanceof InstallError && error.kind !== "fetchFailed" ? false : null;
+  }
+}
+
 export type InstallRequest = {
   readonly lead: ToolLead;
   readonly agent: string;
@@ -130,38 +149,77 @@ export async function install(request: InstallRequest): Promise<Collected> {
     throw new InstallError("notFound", "it already exists");
   }
 
-  // 先に置き場を確保する。IDE 拡張が張った symlink は一覧にも出ず、作ろうとして
-  // 初めて失敗する。取得の前に分かれば、無駄に落とさずに済む。
-  try {
-    await reserve(root, placement.entry, placement.isDirectory);
-  } catch {
-    throw new InstallError("blocked", placement.entry);
+  // 既にあるものは触らずに、まず取得できることを確かめる。取得に失敗したときに
+  // 元のものが消えていると、利用者は何も残らないまま元の版も失う。
+  if (!taken) {
+    // IDE 拡張が張った symlink は一覧にも出ず、作ろうとして初めて失敗する。
+    // 取得の前に分かれば、無駄に落とさずに済む。
+    try {
+      await reserve(root, placement.entry, placement.isDirectory);
+    } catch {
+      throw new InstallError("blocked", placement.entry);
+    }
   }
-  const created = !taken;
 
   let files: TreeFile[];
   let sha: string | undefined;
   try {
     ({ files, sha } = await download(lead));
-    const base = placement.isDirectory ? [placement.entry] : [];
-    const laid = placement.isDirectory
-      ? files
-      : [{ path: placement.entry, bytes: files[0].bytes }];
+  } catch (error) {
+    // 確保しただけの空の置き場は片付ける。元からあったものには触っていない。
+    if (!taken) {
+      await removeEntry(root, placement.entry, placement.isDirectory).catch(() => undefined);
+    }
+    throw error;
+  }
+
+  // 書けない名前が 1 つでもあれば、何も消さずにここで止める。消してから気づくと、
+  // 旧版も新版も無い状態が残る。macOS で作れても Windows で作れない名前がある。
+  const bad = firstUnwritable([placement.entry, ...files.map(file => file.path)]);
+  if (bad !== null) {
+    if (!taken) {
+      await removeEntry(root, placement.entry, placement.isDirectory).catch(() => undefined);
+    }
+    throw new InstallError("unusableName", bad);
+  }
+
+  const base = placement.isDirectory ? [placement.entry] : [];
+  const laid = placement.isDirectory
+    ? files
+    : [{ path: placement.entry, bytes: files[0].bytes }];
+  // 上書きは「重ねる」ではなく「置き換える」。重ねると旧版にしか無いファイルが残り、
+  // 新旧の混ざったものができる。File System Access API には rename がないため、旧版を
+  // 退避してから置換し、失敗時は戻す。
+  // ponytail: 退避はメモリ上。ブラウザ API に原子的な rename が入れば一時ファイルへ替える。
+  const previous = taken ? await readTree(root, placement.entry, placement.isDirectory) : null;
+  if (taken && previous === null) throw new InstallError("blocked", placement.entry);
+  let removed = false;
+  try {
+    if (taken) {
+      await removeEntry(root, placement.entry, placement.isDirectory);
+      removed = true;
+      await reserve(root, placement.entry, placement.isDirectory);
+    }
     await writeTree(root, base, laid);
   } catch (error) {
-    // 自分で作った空の置き場は片付ける。元からあったものには触らない。
-    if (created) {
+    if (taken && removed && previous !== null) {
+      await removeEntry(root, placement.entry, placement.isDirectory).catch(() => undefined);
+      await reserve(root, placement.entry, placement.isDirectory)
+        .then(() => writeTree(root, base, previous))
+        .catch(rollback => console.error("Agent Tool: restore", rollback));
+    } else if (!taken) {
       await removeEntry(root, placement.entry, placement.isDirectory).catch(() => undefined);
     }
     throw error;
   }
 
   // 台帳は IDE 拡張へ取得元を渡すためだけのもの。削除の可否には使わない。
+  // 書けなくても導入は済んでいる。収集一覧に載せないと利用者が消せなくなるので止めない。
   await writeTree(root, [], [{
     path: ledgerPath(lead.name),
     bytes: new TextEncoder().encode(
       JSON.stringify(ledger(lead.name, lead.kind, lead.source, sha), null, 2) + "\n"),
-  }]);
+  }]).catch(error => { console.error("Agent Tool: ledger", error); });
 
   const written = await readTree(root, placement.entry, placement.isDirectory);
   const item: Collected = {
@@ -194,8 +252,7 @@ export async function remove(
 
   await removeEntry(root, entry, isDirectory);
   // 未取り込みの台帳が残っていると、IDE 拡張が消えた実体を登録してしまう。
-  await root.getDirectoryHandle(LEDGER_DIR)
-    .then(dir => dir.removeEntry(`${item.name}.json`))
+  await removeLedgerFile(root, item.name)
     .catch(() => { /* 取り込み済みか、そもそも無い */ });
   await forget(item);
   return "removed";

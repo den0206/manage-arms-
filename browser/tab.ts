@@ -1,14 +1,17 @@
 import { AgentId } from "../core/agent.js";
 import { Collected } from "../core/collection.js";
-import { lead, ToolLead } from "../core/detect.js";
-import { fromJsonLd, needsPage } from "../core/github.js";
+import { ToolLead, verifiedPage } from "../core/detect.js";
+import { needsPage, SUPPORTED_SITES } from "../core/github.js";
 import { PAGE_LIMIT } from "../core/limits.js";
 import {
   CONFIG_DIRS, placement, Placement, rootOf, RootState, SHARED_CONFIG_DIR, splitRoot, targets,
 } from "../core/placement.js";
-import { clearRoot, exists, PickerError, pickerHint, placeHandle, rootState } from "./fs.js";
-import { install, InstallError, remove, willOverwrite } from "./install.js";
-import { autoOpenEnabled, forget, loadCollection, setAutoOpenEnabled } from "./store.js";
+import {
+  clearRoot, configHandle, exists, PickerError, pickerHint, pickerUnavailable, placeHandle,
+  rootState,
+} from "./fs.js";
+import { install, InstallError, isExtractable, remove, willOverwrite } from "./install.js";
+import { autoOpenEnabled, forgetAll, loadCollection, setAutoOpenEnabled } from "./store.js";
 
 const t = (key: string, ...args: string[]): string => chrome.i18n.getMessage(key, args);
 const byId = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -22,6 +25,53 @@ for (const node of document.querySelectorAll<HTMLElement>("[data-i18n]")) {
   node.textContent = t(node.dataset.i18n ?? "");
 }
 byId<HTMLInputElement>("url").placeholder = t("tabUrlPlaceholder");
+
+const sitesDialog = byId<HTMLDialogElement>("supported-sites");
+const sitesList = byId<HTMLUListElement>("sites-list");
+for (const site of SUPPORTED_SITES) {
+  const row = document.createElement("li");
+  const link = document.createElement("a");
+  link.href = site.url;
+  link.target = "_blank";
+  link.rel = "noreferrer";
+  link.textContent = site.label;
+  row.append(link);
+  sitesList.append(row);
+}
+
+/**
+ * popup の高さは中身で決まり、modal はその viewport に収まるよう潰される。通常画面は
+ * 低いので、そのまま開くと一覧が下で切れる。開いている間だけ土台を伸ばして高さを作る。
+ */
+function showSites(open: boolean): void {
+  document.body.classList.toggle("dialog", open);
+  if (open) sitesDialog.showModal();
+  else sitesDialog.close();
+}
+
+byId<HTMLButtonElement>("close-sites").addEventListener("click", () => showSites(false));
+sitesDialog.addEventListener("close", () => document.body.classList.remove("dialog"));
+
+/**
+ * 「対応サイトのリンクを貼る」の「対応サイト」だけをリンクにする。
+ * 語順は言語で変わるので、差し込み位置 `{}` は文言側に持たせて割る。
+ *
+ * `getMessage` の置換は使わない。制御文字を印にすると落とされて割れず、リンクが
+ * 末尾に付く。文言にそのまま `{}` を書いておけば、置換を通らないので確実である。
+ */
+{
+  const SLOT = "{}";
+  const label = byId("url-label");
+  const parts = t("tabUrlLabel").split(SLOT);
+  if (parts.length !== 2) console.error("Agent Tool: tabUrlLabel に", SLOT, "がありません");
+  const link = document.createElement("button");
+  link.type = "button";
+  link.className = "link";
+  link.textContent = t("tabSupportedSitesLink");   // 見出しとは別。文中なので英語は小文字
+  // `label` の中なので、放っておくと入力欄へ転送される。開くのはこちらの役目。
+  link.addEventListener("click", event => { event.preventDefault(); showSites(true); });
+  label.replaceChildren(parts[0] ?? "", link, parts[1] ?? "");
+}
 
 let current: ToolLead | null = null;
 let chosen: AgentId | null = null;
@@ -97,17 +147,24 @@ async function renderTargets(found: ToolLead): Promise<void> {
   showTarget();
 }
 
-/** URL だけで取得元が決まらないカタログは、ページを 1 回読んで JSON-LD から採る。 */
-async function resolve(raw: string): Promise<ToolLead | null> {
-  const direct = lead(raw);
+/**
+ * URL だけで取得元が決まらないカタログは、ページを 1 回読んで JSON-LD から採る。
+ *
+ * `vetted` は service worker が既に展開確認を済ませた候補。もう一度確かめると
+ * アーカイブを 1 本（実測で数 MB）落とし直すことになるので、そこは飛ばす。
+ */
+async function resolve(raw: string, vetted: boolean): Promise<ToolLead | null> {
+  const check = vetted
+    ? async (): Promise<boolean> => true
+    : async (found: ToolLead): Promise<boolean> => await isExtractable(found) === true;
+  const direct = await verifiedPage(raw, "", check);
   if (direct !== null) return direct;
   const page = needsPage(raw);
   if (page === null) return null;
   const response = await fetch(page, { cache: "no-store" }).catch(() => null);
   if (response === null || !response.ok) return null;
   if (Number(response.headers.get("content-length") ?? 0) > PAGE_LIMIT) return null;
-  const resolved = fromJsonLd((await response.text()).slice(0, PAGE_LIMIT));
-  return resolved === null ? null : lead(resolved);
+  return verifiedPage(raw, (await response.text()).slice(0, PAGE_LIMIT), check);
 }
 
 function setMode(detected: boolean): void {
@@ -115,8 +172,8 @@ function setMode(detected: boolean): void {
   byId("found").hidden = !detected;
 }
 
-async function showLead(raw: string): Promise<void> {
-  const found = await resolve(raw);
+async function showLead(raw: string, vetted = false): Promise<void> {
+  const found = await resolve(raw, vetted);
   current = found;
   byId("url-error").hidden = found === null || raw === "";
   byId("status").textContent = "";
@@ -190,7 +247,7 @@ byId<HTMLButtonElement>("install").addEventListener("click", async () => {
   status.className = "status";
   status.textContent = t("tabInstalling");
   try {
-    const root = await placeHandle(where, true);
+    const root = await placeHandle(where, true, { create: true });
     if (root === null) { status.textContent = t("permissionLost"); return; }
 
     const request = { lead: found, agent, placement: where, root };
@@ -199,11 +256,10 @@ byId<HTMLButtonElement>("install").addEventListener("click", async () => {
       return;
     }
     await install({ ...request, overwrite: true });
-    await send({ type: "installed", name: found.name, kind: found.kind });
+    await send({ type: "dismiss" });               // バッジを下ろす。導入済みは収集一覧が持つ
     backToNormal();
-    await renderCollection();
     const done = byId("done");
-    done.textContent = t("tabInstalled", found.name, `~/${rootOf(where)}`);
+    byId("done-text").textContent = t("tabInstalled", found.name, `~/${rootOf(where)}`);
     done.hidden = false;
     setTimeout(() => { done.hidden = true; }, 6000);
   } catch (error) {
@@ -216,13 +272,15 @@ byId<HTMLButtonElement>("install").addEventListener("click", async () => {
 
 const message = (error: unknown, where: Placement): string => {
   if (error instanceof PickerError) {
-    return error.kind === "cancelled" ? ""
-      : t("pickerWrongFolder", error.chosen ?? "", `~/${where.configDir}`);
+    if (error.kind === "cancelled") return "";
+    if (error.kind === "unavailable") return pickerUnavailable();
+    return t("pickerWrongFolder", error.chosen ?? "", `~/${where.configDir}`);
   }
   if (error instanceof InstallError) {
     if (error.kind === "tooLarge") return t("errorTooLarge");
     if (error.kind === "notFound") return t("errorNotFound");
     if (error.kind === "blocked") return t("errorBlocked", `~/${rootOf(where)}/${where.entry}`);
+    if (error.kind === "unusableName") return t("errorUnusableName", error.message);
     return t("errorFetchFailed");
   }
   // 想定していない失敗を「接続を確かめて」で塗りつぶさない。理由をそのまま見せる。
@@ -235,18 +293,56 @@ const message = (error: unknown, where: Placement): string => {
 /** 許可が無いルートは実態を見られない。消えたのか残っているのか決めつけない。 */
 type Row = { readonly item: Collected; readonly verified: boolean };
 
+/**
+ * 実態と突き合わせる。**許可を訊く**ので、クリックから始まる経路でだけ呼ぶ。
+ *
+ * 許可が無いと `exists` を呼べず、IDE 拡張や手で消されたものを落とせない。
+ * popup を開いた直後の許可はまず `prompt` なので（`readRoots` の注記）、
+ * 訊かずに済ませると一覧が実態と永久にずれる。一覧を開くのは利用者の明示操作なので、
+ * ここで 1 回訊く。
+ *
+ * ルートが複数あるときは最初の 1 つしか訊けない（許可ダイアログは transient user
+ * activation を消費する）。残りは `verified: false` のままにして、もう一度押せば次へ進む。
+ */
 async function reconcile(list: readonly Collected[]): Promise<Row[]> {
+  // 同じルートを何度も開かない。`loadHandle` は呼ぶたびに IndexedDB を開け閉てするので、
+  // 件数ではなくルートの数（高々 4 つ）に比例させる。
+  const opened = new Map<string, FileSystemDirectoryHandle | null>();
+  const handleFor = async (root: string): Promise<FileSystemDirectoryHandle | null> => {
+    if (!opened.has(root)) {
+      opened.set(root, await placeHandle(splitRoot(root), true).catch(() => null));
+    }
+    return opened.get(root) ?? null;
+  };
+
   const rows: Row[] = [];
+  const gone: Collected[] = [];
   for (const item of list) {
-    const root = await placeHandle(splitRoot(item.root), false);
+    const root = await handleFor(item.root);
     if (root === null) { rows.push({ item, verified: false }); continue; }
     const entry = item.kind === "skill" ? item.name : `${item.name}.md`;
     // IDE 側や手で消されていれば、ここで収集一覧から落とす。
     if (await exists(root, entry)) rows.push({ item, verified: true });
-    else await forget(item);
+    else gone.push(item);
   }
+  await forgetAll(gone);                          // 消えていた分を 1 回でまとめて落とす
   return rows;
 }
+
+const collectionBox = byId<HTMLDetailsElement>("collection-section");
+
+/**
+ * 描画のきっかけは「畳みを開く」「設定を開く」「削除した」「許可し直した」の 4 つある。
+ * 同じ描画を重ねて走らせない。畳んでいる間は組まない — 見えないもののために
+ * IndexedDB とハンドルの許可を見に行かない。
+ */
+let drawing: Promise<void> | null = null;
+function refreshCollection(): void {
+  if (!collectionBox.open || drawing !== null) return;
+  drawing = renderCollection().finally(() => { drawing = null; });
+}
+
+collectionBox.addEventListener("toggle", refreshCollection);
 
 async function renderCollection(): Promise<void> {
   const rows = await reconcile(await loadCollection());
@@ -266,6 +362,13 @@ async function renderCollection(): Promise<void> {
     const where = document.createElement("code");
     where.textContent = `~/${item.root}`;
     text.append(name, where);
+    // 灰色にするだけでは「まだ入っている」と読まれる。確かめられていないと書く。
+    if (!verified) {
+      const why = document.createElement("div");
+      why.className = "why";
+      why.textContent = t("tabUnverified");
+      text.append(why);
+    }
 
     const button = document.createElement("button");
     button.textContent = t("tabRemove");
@@ -276,12 +379,8 @@ async function renderCollection(): Promise<void> {
   }
 }
 
-/** 許可が切れているルートをまとめて許可し直す。1 回の操作で全部を訊く。 */
-byId<HTMLButtonElement>("verify").addEventListener("click", async () => {
-  const roots = new Set((await loadCollection()).map(item => item.root));
-  for (const root of roots) await placeHandle(splitRoot(root), true).catch(() => null);
-  await renderCollection();
-});
+/** 確かめ直す。許可を訊くのは `reconcile` の仕事なので、組み直すだけでよい。 */
+byId<HTMLButtonElement>("verify").addEventListener("click", () => { void renderCollection(); });
 
 async function removeItem(item: Collected): Promise<void> {
   if (!confirm(t("tabRemoveConfirm", item.name))) return;
@@ -303,7 +402,7 @@ async function removeItem(item: Collected): Promise<void> {
 function setSettings(open: boolean): void {
   document.body.classList.toggle("settings", open);
   byId("settings-view").hidden = !open;
-  if (open) void renderRoots();
+  if (open) { void renderRoots(); refreshCollection(); }
 }
 
 async function renderRoots(): Promise<void> {
@@ -372,18 +471,26 @@ async function grant(configDir: string, again: boolean): Promise<void> {
   status.className = "status";
   status.textContent = "";
   try {
-    const handle = await placeHandle({ configDir, sub: "skills" }, true, again);
+    const handle = await configHandle(configDir, true, again);
     if (handle !== null) status.textContent = t("settingsSaved", `~/${configDir}`);
     await renderRoots();
   } catch (error) {
     if (error instanceof PickerError && error.kind !== "cancelled") {
       status.className = "status error";
-      status.textContent = t("pickerWrongFolder", error.chosen ?? "", `~/${configDir}`);
+      status.textContent = error.kind === "unavailable"
+        ? pickerUnavailable()
+        : t("pickerWrongFolder", error.chosen ?? "", `~/${configDir}`);
     }
     // 失敗しても状態は変わっている。いま何が設定されているかを出し直す。
     await renderRoots();
   }
 }
+
+/** 導入直後の案内から、入れたものの一覧へ。設定を開いて畳みも開く。 */
+byId<HTMLButtonElement>("done-open").addEventListener("click", () => {
+  collectionBox.open = true;                     // 畳んでいれば toggle が描画を起こす
+  setSettings(true);
+});
 
 byId("hint").textContent = pickerHint("~/.claude");
 byId<HTMLButtonElement>("open-settings").addEventListener("click", () => setSettings(true));
@@ -396,11 +503,10 @@ autoOpen.addEventListener("change", () => void setAutoOpenEnabled(autoOpen.check
 
 void (async () => {
   autoOpen.checked = await autoOpenEnabled();
-  await renderCollection();
   // 検知の候補は「今見ているタブのもの」だけを受け取る（別のタブのものを出さない）。
   const candidate = await send({ type: "candidate" });
   if (typeof candidate === "string" && candidate !== "") {
     byId<HTMLInputElement>("url").value = candidate;
-    await showLead(candidate);
+    await showLead(candidate, true);
   }
 })();

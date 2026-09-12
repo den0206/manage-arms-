@@ -43,6 +43,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: ./scripts/check-invariants.sh
+      # 組み立てた形でしか分からないもの（manifest と HTML が指す先、ESM の import 先、
+      # コードが使う i18n キー）を検査する。`tsc --noEmit` では出ない。
+      - run: npm run package:browser
       - run: ./scripts/release-changelog.sh --check
       - run: ./scripts/test-release-changelog.sh
 
