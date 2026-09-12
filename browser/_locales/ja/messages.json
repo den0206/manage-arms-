@@ -131,9 +131,6 @@
   "permissionLost": {
     "message": "このフォルダへ書き込む許可が切れました。"
   },
-  "permissionGrant": {
-    "message": "もう一度許可する"
-  },
   "overwriteConfirm": {
     "message": "$NAME$ は既にあります。上書きしますか。",
     "placeholders": {
