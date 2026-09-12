@@ -259,3 +259,32 @@ test("www つきのカタログも読む", () => {
   assert.equal(found.source.repo, "vercel-labs/agent-skills");
   assert.equal(found.name, "vercel-react-best-practices");
 });
+
+// --- 設定されているフォルダの状態 ---------------------------------------
+
+const { rootStateOf } = require("../out/core/placement.js");
+
+test("名前が一致すればそのエージェントのもの", () => {
+  assert.deepEqual(rootStateOf(".cursor", ".cursor"), { kind: "ok" });
+});
+
+test("別のフォルダが設定されていれば、その名前を返す", () => {
+  // 絶対パスは取れないので、確かめられるのも見せられるのも名前だけ。
+  assert.deepEqual(rootStateOf(".cursor", ".claude"), { kind: "mismatch", chosen: ".claude" });
+  assert.deepEqual(rootStateOf(".cursor", "skills"), { kind: "mismatch", chosen: "skills" });
+});
+
+test("何も無ければ未設定", () => {
+  assert.deepEqual(rootStateOf(".cursor", null), { kind: "unset" });
+  assert.deepEqual(rootStateOf(".cursor", null, []), { kind: "unset" });
+});
+
+test("旧版が覚えた下位フォルダは設定し直してもらう", () => {
+  // `skills` はどのエージェントにもあるので、どこを指しているか確かめられない。
+  assert.deepEqual(rootStateOf(".cursor", null, ["skills"]),
+    { kind: "mismatch", chosen: "skills" });
+});
+
+test("設定ディレクトリの記録があれば旧版の記録は見ない", () => {
+  assert.deepEqual(rootStateOf(".cursor", ".cursor", ["skills"]), { kind: "ok" });
+});
