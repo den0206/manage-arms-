@@ -1,25 +1,250 @@
-:root { color-scheme: light dark; --line: #d5dbe6; --muted: #5b6678; --accent: #1a56db; }
-@media (prefers-color-scheme: dark) { :root { --line: #2b3648; --muted: #98a4b8; --accent: #6a9bff; } }
+/*
+ * 主役はパス。絶対パスを出せない以上、`~/.claude/skills` の見え方が
+ * 「どこに入るのか」を決める唯一の手がかりになる。だからパスは等幅で、
+ * 飾りではなく内容として扱う。それ以外は静かにする。
+ */
+:root {
+  color-scheme: light dark;
+  --paper: #f7f8fa;
+  --card: #ffffff;
+  --ink: #1a1f2b;
+  --muted: #5d6779;
+  --line: #e2e6ed;
+  --accent: #0b6b63;
+  --accent-ink: #ffffff;
+  --accent-wash: #e7f2f0;
+  --danger: #c0392f;
+  --code: #edf0f5;
+  --radius: 10px;
+}
 
-body { margin: 0; font: 15px/1.6 system-ui, -apple-system, sans-serif; }
-main { max-width: 44rem; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
-h1 { font-size: 1.4rem; margin: 0 0 1.5rem; }
-h2 { font-size: 1.05rem; margin: 0 0 .5rem; }
-section { padding: 1.25rem 0; border-top: 1px solid var(--line); }
-section:first-of-type { border-top: 0; padding-top: 0; }
-label { display: block; margin-bottom: .35rem; }
-input[type=url] { width: 100%; padding: .55rem .7rem; font: inherit; box-sizing: border-box;
-                  border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; }
-fieldset { border: 1px solid var(--line); border-radius: 6px; margin: 1rem 0; padding: .75rem 1rem; }
-legend { padding: 0 .35rem; color: var(--muted); font-size: .85rem; }
-#targets label { display: flex; align-items: baseline; gap: .5rem; margin: .25rem 0; }
-button { font: inherit; padding: .5rem 1.1rem; border-radius: 6px; cursor: pointer;
-         border: 1px solid var(--line); background: transparent; color: inherit; }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-button[disabled] { opacity: .5; cursor: default; }
-.muted { color: var(--muted); font-size: .9rem; }
-.error { color: #b4232a; }
-@media (prefers-color-scheme: dark) { .error { color: #ff8a90; } }
-ul { list-style: none; margin: 0; padding: 0; }
-li { display: flex; align-items: baseline; gap: .75rem; padding: .5rem 0; border-bottom: 1px solid var(--line); }
-li .name { flex: 1; }
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #14181f;
+    --card: #1c212b;
+    --ink: #e8ecf3;
+    --muted: #98a2b3;
+    --line: #2c3340;
+    --accent: #4bbfae;
+    --accent-ink: #0d1a18;
+    --accent-wash: #18302d;
+    --danger: #f08a80;
+    --code: #232a35;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  width: 380px;
+  margin: 0;
+  font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--ink);
+  background: var(--paper);
+}
+
+code, .repo, .path { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace; }
+
+/* --- 見出し ------------------------------------------------------------ */
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--card);
+}
+
+h1 { margin: 0; font-size: 13px; font-weight: 650; letter-spacing: -0.01em; }
+
+main { max-height: 520px; overflow-y: auto; padding: 12px 14px 16px; }
+
+section + section { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+
+/* 検知中は入力欄と設定を隠し、見つけたものだけを見せる。 */
+body.detected #url-section,
+body.detected #settings-section,
+body.detected #collection-section { display: none; }
+
+/* --- 見つけたもの ------------------------------------------------------ */
+
+.card {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+
+.kind {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--accent-wash);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+#found-name {
+  margin: 8px 0 2px;
+  font-size: 21px;
+  font-weight: 650;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  word-break: break-word;
+}
+
+.repo { display: block; color: var(--muted); font-size: 12px; }
+
+/* --- 導入先。ここが一番つまずくので、ここに予算を使う ------------------- */
+
+fieldset { margin: 14px 0 0; padding: 0; border: 0; }
+legend { padding: 0 0 6px; color: var(--muted); font-size: 12px; }
+
+.target {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 9px;
+  align-items: center;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.target + .target { margin-top: 6px; }
+.target:hover { border-color: var(--accent); }
+.target:has(input:checked) { border-color: var(--accent); background: var(--accent-wash); }
+.target input { margin: 0; accent-color: var(--accent); }
+.target > span { display: contents; }
+
+.target-name { font-weight: 550; }
+
+/* パスは内容。行の全幅を使い、名前の下にぶら下げる。 */
+.target code {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
+.badge {
+  grid-column: 2;
+  justify-self: start;
+  margin-top: 3px;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* --- 操作 -------------------------------------------------------------- */
+
+.actions { display: flex; gap: 8px; margin-top: 12px; }
+
+button {
+  padding: 7px 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+button:hover { border-color: var(--accent); }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button[disabled] { opacity: 0.55; cursor: default; }
+button[disabled]:hover { border-color: var(--line); }
+
+button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+button.icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-color: transparent;
+  color: var(--muted);
+}
+
+button.icon:hover { border-color: var(--line); color: var(--ink); }
+
+/* --- 状態の知らせ ------------------------------------------------------ */
+
+.status:empty { display: none; }
+.status { margin: 10px 0 0; color: var(--muted); font-size: 12px; }
+.status.error, .error { color: var(--danger); }
+
+.done {
+  margin: 0 0 12px;
+  padding: 9px 11px;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+  background: var(--accent-wash);
+  font-size: 12px;
+}
+
+/* --- 入力 -------------------------------------------------------------- */
+
+label { display: block; margin-bottom: 5px; color: var(--muted); font-size: 12px; }
+
+input[type=url] {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+input[type=url]:focus-visible { border-color: var(--accent); outline: none; }
+
+.error { margin: 6px 0 0; font-size: 12px; }
+
+/* --- 導入したもの ------------------------------------------------------ */
+
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.section-head h2 { margin: 0; font-size: 12px; font-weight: 600; color: var(--muted); }
+.section-head button { padding: 4px 9px; font-size: 11.5px; }
+
+ul { margin: 8px 0 0; padding: 0; list-style: none; }
+
+li {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+
+li:first-child { border-top: 0; }
+li .name { flex: 1; min-width: 0; }
+li .name > div { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+li code { display: block; color: var(--muted); font-size: 11.5px; overflow-wrap: anywhere; }
+li button { padding: 4px 9px; font-size: 11.5px; }
+
+/* 許可が無くて実態を確かめられない行。消えたとも残っているとも言わない。 */
+li.unverified .name { opacity: 0.6; }
+
+.empty { margin: 10px 0 0; color: var(--muted); font-size: 12px; }
+#collection:empty + .empty { display: block; }
+
+/* --- 設定 -------------------------------------------------------------- */
+
+.switch { display: flex; gap: 8px; align-items: center; margin: 0; color: var(--ink); font-size: 12px; }
+.switch input { margin: 0; accent-color: var(--accent); }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}

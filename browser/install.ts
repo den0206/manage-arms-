@@ -1,11 +1,11 @@
-import { readTarGz } from "../core/archive.js";
+import { ArchiveError, readTarGz } from "../core/archive.js";
 import { Collected, isRemovable } from "../core/collection.js";
-import { ToolLead } from "../core/detect.js";
+import { locateSkill, ToolLead } from "../core/detect.js";
 import { GitHubSource } from "../core/github.js";
 import { treeHash, TreeFile } from "../core/hash.js";
 import { ledger, LEDGER_DIR, ledgerPath } from "../core/ledger.js";
-import { SIZE_LIMIT } from "../core/limits.js";
-import { Placement } from "../core/placement.js";
+import { CATALOG_EXTRACT_LIMIT, ENTRY_LIMIT, SINGLE_FILE_LIMIT, SIZE_LIMIT } from "../core/limits.js";
+import { Placement, rootOf } from "../core/placement.js";
 import { exists, readTree, removeEntry, writeTree } from "./fs.js";
 import { collect, forget } from "./store.js";
 
@@ -40,29 +40,19 @@ export class InstallError extends Error {
   }
 }
 
-type Kept = { readonly inside: string[]; readonly bytes: Uint8Array };
-
 /**
- * カタログ URL は取得元に subdir を持たない。名前のディレクトリで SKILL.md を持つものを探す。
- * 候補が複数あれば浅い方を採る（`skills/pdf` と `examples/pdf` なら前者）。
- */
-export function locate(kept: readonly Kept[], name: string): string[] | null {
-  const found = kept
-    .filter(entry => entry.inside.length >= 2
-      && entry.inside[entry.inside.length - 1] === "SKILL.md"
-      && entry.inside[entry.inside.length - 2] === name)
-    .map(entry => entry.inside.slice(0, -1))
-    .sort((a, b) => a.length - b.length);
-  return found[0] ?? null;
-}
-
-/**
- * 取得して、目的のものだけを取り出す。関係ないエントリはその場で捨てるので、
- * メモリに載るのは導入するものだけになる。
+ * 取得して、目的のものだけを取り出す。
+ *
+ * subdir が分かっているときは、その配下だけを残して他をその場で捨てる。
+ * カタログ URL は subdir を持たないので一度まとめて持ち、`locateSkill` で
+ * ディレクトリ名か SKILL.md の frontmatter `name` を突き合わせて探す。
  */
 export async function download(lead: ToolLead): Promise<{ files: TreeFile[]; sha?: string }> {
   const sha = await commitSha(lead.source);
   const response = await fetch(archiveUrl(lead.source, sha), { cache: "no-store" });
+  if (response.status === 404) {
+    throw new InstallError("notFound", `${lead.source.repo} was not found on GitHub`);
+  }
   if (!response.ok || response.body === null) {
     throw new InstallError("fetchFailed", `the archive could not be fetched (${response.status})`);
   }
@@ -73,26 +63,47 @@ export async function download(lead: ToolLead): Promise<{ files: TreeFile[]; sha
   }
 
   const want = lead.source.subdir === undefined ? null : lead.source.subdir.split("/");
-  const kept: Kept[] = [];
-  for await (const entry of readTarGz(response.body)) {
-    if (entry.kind !== "file") continue;
-    const inside = entry.path.slice(1);                 // `<repo>-<ref>/` を剥がす
-    const wanted = want === null
-      ? inside.includes(lead.name)                      // カタログ。ここで大きく絞る
-      : want.every((part, index) => inside[index] === part);
-    if (wanted) kept.push({ inside, bytes: entry.bytes });
+  const limits = want === null
+    ? { entries: ENTRY_LIMIT, single: SINGLE_FILE_LIMIT, total: CATALOG_EXTRACT_LIMIT }
+    : undefined;
+
+  const kept: TreeFile[] = [];
+  const links: string[] = [];
+  try {
+    for await (const entry of readTarGz(response.body, limits)) {
+      if (entry.kind === "directory") continue;
+      const inside = entry.path.slice(1);                 // `<repo>-<ref>/` を剥がす
+      if (want !== null && !want.every((part, index) => inside[index] === part)) continue;
+      // リンクは書けないので中身を持たない。入れたいものの中にあれば後で止める。
+      if (entry.kind === "link") { links.push(inside.join("/")); continue; }
+      kept.push({ path: inside.join("/"), bytes: entry.bytes });
+    }
+  } catch (error) {
+    throw error instanceof ArchiveError
+      ? new InstallError("tooLarge", error.message) : error;
   }
 
-  const base = want ?? locate(kept, lead.name);
-  if (base === null) throw new InstallError("notFound", "nothing was found at that path");
+  const base = want ?? locateSkill(kept, lead.name);
+  if (base === null) {
+    throw new InstallError("notFound", `${lead.name} was not found in ${lead.source.repo}`);
+  }
+
+  // 入れるものの中にリンクがあれば止める。外にあるだけなら関係ない。
+  const prefix = `${base.join("/")}/`;
+  const inside = links.filter(path => base.length === 0 || path.startsWith(prefix));
+  if (inside.length > 0) {
+    throw new InstallError("fetchFailed", `${inside[0]} is a link and cannot be installed`);
+  }
 
   let files = kept
-    .filter(entry => base.every((part, index) => entry.inside[index] === part))
-    .map(entry => ({ path: entry.inside.slice(base.length).join("/"), bytes: entry.bytes }))
+    .filter(file => base.every((part, index) => file.path.split("/")[index] === part))
+    .map(file => ({ path: file.path.split("/").slice(base.length).join("/"), bytes: file.bytes }))
     .filter(file => file.path !== "");
   // Subagent は .md 1 つ。取得元の subdir はその親ディレクトリなので名前で絞る。
   if (lead.kind === "subagent") files = files.filter(file => file.path === `${lead.name}.md`);
-  if (files.length === 0) throw new InstallError("notFound", "nothing was found at that path");
+  if (files.length === 0) {
+    throw new InstallError("notFound", `${lead.name} was not found in ${lead.source.repo}`);
+  }
   return { files, sha };
 }
 
@@ -131,7 +142,7 @@ export async function install(request: InstallRequest): Promise<Collected> {
 
   const written = await readTree(root, placement.entry, placement.isDirectory);
   const item: Collected = {
-    name: lead.name, kind: lead.kind, agent: request.agent, root: placement.root,
+    name: lead.name, kind: lead.kind, agent: request.agent, root: rootOf(placement),
     repo: lead.source.repo,
     ...(lead.source.branch === undefined ? {} : { branch: lead.source.branch }),
     ...(lead.source.subdir === undefined ? {} : { subdir: lead.source.subdir }),

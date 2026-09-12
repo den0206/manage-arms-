@@ -9,7 +9,7 @@ Cursor 拡張と、Skill と Subagent の検知・導入を担うブラウザ拡
 | 対象 | Cursor / VS Code | Chrome / Edge |
 | 対象 OS | macOS / Linux / Windows | 同左 |
 | 実装 | TypeScript | TypeScript |
-| 永続メタデータ | `globalStorageUri/registry.json` | IndexedDB のディレクトリハンドルと収集一覧 |
+| 永続メタデータ | `globalStorageUri/registry.json` | IndexedDB のディレクトリハンドル、収集一覧、自動表示設定 |
 
 両者は独立して動作する。ブラウザ拡張は IDE 拡張の導入も起動も前提にしない。
 
@@ -24,7 +24,8 @@ Cursor 拡張と、Skill と Subagent の検知・導入を担うブラウザ拡
 
 ## ブラウザ拡張の機能
 
-- 対応サイトの閲覧中に、そのページが Skill / Subagent なら検知してバナーで知らせる。
+- 初回オンボーディングで利用する Agent の導入先を一度だけ許可する。
+- 対応サイトの閲覧中に、そのページが Skill / Subagent なら検知して popup window を開く。
 - 貼り付けた URL を検知と同じ判定で解析する。
 - 導入先のエージェントを選び、File System Access API で実体を書き込む。
 - 自分が入れたものを削除する。

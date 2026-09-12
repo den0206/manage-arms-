@@ -13,16 +13,16 @@ export class PickerError extends Error {
   }
 }
 
-const lastSegment = (root: string): string => root.slice(root.lastIndexOf("/") + 1);
-
 /**
- * 導入先ルートのハンドルを得る。覚えていれば再利用し、権限が切れていれば
+ * エージェントの設定ディレクトリのハンドルを得る。覚えていれば再利用し、権限が切れていれば
  * 利用者の操作の中で requestPermission を呼ぶ（ブラウザ再起動ごとに 1 回）。
+ *
+ * `pick` が false のときはピッカーを出さない。許可済みかどうかの確認に使う。
  */
-export async function rootHandle(
-  root: string, pick: boolean,
+export async function configHandle(
+  configDir: string, pick: boolean,
 ): Promise<FileSystemDirectoryHandle | null> {
-  const saved = await loadHandle(root);
+  const saved = await loadHandle(configDir);
   if (saved !== undefined) {
     if (await saved.queryPermission({ mode: "readwrite" }) === "granted") return saved;
     if (!pick) return null;
@@ -32,15 +32,32 @@ export async function rootHandle(
 
   let handle: FileSystemDirectoryHandle;
   try {
-    handle = await showDirectoryPicker({ id: root.replace(/[^\w]/g, "_"), mode: "readwrite" });
+    handle = await showDirectoryPicker({
+      id: configDir.replace(/[^\w]/g, "_"), mode: "readwrite", startIn: "documents",
+    });
   } catch {
     throw new PickerError("cancelled");
   }
-  // 取り違えは検出できない（`~/.cursor/skills` も `~/.claude/skills` も name は `skills`）。
-  // せめて末尾の名前だけは見て、明らかに違うものは受け取らない。
-  if (handle.name !== lastSegment(root)) throw new PickerError("wrongFolder", handle.name);
-  await saveHandle(root, handle);
+  // 取り違えは検出できない（別のエージェントの設定ディレクトリも隠しフォルダで似た名前）。
+  // 末尾の名前だけは見て、明らかに違うものは受け取らない。
+  if (handle.name !== configDir) throw new PickerError("wrongFolder", handle.name);
+  await saveHandle(configDir, handle);
   return handle;
+}
+
+/**
+ * 設定ディレクトリの下の置き場。無ければ作る（`~/.claude/agents` が未作成のことがある）。
+ */
+export const subHandle = (
+  config: FileSystemDirectoryHandle, sub: string,
+): Promise<FileSystemDirectoryHandle> => config.getDirectoryHandle(sub, { create: true });
+
+/** 置き場のハンドルを 1 回で得る。許可が無ければ null。 */
+export async function placeHandle(
+  where: { configDir: string; sub: string }, pick: boolean,
+): Promise<FileSystemDirectoryHandle | null> {
+  const config = await configHandle(where.configDir, pick);
+  return config === null ? null : await subHandle(config, where.sub);
 }
 
 const dirOf = async (root: FileSystemDirectoryHandle, segments: string[],

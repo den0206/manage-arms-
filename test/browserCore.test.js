@@ -1,7 +1,8 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { kindOf, lead, proofUrls } = require("../out/core/detect.js");
-const { placement, targets, SHARED_SKILL_ROOT } = require("../out/core/placement.js");
+const { placement, rootOf, splitRoot, targets, SHARED_CONFIG_DIR, CONFIG_DIRS } =
+  require("../out/core/placement.js");
 const { decode, ledger, ledgerPath, LEDGER_DIR } = require("../out/core/ledger.js");
 const { add, find, isRemovable, MAX_BROWSER_COLLECTION_ENTRIES } =
   require("../out/core/collection.js");
@@ -76,25 +77,41 @@ test("Subagent の導入先は Claude と Cursor だけ", () => {
 test("共有ストアがあれば Cursor と Codex は同じ場所に置く", () => {
   for (const agent of ["cursor", "codex"]) {
     assert.deepEqual(placement(agent, "skill", "pdf", true),
-      { root: SHARED_SKILL_ROOT, entry: "pdf", isDirectory: true });
+      { configDir: SHARED_CONFIG_DIR, sub: "skills", entry: "pdf", isDirectory: true });
   }
 });
 
 test("共有ストアが無ければ各エージェント直下へ退避する", () => {
-  assert.deepEqual(placement("cursor", "skill", "pdf", false),
-    { root: ".cursor/skills", entry: "pdf", isDirectory: true });
-  assert.deepEqual(placement("codex", "skill", "pdf", false),
-    { root: ".codex/skills", entry: "pdf", isDirectory: true });
+  assert.equal(rootOf(placement("cursor", "skill", "pdf", false)), ".cursor/skills");
+  assert.equal(rootOf(placement("codex", "skill", "pdf", false)), ".codex/skills");
 });
 
 test("Claude は共有ストアを読まないので常に自分の下へ置く", () => {
-  assert.deepEqual(placement("claude", "skill", "pdf", true),
-    { root: ".claude/skills", entry: "pdf", isDirectory: true });
+  // 共有ストアを許可済みでも Claude はそこを読まない。
+  assert.equal(rootOf(placement("claude", "skill", "pdf", true)), ".claude/skills");
 });
 
 test("Subagent は .md ファイルとして置く", () => {
   assert.deepEqual(placement("claude", "subagent", "reviewer", true),
-    { root: ".claude/agents", entry: "reviewer.md", isDirectory: false });
+    { configDir: ".claude", sub: "agents", entry: "reviewer.md", isDirectory: false });
+});
+
+test("利用者に選ばせるのは設定ディレクトリだけ", () => {
+  // `skills` と `agents` はそこから辿る。ピッカーはエージェントごとに 1 回で済む。
+  assert.deepEqual([...CONFIG_DIRS], [".claude", ".cursor", ".codex", ".agents"]);
+  for (const agent of ["claude", "cursor", "codex"]) {
+    for (const kind of ["skill", "subagent"]) {
+      const where = placement(agent, kind, "x", false);
+      if (where === null) continue;
+      assert.ok(CONFIG_DIRS.includes(where.configDir), `${agent} ${kind}`);
+    }
+  }
+});
+
+test("ルートは設定ディレクトリと置き場に割り戻せる", () => {
+  const where = placement("claude", "skill", "pdf", false);
+  assert.deepEqual(splitRoot(rootOf(where)), { configDir: ".claude", sub: "skills" });
+  assert.deepEqual(splitRoot(".agents/skills"), { configDir: ".agents", sub: "skills" });
 });
 
 test("非対応の組み合わせには置き場を返さない", () => {
