@@ -143,16 +143,13 @@
     }
   },
   "pickerWrongFolder": {
-    "message": "$NAME$ が選ばれました。$CONFIG$ か $ROOT$ を選んでください。",
+    "message": "$NAME$ が選ばれました。$CONFIG$ そのものを選んでください。この拡張が確かめられるのはフォルダ名だけです。",
     "placeholders": {
       "name": {
         "content": "$1"
       },
       "config": {
         "content": "$2"
-      },
-      "root": {
-        "content": "$3"
       }
     }
   },
@@ -186,5 +183,27 @@
   },
   "back": {
     "message": "戻る"
+  },
+  "rootMismatch": {
+    "message": "$EXPECTED$ が必要ですが $CHOSEN$ が設定されています。$EXPECTED$ を選び直すと導入できます。",
+    "placeholders": {
+      "expected": {
+        "content": "$1"
+      },
+      "chosen": {
+        "content": "$2"
+      }
+    }
+  },
+  "rootMismatchShort": {
+    "message": "別のフォルダ: $CHOSEN$",
+    "placeholders": {
+      "chosen": {
+        "content": "$1"
+      }
+    }
+  },
+  "settingsClear": {
+    "message": "設定を取り消す"
   }
 }

@@ -186,7 +186,9 @@ button.chip svg { flex: none; }
 /* --- 状態の知らせ ------------------------------------------------------ */
 
 .hint:empty, .status:empty { display: none; }
-.hint { margin: 10px 0 0; color: var(--muted); font-size: 11.5px; }
+/* 利用者が手を動かすための案内。読み飛ばされると詰まるので太字にする。 */
+.hint { margin: 10px 0 0; color: var(--muted); font-size: 11.5px; font-weight: 600; }
+.hint.error, code.error { color: var(--danger); }
 .status { margin: 10px 0 0; color: var(--muted); font-size: 12px; }
 .status.error, .error { color: var(--danger); }
 
@@ -264,9 +266,25 @@ li.unverified .name { opacity: 0.6; }
 }
 
 .root + .root { margin-top: 7px; }
+
+/* 別のフォルダが設定されている行。直さないと導入できないので、はっきり出す。 */
+.root.bad { border-color: var(--danger); }
+.root .error { margin-top: 3px; font-size: 11.5px; line-height: 1.45; }
 .root-name { font-weight: 600; }
 .root code { color: var(--muted); font-size: 11.5px; }
-.root button { flex: none; padding: 5px 10px; font-size: 11.5px; white-space: nowrap; }
+.root-actions { display: flex; flex: none; gap: 6px; align-items: center; }
+.root-actions button { padding: 5px 10px; font-size: 11.5px; white-space: nowrap; }
+
+/* 設定の取り消し。押し間違えると設定が消えるので、危険色はホバーまで出さない。 */
+.root-actions .clear {
+  width: 26px;
+  padding: 0;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+}
+
+.root-actions .clear:hover { border-color: var(--danger); color: var(--danger); }
 
 .switch {
   display: flex;
