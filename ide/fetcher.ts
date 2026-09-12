@@ -2,7 +2,7 @@ import {
   createWriteStream, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { open as openZip, Entry, ZipFile } from "yauzl";
 import { KindId } from "../core/agent";
@@ -11,7 +11,7 @@ import { safeSegments } from "../core/archive";
 import { ENTRY_LIMIT, EXTRACTED_SIZE_LIMIT, PAGE_LIMIT, SINGLE_FILE_LIMIT, SIZE_LIMIT } from "../core/limits";
 import * as frontmatter from "./frontmatter";
 import { archiveUrl, GitHubSource } from "../core/github";
-import { isValidName } from "./writeGuard";
+import { isInside, isValidName } from "./writeGuard";
 
 /**
  * 取得した中身の解釈結果。自動では入れない —
@@ -84,7 +84,7 @@ export async function stage(source: GitHubSource, options: {
       archive, source.repo, options.fetchImpl ?? fetch);
 
     const unpacked = join(root, "unpacked");
-    await extract(archive, unpacked);
+    const links = await extract(archive, unpacked);
     rmSync(archive, { force: true });          // zip 本体はもう要らない
 
     // zipball は `<repo>-<branch>/` を 1 段かぶせる。それを剥がす。
@@ -94,9 +94,16 @@ export async function stage(source: GitHubSource, options: {
 
     // ディレクトリ名由来の候補も含めて、最後にもう一度名前を検査する。
     // ここを通った名前だけが `installer` でパスに使われる。
-    const candidates = identify(base).filter(candidate => isValidName(candidate.name));
+    const candidates = identify(base)
+      .filter(candidate => isValidName(candidate.name))
+      // symlink は展開していない。含む候補を入れると、欠けたまま導入が成功したように
+      // 見える。ブラウザ拡張の `install.ts` と同じく、取り出す範囲内なら通さない。
+      .filter(candidate => !links.some(link => isInside(link, candidate.localPath)));
     if (candidates.length === 0) {
-      fail("Neither SKILL.md nor plugin.json was found; the format is not supported");
+      const blocked = links.find(link => isInside(link, base));
+      fail(blocked === undefined
+        ? "Neither SKILL.md nor plugin.json was found; the format is not supported"
+        : `${relative(unpacked, blocked)} is a link and cannot be installed`);
     }
     return { root, source, candidates, resolvedSha: options.resolvedSha };
   } catch (error) {
@@ -139,19 +146,21 @@ async function download(url: string, destination: string, repo: string,
  * ディレクトリ横断（Zip Slip）、symlink、対応しない種別、サイズ上限を
  * ここで落とすので、展開後の木をもう一度歩き直さない。
  */
-export function extract(archive: string, destination: string): Promise<void> {
+export function extract(archive: string, destination: string): Promise<string[]> {
   mkdirSync(destination, { recursive: true });
   return new Promise((done, reject) => {
     openZip(archive, { lazyEntries: true, autoClose: true }, (error, zip: ZipFile) => {
       if (error) return reject(new AgentToolError("FETCH_FAILED", `extraction failed: ${error.message}`));
       let entries = 0;
       let total = 0;
+      /** 書かずに飛ばした symlink の展開先。取り出す候補の中にあれば `stage` が落とす。 */
+      const links: string[] = [];
       const abort = (message: string): void => {
         zip.close();
         reject(new AgentToolError("FETCH_FAILED", `extraction failed: ${message}`));
       };
       zip.on("error", (streamError: Error) => abort(streamError.message));
-      zip.on("end", () => done());
+      zip.on("end", () => done(links));
       zip.on("entry", (entry: Entry) => {
         entries += 1;
         if (entries > ENTRY_LIMIT) return abort("too many files in the archive");
@@ -162,8 +171,8 @@ export function extract(archive: string, destination: string): Promise<void> {
         // 上位 16 bit が Unix のモード。symlink と特殊ファイルは取り出さない。
         const mode = (entry.externalFileAttributes >>> 16) & 0o170000;
         // symlink は書かずに飛ばす。リポジトリ直下の `CLAUDE.md` が symlink というだけで
-        // 取得ごと諦めさせない。取り出したいものの中にあれば、後段の identify が見つけない。
-        if (mode === 0o120000) return zip.readEntry();
+        // 取得ごと諦めさせない。取り出したいものの中にあるかは `stage` が見る。
+        if (mode === 0o120000) { links.push(target); return zip.readEntry(); }
         if (mode !== 0 && mode !== 0o100000 && mode !== 0o040000) {
           return abort("the archive contains an unsupported file type");
         }
@@ -226,7 +235,7 @@ export function singleTopLevel(dir: string): string {
 
 /**
  * 取得した中身を見て決める。README のテキストからは推測しない。
- * 展開時に symlink を弾いているので、ここでは種別だけを見る。
+ * symlink を含む候補は `stage` が落とすので、ここでは種別だけを見る。
  */
 export function identify(base: string): Candidate[] {
   const found: Candidate[] = [];
