@@ -1,6 +1,6 @@
 import { lead, proofUrls, ToolLead } from "../core/detect.js";
 import { fromJsonLd, needsPage } from "../core/github.js";
-import { splitRoot } from "../core/placement.js";
+import { rootStateOf, splitRoot } from "../core/placement.js";
 import { autoOpenEnabled, knownRoots, loadCollection, loadHandle } from "./store.js";
 
 /**
@@ -34,7 +34,10 @@ async function alreadyInstalled(found: ToolLead): Promise<boolean> {
   const entry = found.kind === "skill" ? found.name : `${found.name}.md`;
   for (const root of await knownRoots()) {
     const config = await loadHandle(root);
-    if (config === undefined || await config.queryPermission({ mode: "read" }) !== "granted") continue;
+    if (config === undefined) continue;
+    // 別のフォルダが設定されている記録は見ない。中身を見て「導入済み」と誤判定する。
+    if (rootStateOf(splitRoot(root).configDir, config.name).kind !== "ok") continue;
+    if (await config.queryPermission({ mode: "read" }) !== "granted") continue;
     // 保存しているのが設定ディレクトリか置き場そのものかで、見る階層が変わる。
     const dirs = splitRoot(root).sub === ""
       ? await Promise.all(["skills", "agents"].map(sub =>

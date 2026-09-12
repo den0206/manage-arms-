@@ -4,11 +4,11 @@ import { lead, ToolLead } from "../core/detect.js";
 import { fromJsonLd, needsPage } from "../core/github.js";
 import { PAGE_LIMIT } from "../core/limits.js";
 import {
-  CONFIG_DIRS, placement, Placement, rootOf, SHARED_CONFIG_DIR, splitRoot, targets,
+  CONFIG_DIRS, placement, Placement, rootOf, RootState, SHARED_CONFIG_DIR, splitRoot, targets,
 } from "../core/placement.js";
-import { exists, PickerError, pickerHint, placeHandle } from "./fs.js";
+import { clearRoot, exists, PickerError, pickerHint, placeHandle, rootState } from "./fs.js";
 import { install, InstallError, remove, willOverwrite } from "./install.js";
-import { autoOpenEnabled, forget, knownRoots, loadCollection, setAutoOpenEnabled } from "./store.js";
+import { autoOpenEnabled, forget, loadCollection, setAutoOpenEnabled } from "./store.js";
 
 const t = (key: string, ...args: string[]): string => chrome.i18n.getMessage(key, args);
 const byId = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -29,31 +29,53 @@ let chosen: AgentId | null = null;
 // --- 導入先の選択 -------------------------------------------------------
 
 /** 導入先の候補。選ばれているものを `chosen` に持つ。 */
-let options: { agent: AgentId; where: Placement; configured: boolean }[] = [];
+let options: { agent: AgentId; where: Placement; state: RootState }[] = [];
 
 /**
- * フォルダを設定済みか。
+ * 設定の状態を全エージェント分まとめて読む。
  *
  * **実際の許可は見ない。** File System Access API の許可は origin のタブが全部閉じると
  * 消えるので、popup では毎回「未許可」になる。利用者が決めたのは「どのフォルダを使うか」
  * なので、覚えているかどうかで見せる。足りない許可は導入を押したときに 1 回訊けばよい。
  */
-async function configuredRoots(): Promise<(configDir: string) => boolean> {
-  const roots = await knownRoots();
-  return configDir => roots.some(root => root === configDir || root.startsWith(`${configDir}/`));
+async function readRoots(): Promise<Map<string, RootState>> {
+  const pairs = await Promise.all(
+    CONFIG_DIRS.map(async configDir => [configDir, await rootState(configDir)] as const));
+  return new Map(pairs);
 }
 
-/** 選択に合わせて、入る場所と足りない許可を出し分ける。 */
+const stateLabel = (state: RootState): string =>
+  state.kind === "ok" ? ""
+    : state.kind === "unset" ? `（${t("tabNeedsPermission")}）`
+    : `（${t("rootMismatchShort", state.chosen)}）`;
+
+/** 選択に合わせて、入る場所と足りない設定を出し分ける。 */
 function showTarget(): void {
   const picked = options.find(option => option.agent === chosen);
-  byId("target-path").textContent = picked === undefined ? "" : `~/${rootOf(picked.where)}`;
-  byId("picker-hint").textContent = picked === undefined || picked.configured
-    ? "" : pickerHint(`~/${picked.where.configDir}`);
+  const path = byId("target-path");
+  const hint = byId("picker-hint");
+  path.textContent = picked === undefined ? "" : `~/${rootOf(picked.where)}`;
+  path.className = "repo";
+  hint.className = "hint";
+  hint.textContent = "";
+  if (picked === undefined || picked.state.kind === "ok") return;
+
+  if (picked.state.kind === "unset") {
+    hint.textContent = pickerHint(`~/${picked.where.configDir}`);
+    return;
+  }
+  // 別のフォルダが設定されている。入る先が違うので、赤字で示して導入も止める。
+  path.className = "repo error";
+  path.textContent = `~/${picked.where.configDir} → ${picked.state.chosen}`;
+  hint.className = "hint error";
+  hint.textContent = t("rootMismatch", `~/${picked.where.configDir}`, picked.state.chosen);
 }
 
 async function renderTargets(found: ToolLead): Promise<void> {
-  const isConfigured = await configuredRoots();
-  const shared = isConfigured(SHARED_CONFIG_DIR);
+  const roots = await readRoots();
+  const stateOf = (configDir: string): RootState =>
+    roots.get(configDir) ?? { kind: "unset" };
+  const shared = stateOf(SHARED_CONFIG_DIR).kind === "ok";
   const select = byId<HTMLSelectElement>("target");
   select.replaceChildren();
   options = [];
@@ -61,18 +83,16 @@ async function renderTargets(found: ToolLead): Promise<void> {
   for (const agent of targets(found.kind)) {
     const where = placement(agent, found.kind, found.name, shared);
     if (where === null) continue;
-    const configured = isConfigured(where.configDir);
-    options.push({ agent, where, configured });
+    const state = stateOf(where.configDir);
+    options.push({ agent, where, state });
 
     const option = document.createElement("option");
     option.value = agent;
-    option.textContent = configured
-      ? agentLabel(where.configDir)
-      : `${agentLabel(where.configDir)}（${t("tabNeedsPermission")}）`;
+    option.textContent = `${agentLabel(where.configDir)}${stateLabel(state)}`;
     select.append(option);
   }
-  // 設定済みのものがあればそれを初期値にする。無ければ先頭。
-  chosen = (options.find(option => option.configured) ?? options[0])?.agent ?? null;
+  // 正しく設定されているものがあればそれを初期値にする。無ければ先頭。
+  chosen = (options.find(option => option.state.kind === "ok") ?? options[0])?.agent ?? null;
   if (chosen !== null) select.value = chosen;
   showTarget();
 }
@@ -158,6 +178,12 @@ byId<HTMLButtonElement>("install").addEventListener("click", async () => {
     return;
   }
   const { agent, where } = picked;
+  // 別のフォルダが設定されたままなら入れない。意図しない場所へ書かない。
+  if (picked.state.kind === "mismatch") {
+    status.className = "status error";
+    status.textContent = t("rootMismatch", `~/${where.configDir}`, picked.state.chosen);
+    return;
+  }
 
   const button = byId<HTMLButtonElement>("install");
   button.disabled = true;
@@ -191,7 +217,7 @@ byId<HTMLButtonElement>("install").addEventListener("click", async () => {
 const message = (error: unknown, where: Placement): string => {
   if (error instanceof PickerError) {
     return error.kind === "cancelled" ? ""
-      : t("pickerWrongFolder", error.chosen ?? "", `~/${where.configDir}`, `~/${rootOf(where)}`);
+      : t("pickerWrongFolder", error.chosen ?? "", `~/${where.configDir}`);
   }
   if (error instanceof InstallError) {
     if (error.kind === "tooLarge") return t("errorTooLarge");
@@ -281,32 +307,61 @@ function setSettings(open: boolean): void {
 }
 
 async function renderRoots(): Promise<void> {
-  // 覚えているのは設定ディレクトリか、その下の置き場。どちらでも「許可済み」とする。
-  const granted = await knownRoots();
-  const isGranted = (configDir: string): boolean =>
-    granted.some(root => root === configDir || root.startsWith(`${configDir}/`));
-
+  const roots = await readRoots();
   const box = byId("roots");
   box.replaceChildren();
+
   for (const configDir of CONFIG_DIRS) {
-    const done = isGranted(configDir);
+    const state = roots.get(configDir) ?? { kind: "unset" as const };
     const row = document.createElement("div");
-    row.className = "root";
+    row.className = state.kind === "mismatch" ? "root bad" : "root";
 
     const text = document.createElement("div");
     const name = document.createElement("div");
     name.className = "root-name";
     name.textContent = agentLabel(configDir);
     const path = document.createElement("code");
-    path.textContent = `~/${configDir}`;
     text.append(name, path);
 
-    const button = document.createElement("button");
-    button.textContent = done ? t("settingsGranted") : t("settingsChoose");
-    if (!done) button.className = "primary";
-    button.addEventListener("click", () => void grant(configDir, done));
+    if (state.kind === "mismatch") {
+      // 設定されているフォルダを赤字で見せる。何が入っているのか分からないまま
+      // 「選び直す」とだけ言われても直しようがない。
+      path.className = "error";
+      path.textContent = `~/${configDir} → ${state.chosen}`;
+      const why = document.createElement("div");
+      why.className = "error";
+      why.textContent = t("rootMismatch", `~/${configDir}`, state.chosen);
+      text.append(why);
+    } else {
+      path.textContent = `~/${configDir}`;
+    }
 
-    row.append(text, button);
+    const actions = document.createElement("div");
+    actions.className = "root-actions";
+
+    const button = document.createElement("button");
+    button.textContent = state.kind === "ok" ? t("settingsGranted") : t("settingsChoose");
+    if (state.kind !== "ok") button.className = "primary";
+    button.addEventListener("click", () => void grant(configDir, state.kind !== "unset"));
+    actions.append(button);
+
+    // 設定してあるときだけ取り消せる。間違ったフォルダを入れたまま直せないと困る。
+    if (state.kind !== "unset") {
+      const clear = document.createElement("button");
+      clear.className = "clear";
+      clear.type = "button";
+      clear.title = t("settingsClear");
+      clear.setAttribute("aria-label", t("settingsClear"));
+      clear.textContent = "×";
+      clear.addEventListener("click", async () => {
+        await clearRoot(configDir);
+        byId("settings-status").textContent = "";
+        await renderRoots();
+      });
+      actions.append(clear);
+    }
+
+    row.append(text, actions);
     box.append(row);
   }
 }
@@ -323,9 +378,10 @@ async function grant(configDir: string, again: boolean): Promise<void> {
   } catch (error) {
     if (error instanceof PickerError && error.kind !== "cancelled") {
       status.className = "status error";
-      status.textContent = t("pickerWrongFolder", error.chosen ?? "",
-        `~/${configDir}`, `~/${configDir}/skills`);
+      status.textContent = t("pickerWrongFolder", error.chosen ?? "", `~/${configDir}`);
     }
+    // 失敗しても状態は変わっている。いま何が設定されているかを出し直す。
+    await renderRoots();
   }
 }
 

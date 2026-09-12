@@ -1,6 +1,7 @@
 import { safeSegments } from "../core/archive.js";
 import { TreeFile } from "../core/hash.js";
-import { dropHandle, loadHandle, saveHandle } from "./store.js";
+import { RootState, rootStateOf } from "../core/placement.js";
+import { dropHandle, knownRoots, loadHandle, saveHandle } from "./store.js";
 
 /**
  * File System Access API はハンドルから basename しか返さない。絶対パスは持てないので、
@@ -13,23 +14,47 @@ export class PickerError extends Error {
   }
 }
 
+/** 設定されているフォルダの状態。判定そのものは core の純粋関数に置く。 */
+export async function rootState(configDir: string): Promise<RootState> {
+  const saved = await loadHandle(configDir);
+  const legacy: string[] = [];
+  if (saved === undefined) {
+    // 旧版は `<configDir>/skills` のように下位フォルダも覚えていた。
+    for (const key of await knownRoots()) {
+      if (!key.startsWith(`${configDir}/`)) continue;
+      legacy.push((await loadHandle(key))?.name ?? key);
+    }
+  }
+  return rootStateOf(configDir, saved?.name ?? null, legacy);
+}
+
+/** 設定を取り消す。旧版が残した下位フォルダの記録もまとめて捨てる。 */
+export async function clearRoot(configDir: string): Promise<void> {
+  await dropHandle(configDir);
+  for (const key of await knownRoots()) {
+    if (key.startsWith(`${configDir}/`)) await dropHandle(key);
+  }
+}
+
 /** 覚えているハンドルを使えるようにする。権限が切れていれば操作の中で訊き直す。 */
 async function revive(
-  key: string, pick: boolean,
+  configDir: string, pick: boolean,
 ): Promise<FileSystemDirectoryHandle | null> {
-  const saved = await loadHandle(key);
+  const saved = await loadHandle(configDir);
   if (saved === undefined) return null;
+  // 別のフォルダが入っていたら使わない。呼び出し側が設定し直させる。
+  if (saved.name !== configDir) return null;
   if (await saved.queryPermission({ mode: "readwrite" }) === "granted") return saved;
   if (!pick) return null;
   return await saved.requestPermission({ mode: "readwrite" }) === "granted" ? saved : null;
 }
 
 /**
- * 置き場のハンドルを得る。`pick` が false ならピッカーを出さない（許可済みかの確認に使う）。
+ * 置き場のハンドルを得る。`pick` が false ならピッカーを出さない（設定済みかの確認に使う）。
  *
- * 選んでもらうのは `~/.claude` だが、**`~/.claude/skills` を選ばれても受け取る**。
- * 利用者が探しに行くのは「スキルの入っているフォルダ」の方で、そちらを選ぶのが自然だから。
- * 設定ディレクトリを選んでもらえれば `skills` と `agents` の両方を辿れて、ピッカーが 1 回で済む。
+ * 選んでもらうのは**エージェントの設定ディレクトリそのもの**に限る。`skills` のような
+ * 下位のフォルダを受け取ると、`~/.claude/skills` を Cursor の設定として保存できてしまい、
+ * 名前だけでは見分けられない。`skills` と `agents` は設定ディレクトリから辿る。
  */
 export async function placeHandle(
   where: { configDir: string; sub: string }, pick: boolean,
@@ -39,9 +64,6 @@ export async function placeHandle(
   if (!force) {
     const config = await revive(where.configDir, pick);
     if (config !== null) return await config.getDirectoryHandle(where.sub, { create: true });
-
-    const direct = await revive(`${where.configDir}/${where.sub}`, pick);
-    if (direct !== null) return direct;
   }
   if (!pick) return null;
 
@@ -55,21 +77,12 @@ export async function placeHandle(
   } catch {
     throw new PickerError("cancelled");
   }
-
-  // 絶対パスは得られないので、確かめられるのは末尾の名前だけ。
-  // 設定ディレクトリなら両方を辿れる。置き場そのものならそれだけを覚える。
-  // 選び直したときに古い方が残ると、どちらが効いているのか分からなくなる。
-  if (handle.name === where.configDir) {
-    await dropHandle(`${where.configDir}/${where.sub}`);
-    await saveHandle(where.configDir, handle);
-    return await handle.getDirectoryHandle(where.sub, { create: true });
-  }
-  if (handle.name === where.sub) {
-    await dropHandle(where.configDir);
-    await saveHandle(`${where.configDir}/${where.sub}`, handle);
-    return handle;
-  }
-  throw new PickerError("wrongFolder", handle.name);
+  await dropHandle(`${where.configDir}/${where.sub}`);   // 旧版が残した下位フォルダの記録
+  // 名前が違っても覚える。「いま何が設定されているか」を画面に出すため。
+  // 書き込みには使わない（`revive` が名前を見て弾く）。
+  await saveHandle(where.configDir, handle);
+  if (handle.name !== where.configDir) throw new PickerError("wrongFolder", handle.name);
+  return await handle.getDirectoryHandle(where.sub, { create: true });
 }
 
 /**

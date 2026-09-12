@@ -143,16 +143,13 @@
     }
   },
   "pickerWrongFolder": {
-    "message": "You chose $NAME$. Choose $CONFIG$ or $ROOT$.",
+    "message": "You chose $NAME$. Choose $CONFIG$ itself — the folder name is the only thing this extension can check.",
     "placeholders": {
       "name": {
         "content": "$1"
       },
       "config": {
         "content": "$2"
-      },
-      "root": {
-        "content": "$3"
       }
     }
   },
@@ -186,5 +183,27 @@
   },
   "back": {
     "message": "Back"
+  },
+  "rootMismatch": {
+    "message": "$EXPECTED$ is expected, but $CHOSEN$ is set. Choose $EXPECTED$ to install here.",
+    "placeholders": {
+      "expected": {
+        "content": "$1"
+      },
+      "chosen": {
+        "content": "$2"
+      }
+    }
+  },
+  "rootMismatchShort": {
+    "message": "wrong folder: $CHOSEN$",
+    "placeholders": {
+      "chosen": {
+        "content": "$1"
+      }
+    }
+  },
+  "settingsClear": {
+    "message": "Clear this folder"
   }
 }
