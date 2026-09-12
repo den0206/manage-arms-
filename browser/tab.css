@@ -2,34 +2,57 @@
  * 主役はパス。絶対パスを出せない以上、`~/.claude/skills` の見え方が
  * 「どこに入るのか」を決める唯一の手がかりになる。だからパスは等幅で、
  * 飾りではなく内容として扱う。それ以外は静かにする。
+ *
+ * 飾りは「深さ」と「動き」だけに使う。色数は増やさない。動きは 120〜200ms、
+ * `transform` と `opacity` だけを動かす（合成だけで済みレイアウトを起こさない）。
  */
 :root {
   color-scheme: light dark;
-  --paper: #f7f8fa;
+
+  /*
+   * アイコンから採った色。地は藍紫のグラデーション、節が cyan / mint / yellow / pink。
+   * `--brand` の 2 色はアイコンそのままで、飾りにだけ使う（文字は載せない）。
+   * `--accent` はその紫を文字が読める濃さまで落としたもの（白地で 6.1:1）。
+   * 灰も同じ紫へわずかに寄せて、全体が 1 つの色として見えるようにする。
+   */
+  --brand: #8590f6;
+  --brand-2: #9b7df1;
+
+  --paper: #f8f7fc;
   --card: #ffffff;
-  --ink: #1a1f2b;
-  --muted: #5d6779;
-  --line: #e2e6ed;
-  --accent: #0b6b63;
+  --ink: #1b1a2b;
+  --muted: #5c5a72;
+  --line: #e5e3f0;
+  --accent: #5b4bd6;
   --accent-ink: #ffffff;
-  --accent-wash: #e7f2f0;
-  --danger: #c0392f;
-  --code: #edf0f5;
+  --accent-wash: #eeebfd;
+  --danger: #c42a4c;
+  --code: #efedf7;
   --radius: 10px;
+
+  /* 深さ。影は 2 段だけ持つ。カードと、上に浮くもの（modal）。 */
+  --lift: 0 1px 2px color-mix(in srgb, var(--ink) 7%, transparent);
+  --lift-high: 0 14px 34px color-mix(in srgb, var(--ink) 24%, transparent);
+  /* 行やボタンの下地。線を増やさずに「触れる」ことだけを示す。 */
+  --hover: color-mix(in srgb, var(--accent) 7%, transparent);
+  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --paper: #14181f;
-    --card: #1c212b;
-    --ink: #e8ecf3;
-    --muted: #98a2b3;
-    --line: #2c3340;
-    --accent: #4bbfae;
-    --accent-ink: #0d1a18;
-    --accent-wash: #18302d;
-    --danger: #f08a80;
-    --code: #232a35;
+    --paper: #16151f;
+    --card: #1e1d2a;
+    --ink: #e9e7f5;
+    --muted: #9a97b4;
+    --line: #302e41;
+    --accent: #a99cff;
+    --accent-ink: #141322;
+    --accent-wash: #272247;
+    --danger: #ff9aa2;
+    --code: #262434;
+    --lift: 0 1px 2px color-mix(in srgb, #000 45%, transparent);
+    --lift-high: 0 14px 34px color-mix(in srgb, #000 60%, transparent);
+    --hover: color-mix(in srgb, var(--accent) 12%, transparent);
   }
 }
 
@@ -41,13 +64,24 @@ body {
   font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
   color: var(--ink);
   background: var(--paper);
+  -webkit-tap-highlight-color: transparent;
 }
 
 code, .repo, .path { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace; }
 
+/* --- 動き --------------------------------------------------------------
+ * `hidden` の付け外しは `display` を切り替えるので、外した時点で animation が
+ * 走り直す。画面の出し入れに JavaScript の合図を足さずに済む。 */
+
+@keyframes rise { from { opacity: 0; transform: translateY(5px); } }
+@keyframes pop { from { opacity: 0; transform: scale(0.98); } }
+@keyframes fade { from { opacity: 0; } }
+@keyframes spin { to { transform: rotate(1turn); } }
+
 /* --- 見出し ------------------------------------------------------------ */
 
 header {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -56,9 +90,32 @@ header {
   background: var(--card);
 }
 
-h1 { flex: 1; margin: 0; font-size: 13px; font-weight: 650; letter-spacing: -0.01em; }
+/* 上端の帯。アイコンと同じ向き・同じ 2 色で、ここが何の拡張かを一目で示す。 */
+header::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: linear-gradient(105deg, var(--brand), var(--brand-2));
+}
 
-main { max-height: 520px; overflow-y: auto; padding: 12px 14px 16px; }
+h1 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+main {
+  max-height: 520px;
+  padding: 12px 14px 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;    /* popup の中で止める。裏のページを動かさない */
+  scrollbar-width: thin;
+}
 
 section + section { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
 
@@ -74,6 +131,9 @@ body.settings #found,
 body.settings #url-section,
 body.settings #done { display: none; }
 
+/* 画面が入れ替わったことを一度だけ示す。切り替えの向きは付けない。 */
+#found:not([hidden]), #settings-view:not([hidden]) { animation: rise 0.18s var(--ease) both; }
+
 /* 戻るは設定のときだけ。歯車は設定と検知のときに引っ込める。 */
 #close-settings { display: none; }
 body.settings #close-settings { display: flex; }
@@ -87,6 +147,17 @@ body.detected #open-settings { display: none; }
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--card);
+  box-shadow: var(--lift);
+}
+
+/* 検知したカードだけは、上端にアイコンの 2 色をごく薄く敷いて他の面と区別する。 */
+#found .card {
+  background:
+    linear-gradient(160deg,
+      color-mix(in srgb, var(--brand) 20%, transparent),
+      color-mix(in srgb, var(--brand-2) 13%, transparent) 42%,
+      transparent 72%),
+    var(--card);
 }
 
 /* 検知の一段目。種類を先に置き、名前を主役にする。 */
@@ -101,12 +172,16 @@ body.detected #open-settings { display: none; }
   line-height: 1.2;
   letter-spacing: -0.02em;
   overflow-wrap: anywhere;
+  text-wrap: balance;
 }
 
 .kind {
+  display: inline-flex;
   flex: none;
+  gap: 5px;
+  align-items: center;
   order: -1;
-  padding: 2px 7px;
+  padding: 2px 8px 2px 7px;
   border-radius: 999px;
   background: var(--accent-wash);
   color: var(--accent);
@@ -114,10 +189,20 @@ body.detected #open-settings { display: none; }
   font-weight: 600;
 }
 
+/* 種類は色だけで区別しない。点を添えて「印」だと分かる形にする。 */
+.kind::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
 .repo { display: block; margin-top: 3px; color: var(--muted); font-size: 11.5px; overflow-wrap: anywhere; }
 
 /* 二段目。導入を押してから出す。 */
 #destination { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+#destination:not([hidden]) { animation: rise 0.16s var(--ease) both; }
 #destination .repo:first-child { margin-top: 0; }
 
 /* 導入先は 1 行。候補を並べて場所を取らない。 */
@@ -135,9 +220,17 @@ select {
   color: inherit;
   font: inherit;
   font-size: 12px;
+  transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
 }
 
-select:focus-visible { border-color: var(--accent); outline: none; }
+select:hover { border-color: var(--accent); }
+
+/* 焦点は入力欄と同じ太さで示す。枠の色だけでは細くて気付けない。 */
+select:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
 #target-path { margin-top: 5px; }
 
 /* --- 操作 -------------------------------------------------------------- */
@@ -153,17 +246,47 @@ button {
   font: inherit;
   font-weight: 550;
   cursor: pointer;
+  touch-action: manipulation;
+  transition:
+    border-color 0.15s var(--ease),
+    background-color 0.15s var(--ease),
+    color 0.15s var(--ease),
+    box-shadow 0.15s var(--ease),
+    transform 0.08s var(--ease);
 }
 
-button:hover { border-color: var(--accent); }
+button:hover { border-color: var(--accent); background: var(--hover); }
+/* 押した手応え。沈むのは 1px で足りる。 */
+button:active:not([disabled]) { transform: translateY(1px); }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 button[disabled] { opacity: 0.55; cursor: default; }
-button[disabled]:hover { border-color: var(--line); }
+button[disabled]:hover { border-color: var(--line); background: transparent; }
 
 button.primary {
   border-color: var(--accent);
   background: var(--accent);
   color: var(--accent-ink);
+  box-shadow: var(--lift);
+}
+
+button.primary:hover {
+  background: color-mix(in srgb, var(--accent) 88%, var(--ink));
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 34%, transparent);
+}
+
+button.primary[disabled]:hover { background: var(--accent); box-shadow: var(--lift); }
+
+/* 導入中。`disabled` になるのはこの間だけなので、印もそれに乗せる。 */
+#install { display: inline-flex; gap: 7px; align-items: center; }
+
+#install[disabled]::after {
+  content: "";
+  width: 11px;
+  height: 11px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
 }
 
 /* 見出しの操作。アイコンだけでは何のボタンか伝わらないので、必ず文字を添える。 */
@@ -172,6 +295,7 @@ button.chip {
   gap: 5px;
   align-items: center;
   padding: 5px 10px 5px 8px;
+  border-color: transparent;
   border-radius: 8px;
   font-size: 12px;
   font-weight: 550;
@@ -179,7 +303,9 @@ button.chip {
 }
 
 button.chip:hover { border-color: var(--accent); color: var(--accent); }
-button.chip svg { flex: none; }
+button.chip svg { flex: none; transition: transform 0.2s var(--ease); }
+/* 歯車だけ少し回す。戻るの矢印は回さない — 向きが意味を持つ。 */
+#open-settings:hover svg { transform: rotate(30deg); }
 
 /* 対応サイトは導入設定と混ぜず、元の画面を保ったまま一覧だけ重ねる。 */
 dialog {
@@ -190,7 +316,7 @@ dialog {
   border-radius: var(--radius);
   background: var(--card);
   color: var(--ink);
-  box-shadow: 0 12px 30px color-mix(in srgb, var(--ink) 22%, transparent);
+  box-shadow: var(--lift-high);
 }
 
 /*
@@ -199,10 +325,11 @@ dialog {
  * それでも入らなければ一覧の中をスクロールさせる。
  */
 body.dialog { min-height: 330px; }
-dialog[open] { display: flex; flex-direction: column; }
-.sites-list { flex: 1; min-height: 0; overflow-y: auto; }
+dialog[open] { display: flex; flex-direction: column; animation: pop 0.16s var(--ease) both; }
+.sites-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 
 dialog::backdrop { background: color-mix(in srgb, var(--ink) 30%, transparent); }
+dialog[open]::backdrop { animation: fade 0.16s var(--ease) both; }
 .dialog-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--line); }
 .dialog-head h2 { margin: 0; font-size: 14px; }
 .dialog-head .clear { padding: 4px 8px; font-size: 12px; }
@@ -210,7 +337,8 @@ dialog .lead { margin: 12px 14px 0; }
 .sites-list { margin: 10px 14px 14px; }
 .dialog-head, dialog .lead { flex: none; }
 .sites-list li { padding: 8px 0; }
-.sites-list a { color: var(--accent); font-weight: 600; }
+.sites-list a { color: var(--accent); font-weight: 600; text-decoration-color: transparent; transition: text-decoration-color 0.15s var(--ease); }
+.sites-list a:hover { text-decoration-color: currentColor; }
 
 /* --- 状態の知らせ ------------------------------------------------------ */
 
@@ -220,6 +348,9 @@ dialog .lead { margin: 12px 14px 0; }
 .hint.error, code.error { color: var(--danger); }
 .status { margin: 10px 0 0; color: var(--muted); font-size: 12px; }
 .status.error, .error { color: var(--danger); }
+/* 文字が入れ替わったことに気付けるように。中身の差し替えでは走らないので、
+   `:empty` から出たときだけ効く控えめな印として置く。 */
+.status:not(:empty) { animation: fade 0.2s var(--ease) both; }
 
 .done {
   gap: 8px;
@@ -235,7 +366,7 @@ dialog .lead { margin: 12px 14px 0; }
 
 /* `display` は出ているときだけ。`.done` に直接置くと作者スタイルが UA の
    `[hidden] { display: none }` に勝ち、空の箱が出たままになる。 */
-.done:not([hidden]) { display: flex; }
+.done:not([hidden]) { display: flex; animation: rise 0.2s var(--ease) both; }
 
 /* 文中のリンク。ボタンに見せない — 主役は貼る操作の方。 */
 .link {
@@ -245,14 +376,17 @@ dialog .lead { margin: 12px 14px 0; }
   color: var(--accent);
   font: inherit;
   text-decoration: underline;
+  text-underline-offset: 2px;
   cursor: pointer;
 }
 
+.link:hover { border: 0; background: none; }
 .link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* --- 入力 -------------------------------------------------------------- */
 
-label { display: block; margin-bottom: 5px; color: var(--muted); font-size: 12px; }
+/* `#url-label` は `label` ではない（tab.html の注記）。見え方だけ合わせる。 */
+label, #url-label { display: block; margin: 0 0 5px; color: var(--muted); font-size: 12px; }
 
 input[type=url] {
   width: 100%;
@@ -263,11 +397,19 @@ input[type=url] {
   color: inherit;
   font: inherit;
   font-size: 12px;
+  transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
 }
 
-input[type=url]:focus-visible { border-color: var(--accent); outline: none; }
+input[type=url]:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
+
+input[type=url]:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
 
 .error { margin: 6px 0 0; font-size: 12px; }
+#url-error:not([hidden]) { animation: fade 0.16s var(--ease) both; }
 
 /* --- 導入したもの。設定の最下部に畳んで置く ---------------------------- */
 
@@ -283,12 +425,15 @@ input[type=url]:focus-visible { border-color: var(--accent); outline: none; }
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;
+  transition: color 0.15s var(--ease);
 }
 
+#collection-section summary:hover { color: var(--accent); }
 #collection-section summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#collection-section[open] > :not(summary) { animation: rise 0.16s var(--ease) both; }
 
 /* 件数が増えても設定画面そのものは伸ばさない。一覧の中だけをスクロールさせる。 */
-#collection { max-height: 260px; overflow-y: auto; }
+#collection { max-height: 260px; overflow-y: auto; overscroll-behavior: contain; }
 
 /* 許可を取り直す。行の実態が確かめられないときだけ出る。 */
 #verify { margin-top: 10px; padding: 4px 9px; font-size: 11.5px; }
@@ -303,12 +448,24 @@ li {
   border-top: 1px solid var(--line);
 }
 
+/* 一覧は最大 100 行（`core/collection.ts`）。畳んでいる間の組版を省く。 */
+#collection li {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 51px;
+  transition: background-color 0.15s var(--ease);
+}
+#collection li:hover { background: var(--hover); }
+
 li:first-child { border-top: 0; }
 li .name { flex: 1; min-width: 0; }
 li .name > div:first-child
   { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 li code { display: block; color: var(--muted); font-size: 11.5px; overflow-wrap: anywhere; }
 li button { padding: 4px 9px; font-size: 11.5px; }
+/* 削除は行に触れるまで前に出さない。押し間違えると実体が消える。 */
+#collection li button { border-color: transparent; color: var(--muted); }
+#collection li:hover button { border-color: var(--line); color: var(--ink); }
+#collection li button:hover { border-color: var(--danger); color: var(--danger); }
 
 /* 許可が無くて実態を確かめられない行。消えたとも残っているとも言わない。 */
 li.unverified .name > div:first-child, li.unverified code { opacity: 0.6; }
@@ -332,12 +489,15 @@ li .why { margin-top: 3px; color: var(--muted); font-size: 11px; line-height: 1.
   border: 1px solid var(--line);
   border-radius: 9px;
   background: var(--card);
+  box-shadow: var(--lift);
+  transition: border-color 0.15s var(--ease);
 }
 
+.root:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
 .root + .root { margin-top: 7px; }
 
 /* 別のフォルダが設定されている行。直さないと導入できないので、はっきり出す。 */
-.root.bad { border-color: var(--danger); }
+.root.bad, .root.bad:hover { border-color: var(--danger); }
 .root .error { margin-top: 3px; font-size: 11.5px; line-height: 1.45; }
 .root-name { font-weight: 600; }
 .root code { color: var(--muted); font-size: 11.5px; }
@@ -348,11 +508,13 @@ li .why { margin-top: 3px; color: var(--muted); font-size: 11px; line-height: 1.
 .root-actions .clear {
   width: 26px;
   padding: 0;
+  border-color: transparent;
   color: var(--muted);
   font-size: 15px;
   line-height: 1;
 }
 
+.root:hover .clear { border-color: var(--line); }
 .root-actions .clear:hover { border-color: var(--danger); color: var(--danger); }
 
 .switch {
@@ -364,10 +526,14 @@ li .why { margin-top: 3px; color: var(--muted); font-size: 11px; line-height: 1.
   border-top: 1px solid var(--line);
   color: var(--ink);
   font-size: 12px;
+  cursor: pointer;
 }
 
 .switch input { margin: 0; accent-color: var(--accent); }
+.switch input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
+  /* 止まった輪は「終わっている」と読まれる。文言の「Installing…」だけで足りる。 */
+  #install[disabled]::after { display: none; }
 }

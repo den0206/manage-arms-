@@ -100,7 +100,8 @@ async function visit(url: string, tabId: number | undefined, jsonLd?: string): P
 
   candidates.set(tabId, found.url);
   await chrome.action.setBadgeText({ text: "1", tabId }).catch(() => { /* タブが閉じた */ });
-  await chrome.action.setBadgeBackgroundColor({ color: "#5b36d6", tabId }).catch(() => { /* 同上 */ });
+  // popup の `--accent` と同じ紫。バッジはアイコンの上に出るので、そこで色がずれない。
+  await chrome.action.setBadgeBackgroundColor({ color: "#5b4bd6", tabId }).catch(() => { /* 同上 */ });
   // 設定が ON なら popup を開く。開けない場合（Chrome の版や操作の文脈による）は
   // バッジだけにする。**別ウィンドウは作らない** — 見ていたページが隠れる。
   await chrome.action.openPopup().catch(() => { /* バッジで足りる */ });

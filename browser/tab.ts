@@ -61,16 +61,17 @@ sitesDialog.addEventListener("close", () => document.body.classList.remove("dial
  */
 {
   const SLOT = "{}";
-  const label = byId("url-label");
+  const lead = byId("url-label");
   const parts = t("tabUrlLabel").split(SLOT);
   if (parts.length !== 2) console.error("Agent Tool: tabUrlLabel に", SLOT, "がありません");
   const link = document.createElement("button");
   link.type = "button";
   link.className = "link";
   link.textContent = t("tabSupportedSitesLink");   // 見出しとは別。文中なので英語は小文字
-  // `label` の中なので、放っておくと入力欄へ転送される。開くのはこちらの役目。
-  link.addEventListener("click", event => { event.preventDefault(); showSites(true); });
-  label.replaceChildren(parts[0] ?? "", link, parts[1] ?? "");
+  link.addEventListener("click", () => showSites(true));
+  lead.replaceChildren(parts[0] ?? "", link, parts[1] ?? "");
+  // 案内文はボタンを含むので入力欄の名前に使えない。同じ文を読み上げ用に渡す。
+  byId("url").setAttribute("aria-label", parts.join(link.textContent ?? ""));
 }
 
 let current: ToolLead | null = null;
@@ -258,10 +259,14 @@ byId<HTMLButtonElement>("install").addEventListener("click", async () => {
     await install({ ...request, overwrite: true });
     await send({ type: "dismiss" });               // バッジを下ろす。導入済みは収集一覧が持つ
     backToNormal();
+    // 読み上げのために先に出す。`hidden` の間は live region が木に載らない。
     const done = byId("done");
-    byId("done-text").textContent = t("tabInstalled", found.name, `~/${rootOf(where)}`);
     done.hidden = false;
-    setTimeout(() => { done.hidden = true; }, 6000);
+    byId("done-text").textContent = t("tabInstalled", found.name, `~/${rootOf(where)}`);
+    // 中の「一覧を見る」に指がかかったまま消さない。フォーカスが body へ落ちる。
+    setTimeout(() => {
+      if (!done.contains(document.activeElement)) done.hidden = true;
+    }, 6000);
   } catch (error) {
     status.className = "status error";
     status.textContent = message(error, where);
@@ -360,6 +365,7 @@ async function renderCollection(): Promise<void> {
     const name = document.createElement("div");
     name.textContent = item.name;
     const where = document.createElement("code");
+    where.translate = false;                      // パスを自動翻訳に壊させない
     where.textContent = `~/${item.root}`;
     text.append(name, where);
     // 灰色にするだけでは「まだ入っている」と読まれる。確かめられていないと書く。
@@ -420,6 +426,7 @@ async function renderRoots(): Promise<void> {
     name.className = "root-name";
     name.textContent = agentLabel(configDir);
     const path = document.createElement("code");
+    path.translate = false;                       // 同上
     text.append(name, path);
 
     if (state.kind === "mismatch") {
