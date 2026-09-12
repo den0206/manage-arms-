@@ -2,19 +2,32 @@ import { AgentId, configDir, skillRoots, subagentRoots, supports } from "./agent
 import { DetectKind } from "./detect.js";
 
 /**
- * ブラウザ拡張の導入先。ホーム相対のルートと、その下に作る名前だけを決める。
+ * ブラウザ拡張の導入先。ホーム相対のディレクトリと、その下に作る名前だけを決める。
  * 絶対パスは持てない — File System Access API のハンドルからは basename しか得られない。
+ *
+ * 利用者に選んでもらうのは **エージェントの設定ディレクトリ**（`~/.claude`）にする。
+ * `skills` と `agents` はそこから辿れるので、ピッカーを出す回数がエージェントごとに 1 回で済む。
  */
 export type Placement = {
-  /** 利用者に選んでもらうルート（ホーム相対）。 */
-  readonly root: string;
-  /** ルート直下に作るもの。Skill はディレクトリ、Subagent は `.md` ファイル。 */
+  /** 利用者が選ぶディレクトリ（ホーム相対）。 */
+  readonly configDir: string;
+  /** 設定ディレクトリから見た置き場。無ければ作る。 */
+  readonly sub: string;
+  /** その下に作るもの。Skill はディレクトリ、Subagent は `.md` ファイル。 */
   readonly entry: string;
   readonly isDirectory: boolean;
 };
 
 /** Cursor と Codex はどちらもここを読む。1 つ置けば両方から使える。 */
-export const SHARED_SKILL_ROOT = ".agents/skills";
+export const SHARED_CONFIG_DIR = ".agents";
+export const SHARED_SKILL_ROOT = `${SHARED_CONFIG_DIR}/skills`;
+
+/** 一覧や台帳で使うホーム相対のルート。 */
+export const rootOf = (where: Placement): string => `${where.configDir}/${where.sub}`;
+
+/** 選んでもらう必要のあるディレクトリの全列挙。設定画面がこの順で並べる。 */
+export const CONFIG_DIRS: readonly string[] =
+  [".claude", ".cursor", ".codex", SHARED_CONFIG_DIR];
 
 /** その種別を導入できるエージェント。Gemini は MCP だけなので現れない。 */
 export const targets = (kind: DetectKind): AgentId[] =>
@@ -36,13 +49,23 @@ export function placement(
   const available = roots(agent, kind);
   if (available.length === 0) return null;
 
-  const root = sharedRootAvailable && available.includes(SHARED_SKILL_ROOT)
-    ? SHARED_SKILL_ROOT
-    : `${configDir(agent)}/${kind === "skill" ? "skills" : "agents"}`;
-  // 選んだルートがそのエージェントの読む場所に入っていること。推測で書かない。
-  if (!available.includes(root)) return null;
+  const shared = sharedRootAvailable && available.includes(SHARED_SKILL_ROOT);
+  const where = {
+    configDir: shared ? SHARED_CONFIG_DIR : configDir(agent),
+    sub: shared || kind === "skill" ? "skills" : "agents",
+  };
+  // 選んだ置き場がそのエージェントの読む場所に入っていること。推測で書かない。
+  if (!available.includes(`${where.configDir}/${where.sub}`)) return null;
 
   return kind === "skill"
-    ? { root, entry: name, isDirectory: true }
-    : { root, entry: `${name}.md`, isDirectory: false };
+    ? { ...where, entry: name, isDirectory: true }
+    : { ...where, entry: `${name}.md`, isDirectory: false };
 }
+
+/** `.claude/skills` を設定ディレクトリと置き場に割る。収集一覧が持つのはこの形。 */
+export const splitRoot = (root: string): { configDir: string; sub: string } => {
+  const at = root.indexOf("/");
+  return at < 0
+    ? { configDir: root, sub: "" }
+    : { configDir: root.slice(0, at), sub: root.slice(at + 1) };
+};

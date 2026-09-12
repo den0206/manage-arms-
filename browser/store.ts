@@ -66,8 +66,8 @@ export async function forget(item: Collected): Promise<Collected[]> {
 }
 
 /** バナーの ON / OFF。設定は 1 つだけなので chrome.storage を使わず既定値と往復する。 */
-export const bannerEnabled = async (): Promise<boolean> =>
-  (await run<boolean | undefined>(COLLECTION, "readonly", store => store.get("banner"))) ?? true;
+export const autoOpenEnabled = async (): Promise<boolean> =>
+  (await run<boolean | undefined>(COLLECTION, "readonly", store => store.get("autoOpen"))) ?? true;
 
-export const setBannerEnabled = (on: boolean): Promise<IDBValidKey> =>
-  run(COLLECTION, "readwrite", store => store.put(on, "banner"));
+export const setAutoOpenEnabled = (on: boolean): Promise<IDBValidKey> =>
+  run(COLLECTION, "readwrite", store => store.put(on, "autoOpen"));

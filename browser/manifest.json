@@ -9,16 +9,20 @@
     "type": "module"
   },
   "action": {
-    "default_title": "__MSG_extensionName__"
+    "default_title": "__MSG_extensionName__",
+    "default_popup": "browser/tab.html"
   },
-  "options_page": "browser/tab.html",
+  "options_page": "browser/settings.html",
   "permissions": [
-    "unlimitedStorage"
+    "unlimitedStorage",
+    "webNavigation"
   ],
   "host_permissions": [
     "https://github.com/*",
     "https://skills.sh/*",
+    "https://www.skills.sh/*",
     "https://agentsdirectory.dev/*",
+    "https://www.agentsdirectory.dev/*",
     "https://api.github.com/*",
     "https://raw.githubusercontent.com/*",
     "https://codeload.github.com/*"
@@ -28,7 +32,9 @@
       "matches": [
         "https://github.com/*",
         "https://skills.sh/*",
-        "https://agentsdirectory.dev/*"
+        "https://www.skills.sh/*",
+        "https://agentsdirectory.dev/*",
+        "https://www.agentsdirectory.dev/*"
       ],
       "js": [
         "browser/content.js"

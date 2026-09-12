@@ -62,6 +62,11 @@ File System Access API を使う。利用者がディレクトリを選んで許
 Chromium はホームディレクトリ直下の選択を拒否するが、その配下は選べる。symlink は作れないため、
 D-3 の共有ストアとリンクの方式はブラウザ側では再現しない（D-13）。
 
+初回起動時はオンボーディングを popup window で開き、利用者が使う Agent ごとに導入先ルートを
+選ぶ。ピッカーはこの明示操作でだけ開く。以後は保存済みハンドルに `queryPermission()` を行い、
+`granted` なら Agent を選ぶだけで導入する。権限が `prompt` のときは導入ボタンの操作で再許可を
+求め、`denied` またはハンドル未設定のときだけオンボーディングの選択画面へ戻す。
+
 ## D-12. ブラウザ拡張が扱う種別
 
 Skill と Subagent だけを扱う。
@@ -103,18 +108,22 @@ entry を巻き込んで消さないための条件である。
 ## D-16. ブラウザ拡張の検知
 
 `host_permissions` は検知用の github.com / skills.sh / agentsdirectory.dev と、取得用の
-raw.githubusercontent.com / codeload.github.com に限る。content script が Shadow DOM でバナーを描き、
-ページの CSS と隔てる。検知の ON / OFF 設定を持つ。
+raw.githubusercontent.com / codeload.github.com に限る。content script は候補を service worker へ渡す
+だけで、ページへ UI を挿入しない。
 
-バナーを出す前に `raw.githubusercontent.com` へ実在確認する。閲覧中の URL は外部へ送らない。
+検知時は `raw.githubusercontent.com` へ実在確認し、成功したら service worker が popup window を
+開く。自動表示はオンボーディングで有効にする既定 ON の設定とし、同じタブ・同じ候補には
+セッション中 1 回だけ開く。すでに popup window があれば新規作成せず、その候補を表示して前面へ出す。
+閲覧中の URL は外部へ送らない。
 URL だけで取得元が決まらない agentsdirectory.dev は、開いているページの JSON-LD を DOM から
 読む。入力フォームに貼られたときだけ取得しに行く。
 
 ## D-17. ブラウザ拡張の画面
 
-`showDirectoryPicker()` はポップアップから呼ぶとポップアップが閉じて処理が中断する。導入・
-許可・一覧は専用タブで行う。MV3 の service worker がアイドルで停止する問題も、取得と展開を
-専用タブで行うことで回避する。
+添付画像のような UI は `chrome.windows.create({ type: 'popup' })` で開く extension page とする。
+toolbar action、初回オンボーディング、検知のいずれも同じ window を作成または再利用する。action popup
+はフォーカスを失うと閉じるため使わない。popup window は導入中も残るので、取得と展開をそこで行い
+MV3 service worker のアイドル停止に依存しない。
 
 ## D-18. リポジトリ構成と配布
 

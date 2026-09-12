@@ -5,6 +5,7 @@
 declare namespace chrome {
   namespace runtime {
     function getURL(path: string): string;
+    function openOptionsPage(): Promise<void>;
     function sendMessage<T = unknown, R = unknown>(message: T): Promise<R>;
     const onMessage: {
       addListener(handler: (
@@ -14,14 +15,23 @@ declare namespace chrome {
       ) => boolean | void): void;
     };
   }
-  namespace tabs {
-    function create(options: { url: string }): Promise<{ id?: number }>;
-    function sendMessage<T = unknown>(tabId: number, message: T): Promise<unknown>;
-  }
   namespace i18n {
     function getMessage(key: string, substitutions?: string | string[]): string;
   }
   namespace action {
-    const onClicked: { addListener(handler: () => void): void };
+    function setBadgeText(details: { text: string; tabId?: number }): Promise<void>;
+    function setBadgeBackgroundColor(details: { color: string; tabId?: number }): Promise<void>;
+    function openPopup(): Promise<void>;
+  }
+  namespace tabs {
+    function query(filter: { active?: boolean; currentWindow?: boolean }):
+      Promise<{ id?: number; url?: string }[]>;
+    function sendMessage<T = unknown>(tabId: number, message: T): Promise<unknown>;
+    const onRemoved: { addListener(handler: (tabId: number) => void): void };
+  }
+  namespace webNavigation {
+    const onHistoryStateUpdated: {
+      addListener(handler: (details: { tabId: number; url: string }) => void): void;
+    };
   }
 }

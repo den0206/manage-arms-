@@ -3,50 +3,43 @@
     "message": "Agent Tool"
   },
   "extensionDescription": {
-    "message": "Detect Skills and Subagents while you browse, and install them into your AI coding agents."
-  },
-  "bannerSkill": {
-    "message": "Found the skill \"$NAME$\"",
-    "placeholders": {
-      "name": {
-        "content": "$1"
-      }
-    }
-  },
-  "bannerSubagent": {
-    "message": "Found the subagent \"$NAME$\"",
-    "placeholders": {
-      "name": {
-        "content": "$1"
-      }
-    }
-  },
-  "bannerInstall": {
-    "message": "Install"
-  },
-  "bannerDismiss": {
-    "message": "Not now"
+    "message": "Find skills and subagents while you browse, and install them into Claude Code, Cursor, or Codex."
   },
   "tabTitle": {
     "message": "Agent Tool"
   },
+  "tabSettings": {
+    "message": "Settings"
+  },
+  "kindSkill": {
+    "message": "Skill"
+  },
+  "kindSubagent": {
+    "message": "Subagent"
+  },
   "tabUrlLabel": {
-    "message": "Paste a GitHub or catalog URL"
+    "message": "Paste a GitHub or skills.sh link"
   },
   "tabUrlPlaceholder": {
     "message": "https://github.com/owner/repo/tree/main/skills/pdf"
   },
   "tabUrlUnsupported": {
-    "message": "This URL does not point to a skill or subagent."
+    "message": "That link does not point to a skill or subagent."
   },
   "tabTargetLabel": {
     "message": "Install into"
   },
   "tabNeedsPermission": {
-    "message": "permission required"
+    "message": "needs folder access"
+  },
+  "tabPickTarget": {
+    "message": "Choose where to install it."
   },
   "tabInstall": {
     "message": "Install"
+  },
+  "tabDismiss": {
+    "message": "Not now"
   },
   "tabInstalling": {
     "message": "Installing…"
@@ -63,10 +56,13 @@
     }
   },
   "tabCollection": {
-    "message": "Installed by this extension"
+    "message": "Installed here"
   },
   "tabCollectionEmpty": {
-    "message": "Nothing installed yet."
+    "message": "Nothing yet. Browse GitHub or skills.sh, or paste a link above."
+  },
+  "tabVerify": {
+    "message": "Check folders"
   },
   "tabRemove": {
     "message": "Remove"
@@ -80,21 +76,50 @@
     }
   },
   "tabRemoveChanged": {
-    "message": "$NAME$ was changed after it was installed, so this extension will not remove it.",
+    "message": "$NAME$ changed after it was installed, so it was left alone. Remove it yourself if you meant to.",
     "placeholders": {
       "name": {
         "content": "$1"
       }
     }
   },
-  "tabSettings": {
-    "message": "Settings"
+  "tabAutoOpenToggle": {
+    "message": "Open this popup when a skill is found"
   },
-  "tabBannerToggle": {
-    "message": "Show a banner when a skill or subagent is found"
+  "settingsTitle": {
+    "message": "Choose where Agent Tool can write"
+  },
+  "settingsText": {
+    "message": "Pick each agent's folder once. Agent Tool writes only inside the folders you pick."
+  },
+  "settingsChoose": {
+    "message": "Choose folder"
+  },
+  "settingsGranted": {
+    "message": "Change folder"
+  },
+  "settingsSaved": {
+    "message": "Agent Tool can now write to $PATH$.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "agentClaude": {
+    "message": "Claude Code"
+  },
+  "agentCursor": {
+    "message": "Cursor"
+  },
+  "agentCodex": {
+    "message": "Codex"
+  },
+  "agentAgents": {
+    "message": "Shared with Cursor and Codex"
   },
   "pickerIntroMac": {
-    "message": "Choose the folder $PATH$. Press Cmd+Shift+. in the picker to show hidden folders.",
+    "message": "Press Cmd+Shift+. in the picker to show hidden folders such as $PATH$.",
     "placeholders": {
       "path": {
         "content": "$1"
@@ -102,7 +127,7 @@
     }
   },
   "pickerIntroLinux": {
-    "message": "Choose the folder $PATH$. Press Ctrl+H in the picker to show hidden folders.",
+    "message": "Press Ctrl+H in the picker to show hidden folders such as $PATH$.",
     "placeholders": {
       "path": {
         "content": "$1"
@@ -110,7 +135,7 @@
     }
   },
   "pickerIntroWindows": {
-    "message": "Choose the folder $PATH$.",
+    "message": "Folders such as $PATH$ start with a dot.",
     "placeholders": {
       "path": {
         "content": "$1"
@@ -118,7 +143,7 @@
     }
   },
   "pickerWrongFolder": {
-    "message": "You chose \"$NAME$\". Choose the folder $PATH$ itself.",
+    "message": "You chose $NAME$. Choose $PATH$ itself.",
     "placeholders": {
       "name": {
         "content": "$1"
@@ -129,10 +154,10 @@
     }
   },
   "permissionLost": {
-    "message": "Permission to write to this folder expired."
+    "message": "Folder access expired. Try again to grant it."
   },
   "overwriteConfirm": {
-    "message": "$NAME$ already exists there. Overwrite it?",
+    "message": "$NAME$ is already there. Replace it?",
     "placeholders": {
       "name": {
         "content": "$1"
@@ -140,9 +165,12 @@
     }
   },
   "errorTooLarge": {
-    "message": "The download exceeded the limit and was stopped."
+    "message": "The download went over the size limit and was stopped."
+  },
+  "errorNotFound": {
+    "message": "That skill was not found in the repository."
   },
   "errorFetchFailed": {
-    "message": "The download failed."
+    "message": "The download failed. Check your connection and try again."
   }
 }

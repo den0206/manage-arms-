@@ -19,6 +19,3 @@ declare function showDirectoryPicker(options?: {
   mode?: FileSystemPermissionMode;
   startIn?: FileSystemHandle | string;
 }): Promise<FileSystemDirectoryHandle>;
-
-/** Navigation API（Chromium 102 以降）。TypeScript の DOM 型定義にまだ無い。 */
-declare const navigation: { addEventListener(type: "navigate", handler: () => void): void } | undefined;

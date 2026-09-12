@@ -3,50 +3,43 @@
     "message": "Agent Tool"
   },
   "extensionDescription": {
-    "message": "閲覧中に Skill と Subagent を見つけて、AI コーディングエージェントへ導入します。"
-  },
-  "bannerSkill": {
-    "message": "スキル「$NAME$」を見つけました",
-    "placeholders": {
-      "name": {
-        "content": "$1"
-      }
-    }
-  },
-  "bannerSubagent": {
-    "message": "サブエージェント「$NAME$」を見つけました",
-    "placeholders": {
-      "name": {
-        "content": "$1"
-      }
-    }
-  },
-  "bannerInstall": {
-    "message": "導入する"
-  },
-  "bannerDismiss": {
-    "message": "今はしない"
+    "message": "閲覧中に Skill と Subagent を見つけて、Claude Code・Cursor・Codex へ導入します。"
   },
   "tabTitle": {
     "message": "Agent Tool"
   },
+  "tabSettings": {
+    "message": "設定"
+  },
+  "kindSkill": {
+    "message": "スキル"
+  },
+  "kindSubagent": {
+    "message": "サブエージェント"
+  },
   "tabUrlLabel": {
-    "message": "GitHub かカタログの URL を貼り付けてください"
+    "message": "GitHub か skills.sh のリンクを貼る"
   },
   "tabUrlPlaceholder": {
     "message": "https://github.com/owner/repo/tree/main/skills/pdf"
   },
   "tabUrlUnsupported": {
-    "message": "この URL は Skill や Subagent を指していません。"
+    "message": "このリンクは Skill も Subagent も指していません。"
   },
   "tabTargetLabel": {
     "message": "導入先"
   },
   "tabNeedsPermission": {
-    "message": "許可が必要です"
+    "message": "フォルダの許可が必要"
+  },
+  "tabPickTarget": {
+    "message": "どこに入れるかを選んでください。"
   },
   "tabInstall": {
     "message": "導入する"
+  },
+  "tabDismiss": {
+    "message": "今はしない"
   },
   "tabInstalling": {
     "message": "導入しています…"
@@ -63,10 +56,13 @@
     }
   },
   "tabCollection": {
-    "message": "この拡張で導入したもの"
+    "message": "ここから導入したもの"
   },
   "tabCollectionEmpty": {
-    "message": "まだ何も導入していません。"
+    "message": "まだありません。GitHub や skills.sh を見るか、上にリンクを貼ってください。"
+  },
+  "tabVerify": {
+    "message": "フォルダを確認"
   },
   "tabRemove": {
     "message": "削除"
@@ -80,21 +76,50 @@
     }
   },
   "tabRemoveChanged": {
-    "message": "$NAME$ は導入後に変更されているため、この拡張では削除しません。",
+    "message": "$NAME$ は導入後に変更されているので、そのままにしました。消す場合はご自身で削除してください。",
     "placeholders": {
       "name": {
         "content": "$1"
       }
     }
   },
-  "tabSettings": {
-    "message": "設定"
+  "tabAutoOpenToggle": {
+    "message": "Skill を見つけたらこのポップアップを開く"
   },
-  "tabBannerToggle": {
-    "message": "Skill や Subagent を見つけたらバナーを出す"
+  "settingsTitle": {
+    "message": "Agent Tool が書き込める場所を選ぶ"
+  },
+  "settingsText": {
+    "message": "エージェントごとに 1 回ずつフォルダを選びます。選んだフォルダの外には書き込みません。"
+  },
+  "settingsChoose": {
+    "message": "フォルダを選ぶ"
+  },
+  "settingsGranted": {
+    "message": "フォルダを選び直す"
+  },
+  "settingsSaved": {
+    "message": "$PATH$ へ書き込めるようになりました。",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "agentClaude": {
+    "message": "Claude Code"
+  },
+  "agentCursor": {
+    "message": "Cursor"
+  },
+  "agentCodex": {
+    "message": "Codex"
+  },
+  "agentAgents": {
+    "message": "Cursor と Codex で共有"
   },
   "pickerIntroMac": {
-    "message": "フォルダ $PATH$ を選んでください。ピッカーで Cmd+Shift+. を押すと隠しフォルダが表示されます。",
+    "message": "ピッカーで Cmd+Shift+. を押すと、$PATH$ のような隠しフォルダが表示されます。",
     "placeholders": {
       "path": {
         "content": "$1"
@@ -102,7 +127,7 @@
     }
   },
   "pickerIntroLinux": {
-    "message": "フォルダ $PATH$ を選んでください。ピッカーで Ctrl+H を押すと隠しフォルダが表示されます。",
+    "message": "ピッカーで Ctrl+H を押すと、$PATH$ のような隠しフォルダが表示されます。",
     "placeholders": {
       "path": {
         "content": "$1"
@@ -110,7 +135,7 @@
     }
   },
   "pickerIntroWindows": {
-    "message": "フォルダ $PATH$ を選んでください。",
+    "message": "$PATH$ のようにドットで始まるフォルダを選びます。",
     "placeholders": {
       "path": {
         "content": "$1"
@@ -118,7 +143,7 @@
     }
   },
   "pickerWrongFolder": {
-    "message": "「$NAME$」が選ばれました。$PATH$ そのものを選んでください。",
+    "message": "$NAME$ が選ばれました。$PATH$ そのものを選んでください。",
     "placeholders": {
       "name": {
         "content": "$1"
@@ -129,10 +154,10 @@
     }
   },
   "permissionLost": {
-    "message": "このフォルダへ書き込む許可が切れました。"
+    "message": "フォルダの許可が切れました。もう一度お試しください。"
   },
   "overwriteConfirm": {
-    "message": "$NAME$ は既にあります。上書きしますか。",
+    "message": "$NAME$ は既にあります。置き換えますか。",
     "placeholders": {
       "name": {
         "content": "$1"
@@ -142,7 +167,10 @@
   "errorTooLarge": {
     "message": "取得が上限を超えたため中止しました。"
   },
+  "errorNotFound": {
+    "message": "そのスキルはリポジトリの中に見つかりませんでした。"
+  },
   "errorFetchFailed": {
-    "message": "取得に失敗しました。"
+    "message": "取得に失敗しました。接続を確かめて、もう一度お試しください。"
   }
 }

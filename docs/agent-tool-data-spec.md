@@ -48,10 +48,11 @@ macOS/Linux では symlink、Windows では junction または hardlink を使�
 
 | 保存先 | 内容 |
 |---|---|
-| IndexedDB | 許可済みディレクトリハンドル（エージェント別）と、導入した Skill / Subagent の収集一覧 |
+| IndexedDB | 許可済みディレクトリハンドル（エージェント別）、導入した Skill / Subagent の収集一覧、`autoOpenOnDetection` 設定 |
 
 収集一覧の上限は `core/` の `MAX_BROWSER_COLLECTION_ENTRIES = 100` とし、超えた分は古い順に捨てる。各項目は取得元、commit SHA、導入先、日時、
 導入直後に計算した実体ツリーの SHA-256 だけを持つ。ログ、診断履歴、閲覧した URL は保持しない。
+`autoOpenOnDetection` は既定で `true` の boolean だけを持つ。
 ハンドルは `requestPermission()` の再取得が必要になるため、ブラウザ再起動後の初回操作で
 利用者の操作を1回求める。
 
