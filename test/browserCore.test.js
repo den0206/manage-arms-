@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const { kindOf, lead, proofUrls } = require("../out/core/detect.js");
 const { placement, targets, SHARED_SKILL_ROOT } = require("../out/core/placement.js");
 const { decode, ledger, ledgerPath, LEDGER_DIR } = require("../out/core/ledger.js");
-const { add, evicted, find, isRemovable, MAX_BROWSER_COLLECTION_ENTRIES } =
+const { add, find, isRemovable, MAX_BROWSER_COLLECTION_ENTRIES } =
   require("../out/core/collection.js");
 const { treeHash } = require("../out/core/hash.js");
 
@@ -158,12 +158,6 @@ test("上限を超えたら古い順に捨てる", () => {
   assert.equal(list.length, MAX_BROWSER_COLLECTION_ENTRIES);
   assert.equal(list[0].name, "skill-1");                 // 最古が落ちた
   assert.equal(list[list.length - 1].name, `skill-${MAX_BROWSER_COLLECTION_ENTRIES}`);
-});
-
-test("捨てられる件を先に知れる", () => {
-  const list = [collected("a", 1), collected("b", 2)];
-  assert.deepEqual(evicted(list, collected("c", 3), 2), [collected("a", 1)]);
-  assert.deepEqual(evicted(list, collected("c", 3), 3), []);
 });
 
 test("実体ツリー hash が一致するときだけ削除を許す", () => {

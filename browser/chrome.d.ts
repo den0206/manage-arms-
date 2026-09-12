@@ -4,7 +4,6 @@
  */
 declare namespace chrome {
   namespace runtime {
-    const id: string;
     function getURL(path: string): string;
     function sendMessage<T = unknown, R = unknown>(message: T): Promise<R>;
     const onMessage: {
@@ -19,18 +18,10 @@ declare namespace chrome {
     function create(options: { url: string }): Promise<{ id?: number }>;
     function sendMessage<T = unknown>(tabId: number, message: T): Promise<unknown>;
   }
-  namespace storage {
-    interface Area {
-      get<T extends Record<string, unknown>>(defaults: T): Promise<T>;
-      set(items: Record<string, unknown>): Promise<void>;
-    }
-    const local: Area;
-  }
   namespace i18n {
     function getMessage(key: string, substitutions?: string | string[]): string;
   }
   namespace action {
-    function openPopup(): Promise<void>;
     const onClicked: { addListener(handler: () => void): void };
   }
 }

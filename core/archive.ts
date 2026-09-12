@@ -16,12 +16,10 @@ export function safeSegments(entryName: string): string[] | null {
   return parts.length === 0 ? null : parts;
 }
 
-export type TarKind = "file" | "directory";
-
 export type TarEntry = {
   /** 検証済みのセグメント。先頭の `<repo>-<ref>/` はまだ付いている。 */
   readonly path: string[];
-  readonly kind: TarKind;
+  readonly kind: "file" | "directory";
   readonly bytes: Uint8Array;
 };
 
