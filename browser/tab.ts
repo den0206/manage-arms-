@@ -201,7 +201,8 @@ function setMode(detected: boolean): void {
 async function showLead(raw: string, vetted = false): Promise<void> {
   const found = await resolve(raw, vetted);
   current = found;
-  byId("url-error").hidden = found === null || raw === "";
+  // 対応外の URL でこそ出す。検知できたときは `#url-section` ごと隠れる。
+  byId("url-error").hidden = found !== null || raw === "";
   byId("status").textContent = "";
   byId("status").className = "status";
   byId("picker-hint").textContent = "";
