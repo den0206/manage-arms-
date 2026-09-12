@@ -69,3 +69,33 @@ export const splitRoot = (root: string): { configDir: string; sub: string } => {
     ? { configDir: root, sub: "" }
     : { configDir: root.slice(0, at), sub: root.slice(at + 1) };
 };
+
+/**
+ * 設定されているフォルダの状態。
+ *
+ * File System Access API のハンドルから得られるのは末尾の名前だけで、絶対パスは取れない。
+ * 設定ディレクトリ名（`.claude` `.cursor` `.codex` `.agents`）はエージェント間で
+ * 重複しないので、名前が一致すればそのエージェントのものと判断できる。一致しなければ
+ * 別のフォルダが入っているので、導入させずに設定し直してもらう。
+ */
+export type RootState =
+  | { readonly kind: "unset" }
+  | { readonly kind: "ok" }
+  /** 別のフォルダが設定されている。`chosen` は設定されている方の名前。 */
+  | { readonly kind: "mismatch"; readonly chosen: string };
+
+/**
+ * @param savedName 設定ディレクトリのキーで覚えているハンドルの名前。無ければ null。
+ * @param legacy    `<configDir>/skills` のように下位フォルダを覚えていた旧版の記録。
+ */
+export function rootStateOf(
+  configDir: string, savedName: string | null, legacy: readonly string[] = [],
+): RootState {
+  if (savedName !== null) {
+    return savedName === configDir ? { kind: "ok" } : { kind: "mismatch", chosen: savedName };
+  }
+  // 旧版は下位フォルダも覚えていた。`skills` という名前はどのエージェントにもあるので、
+  // どこを指しているのか確かめられない。設定し直してもらう。
+  const stale = legacy.find(name => name !== "");
+  return stale === undefined ? { kind: "unset" } : { kind: "mismatch", chosen: stale };
+}
