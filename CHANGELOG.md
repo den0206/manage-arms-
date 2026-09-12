@@ -12,11 +12,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Registry entries whose files are gone are dropped on the next scan, so the list no longer shows tools that were deleted outside Agent Tool.
 - A browser extension for Chrome, Edge, and Brave that spots skills and subagents while you browse GitHub, skills.sh, and agentsdirectory.dev, and installs them into Claude Code, Cursor, or Codex. It writes only to folders you pick, and works without the IDE extension installed.
 - A Supported sites dialog in the browser extension with links to GitHub and every supported catalog.
+- A light / dark / system theme setting in the browser extension's popup.
+- A unified `release/Ver_<semver>` workflow that gives both extensions the same version, packages and checksums their artifacts, and attaches them to one GitHub Release, plus a privacy policy (`PRIVACY.md`) and a Chrome Web Store listing checklist (`docs/browser-store-listing.md`).
+- Conditional Chrome Web Store submission from that workflow, skipped until all of its required GitHub Secrets are configured; submit the approved zip to Edge Add-ons manually.
 
 ### Fixed
 
 - Choosing a folder in Brave reported what went wrong instead of doing nothing: Brave turns the File System Access API off by default, and the extension now says so and walks through enabling it in brave://flags.
 - The "Installed here" list drops entries that were removed from the IDE extension. It could not read the folder to check, so it kept showing them.
+- The browser extension's dropdown menus and dialogs stay legible in dark mode; some text could render unreadable against the page's own dark styling before.
+- The browser extension's "paste a URL" label no longer folds the "Supported sites" link into the input's accessible name, the install-succeeded banner is announced to screen readers and keeps focus while visible, and the URL error message is now associated with its field.
 
 ## [0.1.2] — 2026-09-12
 
@@ -31,6 +36,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - The tool list is posted before the agent CLI scan, so the first view no longer waits on spawning login shells.
 - MCP status checks no longer start a new round while the previous one is still running.
 - Packaging now starts from a clean build directory.
+- The browser extension's popup uses a palette matching the extension icon, with a few short, `prefers-reduced-motion`-aware animations (the detected-card entrance, the install spinner, the dialog open).
 
 ### Fixed
 

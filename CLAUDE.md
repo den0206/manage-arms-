@@ -115,7 +115,7 @@ CI はローカルと同じスクリプトを呼び、別ロジックを持た�
 - Secondary Simulator と同じくNode 20、npm、`package-lock.json`、Node標準 `node:test`を使う。
 - 依存は必要最小限の正確な版に固定し、`ignore-scripts=true`、第三者Actionのcommit SHA固定を守る。
 - Publisherは`yuuki-sakai`。alpha / betaはGitHub Releases、安定版は同じVSIXをOpen VSXからGitHubの順に公開する。
-- 版は拡張ごとに独立させ、タグの接頭辞（`ide-v*` / `browser-v*`）でリリースを分岐する。
+- IDE拡張とブラウザ拡張は同じ版で配布する。`release/Ver_X.Y.Z` が両方を組み立て、同じGitHub Releaseへ添付する。
 - ブラウザ拡張はChrome Web StoreとEdge Add-onsへ同じzipを出す。
 - VSIXにバイナリを同梱せず、署名・公証も行わない。最初の公開前と配布経路変更時に、配布VSIXからの初回起動を実機確認する。
 - 定期canaryは設けない。リリース前にRSSとAgent Tool自身の保存容量を計測する。

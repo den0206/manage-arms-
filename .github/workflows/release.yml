@@ -16,6 +16,11 @@ jobs:
     runs-on: ubuntu-latest
     env:
       OVSX_PAT: ${{ secrets.OVSX_PAT }}
+      CHROME_CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
+      CHROME_CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
+      CHROME_REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
+      CHROME_PUBLISHER_ID: ${{ secrets.CHROME_PUBLISHER_ID }}
+      CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -41,7 +46,11 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Apply release version
-        run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version --allow-same-version
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          npm version "$RELEASE_VERSION" --no-git-tag-version --allow-same-version
+          node -e "const fs=require('node:fs'); const file='browser/manifest.json'; const manifest=JSON.parse(fs.readFileSync(file, 'utf8')); manifest.version=process.env.RELEASE_VERSION; fs.writeFileSync(file, JSON.stringify(manifest, null, 2) + '\\n')"
       - name: Cut changelog section
         run: ./scripts/release-changelog.sh "${{ steps.version.outputs.version }}" "$(date -u +%F)"
       - name: Package VSIX
@@ -50,6 +59,26 @@ jobs:
         run: |
           test "$(stat -c %s vsix/agent-tool.vsix)" -lt 20971520
           sha256sum vsix/agent-tool.vsix | tee vsix/agent-tool.vsix.sha256
+      - name: Package browser extension and checksum
+        run: |
+          npm run package:browser
+          sha256sum vsix/agent-tool-browser.zip | tee vsix/agent-tool-browser.zip.sha256
+      - name: Submit browser extension to Chrome Web Store
+        if: ${{ env.CHROME_CLIENT_ID != '' && env.CHROME_CLIENT_SECRET != '' && env.CHROME_REFRESH_TOKEN != '' && env.CHROME_PUBLISHER_ID != '' && env.CHROME_EXTENSION_ID != '' }}
+        run: |
+          access_token="$(curl --fail --silent --show-error https://oauth2.googleapis.com/token \
+            --data-urlencode "client_id=$CHROME_CLIENT_ID" \
+            --data-urlencode "client_secret=$CHROME_CLIENT_SECRET" \
+            --data-urlencode "refresh_token=$CHROME_REFRESH_TOKEN" \
+            --data-urlencode 'grant_type=refresh_token' | node -e "let body=''; process.stdin.on('data', chunk => body += chunk).on('end', () => { const token = JSON.parse(body).access_token; if (!token) process.exit(1); process.stdout.write(token) })")"
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $access_token" \
+            -X POST -T vsix/agent-tool-browser.zip \
+            "https://chromewebstore.googleapis.com/upload/v2/publishers/$CHROME_PUBLISHER_ID/items/$CHROME_EXTENSION_ID:upload"
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $access_token" \
+            -X POST \
+            "https://chromewebstore.googleapis.com/v2/publishers/$CHROME_PUBLISHER_ID/items/$CHROME_EXTENSION_ID:publish"
       - name: Publish stable release to Open VSX
         if: ${{ !contains(steps.version.outputs.version, '-') && env.OVSX_PAT != '' }}
         run: npx --yes ovsx@1.2.0 publish vsix/agent-tool.vsix -p "$OVSX_PAT"
@@ -61,7 +90,8 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "Agent Tool ${{ steps.version.outputs.version }}" \
             --notes-file <(./scripts/release-changelog.sh --section "${{ steps.version.outputs.version }}") \
-            vsix/agent-tool.vsix vsix/agent-tool.vsix.sha256
+            vsix/agent-tool.vsix vsix/agent-tool.vsix.sha256 \
+            vsix/agent-tool-browser.zip vsix/agent-tool-browser.zip.sha256
       - name: Sync version to main
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
@@ -71,8 +101,9 @@ jobs:
           git fetch origin main
           git switch -f -C main origin/main
           npm version "$RELEASE_VERSION" --no-git-tag-version --allow-same-version
+          node -e "const fs=require('node:fs'); const file='browser/manifest.json'; const manifest=JSON.parse(fs.readFileSync(file, 'utf8')); manifest.version=process.env.RELEASE_VERSION; fs.writeFileSync(file, JSON.stringify(manifest, null, 2) + '\\n')"
           ./scripts/release-changelog.sh "$RELEASE_VERSION" "$(date -u +%F)"
-          git add package.json package-lock.json CHANGELOG.md
+          git add package.json package-lock.json browser/manifest.json CHANGELOG.md
           git diff --cached --quiet && exit 0
           git commit -m "chore: Ver_${RELEASE_VERSION} の版と CHANGELOG を反映 [skip ci]"
           git push origin main
