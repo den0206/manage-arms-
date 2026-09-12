@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { KindId } from "../core/agent";
 import { decode as decodeLedger, Ledger, LEDGER_DIR } from "../core/ledger";
@@ -43,9 +43,13 @@ export function scan(env: Env): Found[] {
       if (!name.endsWith(".json")) continue;
       const ledger = readLedger(join(dir, name));
       // ファイル名と中の name がずれている台帳は信用しない。
-      if (ledger !== null && `${ledger.name}.json` === name) {
-        found.push({ root, file: join(dir, name), ledger });
+      if (ledger === null || `${ledger.name}.json` !== name) continue;
+      // 実体の無い台帳は取り込まない。取り込むと、存在しないものの entry を作っては
+      // `prune` が消す往復が走査のたびに起きる。書き込みが途中で失敗すると残りうる。
+      if (!existsSync(join(root, ledger.name)) && !existsSync(join(root, `${ledger.name}.md`))) {
+        continue;
       }
+      found.push({ root, file: join(dir, name), ledger });
     }
   }
   return found;

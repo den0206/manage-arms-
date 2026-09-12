@@ -227,3 +227,22 @@ test("実体を手で消したあとの entry は次の走査で落ちる", asyn
   await inventory({ env: f.env, projectPath: null, run: async () => "", writable: true });
   assert.deepEqual(load(f.env).resources, []);
 });
+
+test("実体の無い台帳は取り込まない", () => {
+  // 書き込みが途中で失敗すると台帳だけが残る。取り込むと、存在しないものの entry を
+  // 作っては prune が消す往復が走査のたびに起きる。
+  const f = fixture();
+  f.orphan("ghost");
+  f.skill("pdf");
+  assert.deepEqual(scan(f.env).map(item => item.ledger.name), ["pdf"]);
+});
+
+test("実体の無い台帳があっても registry は安定する", async () => {
+  const f = fixture();
+  f.orphan("ghost");
+  for (let round = 0; round < 2; round++) {
+    await inventory({ env: f.env, projectPath: null, run: async () => "", writable: true });
+    assert.deepEqual(load(f.env).resources, []);
+  }
+  assert.equal(existsSync(join(f.root, LEDGER_DIR, "ghost.json")), true);  // 消しはしない
+});
