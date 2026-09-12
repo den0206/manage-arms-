@@ -44,7 +44,8 @@ Open VSX の公開を実行して失敗した場合は、Workflowを停止して
 1. `browser-v<semver>` のタグで zip を組み立て、SHA-256 を記録する。
 2. Chrome Web Store へ提出する。
 3. Edge Add-ons へ同じ zip を提出する。
-4. 同じ zip と SHA-256 を GitHub Release に添付する。
+4. Brave は Chrome Web Store からの導入を案内し、Chrome と同じ zip を手動確認する。
+5. 同じ zip と SHA-256 を GitHub Release に添付する。
 
 ストア審査は `host_permissions` の用途説明を求められる。要求するのは github.com /
 skills.sh / agentsdirectory.dev の 3 つだけで、`<all_urls>` は要求しない。
