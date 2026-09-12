@@ -32,7 +32,7 @@ export const unportableName = (name: string): boolean =>
   || new TextEncoder().encode(name).length > 255
   || /[<>:"|?*]/.test(name)
   || /[\u0000-\u001f]/.test(name)
-  || /[. ]$/.test(name)                          // 末尾のピリオド・空白は Windows が落とす
+  || /[. ]$/.test(name)
   || RESERVED_DEVICES.test(name);
 
 /** 展開先に書けない名前を持つ最初のパス。全部書ける場合は `null`。 */
@@ -40,13 +40,7 @@ export const firstUnwritable = (paths: readonly string[]): string | null =>
   paths.find(path => path.split("/").some(unportableName)) ?? null;
 
 export type TarEntry = {
-  /** 検証済みのセグメント。先頭の `<repo>-<ref>/` はまだ付いている。 */
   readonly path: string[];
-  /**
-   * `link` は symlink と hardlink。**中身は返さない**。
-   * 取り出したいものの外にあるだけなら無視してよいので、拒否は呼び出し側が決める
-   * （リポジトリ直下の `CLAUDE.md` が symlink というだけで導入を諦めさせない）。
-   */
   readonly kind: "file" | "directory" | "link";
   readonly bytes: Uint8Array;
 };
@@ -60,7 +54,6 @@ const text = (block: Uint8Array, offset: number, length: number): string => {
   return decoder.decode(end < 0 ? raw : raw.subarray(0, end));
 };
 
-/** tar の数値は 8 進数の文字列。末尾に NUL や空白が付く。 */
 const octal = (block: Uint8Array, offset: number, length: number): number => {
   const value = parseInt(text(block, offset, length).trim(), 8);
   return Number.isFinite(value) ? value : 0;
@@ -73,7 +66,6 @@ class Reader {
   private done = false;
   constructor(private readonly source: ReadableStreamDefaultReader<Uint8Array>) {}
 
-  /** 足りなければ読み足す。末尾に達したら `null`。 */
   async take(length: number): Promise<Uint8Array | null> {
     while (this.buffer.length < length && !this.done) {
       const chunk = await this.source.read();
@@ -92,39 +84,40 @@ class Reader {
 
 export class ArchiveError extends Error {}
 
-// 変数に型注釈を置くと、呼び出しの後ろを TypeScript が到達不能と分かる。
 const fail: (message: string) => never = message => { throw new ArchiveError(message); };
 
-/**
- * gzip された tar を読む。`DecompressionStream` はブラウザにも Node にもある。
- *
- * 通常ファイル・ディレクトリ・リンクを返し、デバイスなどの特殊ファイルは拒否する。
- * リンクの中身は返さない。上限を超えたらその場で失敗させ、残りを読まない。
- */
 export async function* readTarGz(
   stream: ReadableStream<Uint8Array>,
   limits = { entries: ENTRY_LIMIT, single: SINGLE_FILE_LIMIT, total: EXTRACTED_SIZE_LIMIT },
 ): AsyncGenerator<TarEntry> {
-  // Node の型定義は DecompressionStream の writable を BufferSource で受ける。ここだけ合わせる。
   const gunzipped = stream.pipeThrough(
     new DecompressionStream("gzip") as never) as ReadableStream<Uint8Array>;
   const reader = new Reader(gunzipped.getReader());
   let entries = 0;
   let total = 0;
-  /** pax / GNU の長い名前は次のエントリに効く。 */
   let override: string | null = null;
+
+  const account = (size: number): void => {
+    entries += 1;
+    if (entries > limits.entries) fail("too many files in the archive");
+    if (size > limits.single) fail("an extracted file is too large");
+    total += size;
+    if (total > limits.total) fail("the extracted archive is too large");
+  };
 
   while (true) {
     const header = await reader.take(BLOCK);
-    if (header === null) return;                 // 終端ブロックが無くても黙って終える
+    if (header === null) return;
     if (isZeroBlock(header)) return;
 
     const flag = String.fromCharCode(header[156]);
     const size = octal(header, 124, 12);
     const padded = Math.ceil(size / BLOCK) * BLOCK;
 
-    // 長い名前を運ぶ補助エントリ。名前を覚えて本体へ持ち越す。
+    // PAX / GNU の補助エントリも外部入力であり、通常ファイルと同じ資源上限に数える。
+    // ここを数えないと、巨大な long-name / pax 本文だけでメモリ上限を迂回できる。
     if (flag === "L" || flag === "x" || flag === "X") {
+      account(size);
       const body = await reader.take(padded);
       if (body === null) fail("the archive ended in the middle of an entry");
       const raw = decoder.decode(body.subarray(0, size));
@@ -132,7 +125,12 @@ export async function* readTarGz(
         : (/(?:^|\n)\d+ path=([^\n]*)\n/.exec(raw)?.[1] ?? null);
       continue;
     }
-    if (flag === "g") { await reader.take(padded); continue; }   // 全体の既定値。使わない
+    if (flag === "g") {
+      account(size);
+      const body = await reader.take(padded);
+      if (body === null) fail("the archive ended in the middle of an entry");
+      continue;
+    }
 
     const prefix = text(header, 345, 155);
     const name = override ?? (prefix === "" ? text(header, 0, 100) : `${prefix}/${text(header, 0, 100)}`);
@@ -146,21 +144,23 @@ export async function* readTarGz(
     const path = safeSegments(name);
     if (path === null) fail("the archive escapes the extraction directory");
 
-    entries += 1;
-    if (entries > limits.entries) fail("too many files in the archive");
+    // directory / link は本文サイズが通常 0 だが、異常な入力でも上限を共通適用する。
+    account(size);
 
     if (isLink) {
-      await reader.take(padded);                 // リンクに中身は無いが、念のため読み飛ばす
+      const body = await reader.take(padded);
+      if (body === null) fail("the archive ended in the middle of an entry");
       yield { path, kind: "link", bytes: new Uint8Array(0) };
       continue;
     }
     if (flag === "5") {
+      if (padded > 0) {
+        const body = await reader.take(padded);
+        if (body === null) fail("the archive ended in the middle of an entry");
+      }
       yield { path, kind: "directory", bytes: new Uint8Array(0) };
       continue;
     }
-    if (size > limits.single) fail("an extracted file is too large");
-    total += size;
-    if (total > limits.total) fail("the extracted archive is too large");
 
     const body = await reader.take(padded);
     if (body === null) fail("the archive ended in the middle of an entry");
