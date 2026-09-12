@@ -7,6 +7,7 @@ import { pipeline } from "node:stream/promises";
 import { open as openZip, Entry, ZipFile } from "yauzl";
 import { KindId } from "../core/agent";
 import { AgentToolError } from "../core/errors";
+import { safeSegments } from "../core/archive";
 import { ENTRY_LIMIT, EXTRACTED_SIZE_LIMIT, PAGE_LIMIT, SINGLE_FILE_LIMIT, SIZE_LIMIT } from "../core/limits";
 import * as frontmatter from "./frontmatter";
 import { archiveUrl, GitHubSource } from "../core/github";
@@ -185,12 +186,10 @@ export function extract(archive: string, destination: string): Promise<void> {
   });
 }
 
-/** アーカイブ内のパスを展開先へ落とす。外へ出るものは null。 */
+/** アーカイブ内のパスを展開先へ落とす。外へ出るものは null。検証は core と共有する。 */
 export function safeJoin(root: string, entryName: string): string | null {
-  if (entryName.includes("\0")) return null;
-  const parts = entryName.split("/").filter(part => part !== "" && part !== ".");
-  if (parts.some(part => part === ".." || part.includes("\\") || part.includes(":"))) return null;
-  if (parts.length === 0) return null;
+  const parts = safeSegments(entryName);
+  if (parts === null) return null;
   const target = resolve(root, ...parts);
   return target === resolve(root) || target.startsWith(resolve(root) + sep) ? target : null;
 }
