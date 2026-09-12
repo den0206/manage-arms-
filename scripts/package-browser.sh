@@ -14,6 +14,7 @@ mkdir -p "$STAGE/browser"
 cp browser/manifest.json "$STAGE/"
 cp -R browser/_locales "$STAGE/_locales"
 cp browser/tab.html browser/tab.css "$STAGE/browser/"
+cp -R browser/icons "$STAGE/browser/icons"
 cp -R out/web/browser/. "$STAGE/browser/"
 cp -R out/web/core "$STAGE/core"
 

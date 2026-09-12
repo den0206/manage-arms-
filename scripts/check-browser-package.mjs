@@ -2,6 +2,7 @@
 // manifest と HTML が指すファイル、ESM の import 先、i18n のキーを突き合わせる。
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const root = process.argv[2];
 if (root === undefined) {
@@ -60,6 +61,32 @@ for (const file of walk(".").filter(path => path.endsWith(".html"))) {
   }
 }
 
+// --- 対応サイトと manifest の到達範囲 ---
+// `CATALOG_SITES` を増やしても manifest は自動では広がらない。ホストが揃っていないと、
+// 検知の判定だけ通って content script が入らない・取得が CORS で落ちる、が起きる。
+// 実サイトのテストは Node の fetch なので素通りし、ここでしか気づけない。
+// 読むのは出力元。staged の core/ には `type: module` の目印が無く、import すると
+// Node が毎回警告を出す。中身は cp しただけなので同じものである。
+const { CATALOG_SITES } = await import(pathToFileURL(resolve("out/web/core/github.js")).href);
+const has = (patterns, pattern) => patterns.includes(pattern);
+// `www.` 付きも要る。`toUrl` は `www.` を剥がして受けるので、利用者は www の URL を
+// 貼れるし、www のページも見る。manifest 側が素のホストだけだと、そこで検知だけが死ぬ。
+const missing = (patterns, host) => [
+  `https://${host}/*`,
+  `https://www.${host}/*`,
+].filter(pattern => !has(patterns, pattern) && !has(patterns, `https://*.${host}/*`));
+
+for (const site of CATALOG_SITES) {
+  for (const [field, patterns] of [
+    ["host_permissions", manifest.host_permissions ?? []],
+    ["content_scripts.matches", manifest.content_scripts.flatMap(entry => entry.matches)],
+  ]) {
+    for (const pattern of missing(patterns, site.host)) {
+      problems.push(`${field}: ${pattern} がありません（CATALOG_SITES に ${site.host} があります）`);
+    }
+  }
+}
+
 // --- i18n のキー ---
 const locales = readdirSync(join(root, "_locales"));
 const messages = Object.fromEntries(locales.map(locale =>
@@ -71,8 +98,10 @@ for (const match of readFileSync(join(root, "manifest.json"), "utf8").matchAll(/
 }
 for (const file of walk(".").filter(path => path.endsWith(".js") || path.endsWith(".html"))) {
   const body = readFileSync(join(root, file), "utf8");
-  for (const match of body.matchAll(/getMessage\(\s*"([^"]+)"/g)) used.add(match[1]);
-  for (const match of body.matchAll(/\bt\(\s*"([^"]+)"/g)) used.add(match[1]);
+  // リテラルがそのまま第 1 引数になっているものだけを拾う。`getMessage(cond ? a : b)` の
+  // `cond` 側の文字列を、文言キーと取り違えない。
+  for (const match of body.matchAll(/getMessage\(\s*"([^"]+)"\s*[,)]/g)) used.add(match[1]);
+  for (const match of body.matchAll(/\bt\(\s*"([^"]+)"\s*[,)]/g)) used.add(match[1]);
   for (const match of body.matchAll(/data-i18n="([^"]+)"/g)) used.add(match[1]);
 }
 for (const [locale, table] of Object.entries(messages)) {

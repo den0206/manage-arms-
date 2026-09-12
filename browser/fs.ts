@@ -1,7 +1,8 @@
 import { safeSegments } from "../core/archive.js";
 import { TreeFile } from "../core/hash.js";
+import { LEDGER_DIR } from "../core/ledger.js";
 import { RootState, rootStateOf } from "../core/placement.js";
-import { dropHandle, knownRoots, loadHandle, saveHandle } from "./store.js";
+import { dropHandle, loadHandle, saveHandle } from "./store.js";
 
 /**
  * File System Access API はハンドルから basename しか返さない。絶対パスは持てないので、
@@ -9,32 +10,21 @@ import { dropHandle, knownRoots, loadHandle, saveHandle } from "./store.js";
  */
 
 export class PickerError extends Error {
-  constructor(readonly kind: "cancelled" | "wrongFolder", readonly chosen?: string) {
+  constructor(
+    /** `unavailable` はブラウザがピッカーを出せない。Brave は既定で無効にしている。 */
+    readonly kind: "cancelled" | "wrongFolder" | "unavailable",
+    readonly chosen?: string,
+  ) {
     super(kind);
   }
 }
 
 /** 設定されているフォルダの状態。判定そのものは core の純粋関数に置く。 */
-export async function rootState(configDir: string): Promise<RootState> {
-  const saved = await loadHandle(configDir);
-  const legacy: string[] = [];
-  if (saved === undefined) {
-    // 旧版は `<configDir>/skills` のように下位フォルダも覚えていた。
-    for (const key of await knownRoots()) {
-      if (!key.startsWith(`${configDir}/`)) continue;
-      legacy.push((await loadHandle(key))?.name ?? key);
-    }
-  }
-  return rootStateOf(configDir, saved?.name ?? null, legacy);
-}
+export const rootState = async (configDir: string): Promise<RootState> =>
+  rootStateOf(configDir, (await loadHandle(configDir))?.name ?? null);
 
-/** 設定を取り消す。旧版が残した下位フォルダの記録もまとめて捨てる。 */
-export async function clearRoot(configDir: string): Promise<void> {
-  await dropHandle(configDir);
-  for (const key of await knownRoots()) {
-    if (key.startsWith(`${configDir}/`)) await dropHandle(key);
-  }
-}
+/** 設定を取り消す。 */
+export const clearRoot = (configDir: string): Promise<void> => dropHandle(configDir);
 
 /** 覚えているハンドルを使えるようにする。権限が切れていれば操作の中で訊き直す。 */
 async function revive(
@@ -50,45 +40,77 @@ async function revive(
 }
 
 /**
- * 置き場のハンドルを得る。`pick` が false ならピッカーを出さない（設定済みかの確認に使う）。
+ * 設定ディレクトリのハンドルを得る。`pick` が false ならピッカーを出さない
+ * （設定済みかの確認に使う）。
  *
  * 選んでもらうのは**エージェントの設定ディレクトリそのもの**に限る。`skills` のような
  * 下位のフォルダを受け取ると、`~/.claude/skills` を Cursor の設定として保存できてしまい、
  * 名前だけでは見分けられない。`skills` と `agents` は設定ディレクトリから辿る。
  */
-export async function placeHandle(
-  where: { configDir: string; sub: string }, pick: boolean,
+export async function configHandle(
+  configDir: string, pick: boolean,
   /** 覚えているものを使わず、必ずピッカーを開く。「選び直す」はこれを使う。 */
   force = false,
 ): Promise<FileSystemDirectoryHandle | null> {
   if (!force) {
-    const config = await revive(where.configDir, pick);
-    if (config !== null) return await config.getDirectoryHandle(where.sub, { create: true });
+    const config = await revive(configDir, pick);
+    if (config !== null) return config;
   }
   if (!pick) return null;
+
+  // Brave は File System Access API を既定で無効にしている。関数ごと無い場合があるので、
+  // 呼ぶ前に見る。押しても何も起きない、という状態を作らない。
+  if (typeof showDirectoryPicker !== "function") throw new PickerError("unavailable");
 
   let handle: FileSystemDirectoryHandle;
   try {
     // `startIn` は指定しない。ホームは指せず、Documents から始めても遠いだけ。
     // `id` を渡しておくと、2 回目からは前回の場所から開く。
     handle = await showDirectoryPicker({
-      id: where.configDir.replace(/[^\w]/g, "_"), mode: "readwrite",
+      id: configDir.replace(/[^\w]/g, "_"), mode: "readwrite",
     });
-  } catch {
-    throw new PickerError("cancelled");
+  } catch (error) {
+    // 利用者が閉じたのか、ブラウザが出さなかったのかを混ぜない。混ぜると
+    // 「押しても無反応」を黙って受け入れることになる。
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new PickerError("cancelled");
+    }
+    // 画面には案内だけを出す。原因の特定に要るので、生の失敗は console に残す。
+    console.error("Agent Tool: showDirectoryPicker", error);
+    throw new PickerError("unavailable");
   }
-  await dropHandle(`${where.configDir}/${where.sub}`);   // 旧版が残した下位フォルダの記録
   // 名前が違っても覚える。「いま何が設定されているか」を画面に出すため。
   // 書き込みには使わない（`revive` が名前を見て弾く）。
-  await saveHandle(where.configDir, handle);
-  if (handle.name !== where.configDir) throw new PickerError("wrongFolder", handle.name);
-  return await handle.getDirectoryHandle(where.sub, { create: true });
+  await saveHandle(configDir, handle);
+  if (handle.name !== configDir) throw new PickerError("wrongFolder", handle.name);
+  return handle;
+}
+
+/**
+ * 置き場のハンドルを得る。`create` が真のときだけ `skills` / `agents` を作る。
+ * 許可を貰うだけ・様子を見るだけの場面で、使うか分からないフォルダを作らない。
+ */
+export async function placeHandle(
+  where: { configDir: string; sub: string }, pick: boolean,
+  options: { force?: boolean; create?: boolean } = {},
+): Promise<FileSystemDirectoryHandle | null> {
+  const config = await configHandle(where.configDir, pick, options.force === true);
+  if (config === null) return null;
+  return await config
+    .getDirectoryHandle(where.sub, { create: options.create === true })
+    .catch(() => null);
 }
 
 /**
  * 隠しフォルダはピッカーに出ない。開く前に OS 別の手順を出す。
  * ピッカーの表示は拡張から操作できないので、助けられるのは文言だけ。
  */
+/** ピッカーが出せないときの案内。Brave だけ直し方が分かっているので分ける。 */
+export const pickerUnavailable = (): string => {
+  const key = "brave" in navigator ? "pickerUnavailableBrave" : "pickerUnavailable";
+  return chrome.i18n.getMessage(key);
+};
+
 export const pickerHint = (path: string): string => {
   const agent = navigator.userAgent;
   const key = agent.includes("Mac") ? "pickerIntroMac"
@@ -204,4 +226,19 @@ export async function removeEntry(
     throw new Error(`refusing to remove ${entry}`);
   }
   await root.removeEntry(segments[0], { recursive: isDirectory });
+}
+
+/**
+ * 台帳 1 件だけを消す。`.agent-tool/<name>.json` に限り、再帰削除はしない。
+ * 消し方をここに集めておくと、書き込み経路がこのファイルだけで数え切れる。
+ */
+export async function removeLedgerFile(
+  root: FileSystemDirectoryHandle, name: string,
+): Promise<void> {
+  const segments = safeSegments(name);
+  if (segments === null || segments.length !== 1 || segments[0].startsWith(".")) {
+    throw new Error(`refusing to remove ledger ${name}`);
+  }
+  const dir = await root.getDirectoryHandle(LEDGER_DIR);
+  await dir.removeEntry(`${segments[0]}.json`);
 }

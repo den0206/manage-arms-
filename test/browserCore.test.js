@@ -1,10 +1,10 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { kindOf, lead, proofUrls } = require("../out/core/detect.js");
+const { detectPage, kindOf, lead, proofUrls, verifiedPage } = require("../out/core/detect.js");
 const { placement, rootOf, splitRoot, targets, SHARED_CONFIG_DIR, CONFIG_DIRS } =
   require("../out/core/placement.js");
 const { decode, ledger, ledgerPath, LEDGER_DIR } = require("../out/core/ledger.js");
-const { add, find, isRemovable, MAX_BROWSER_COLLECTION_ENTRIES } =
+const { add, isRemovable, MAX_BROWSER_COLLECTION_ENTRIES } =
   require("../out/core/collection.js");
 const { treeHash } = require("../out/core/hash.js");
 
@@ -55,6 +55,27 @@ test("カタログはスキル名があるときだけ候補にする", () => {
   assert.equal(found.name, "grilling");
   assert.deepEqual(found.proofs, []);            // 実在確認は不要
   assert.equal(lead("https://skills.sh/owner/repo"), null);
+});
+
+test("content script の URL と JSON-LD から検知する", () => {
+  const found = detectPage("https://agentsdirectory.dev/skills/pdf", `
+    <script type="application/ld+json">{"codeRepository":"https://github.com/acme/tools/tree/main/skills/pdf"}</script>
+  `);
+  assert.deepEqual(found, {
+    url: "https://github.com/acme/tools/tree/main/skills/pdf",
+    source: { repo: "acme/tools", branch: "main", subdir: "skills/pdf", branchAmbiguous: true },
+    kind: "skill", name: "pdf", proofs: ["skills/pdf/SKILL.md"],
+  });
+});
+
+test("展開できないカタログ項目は検知しない", async () => {
+  const found = await verifiedPage("https://agentsdirectory.dev/skills/azure-rbac", `
+    <script type="application/ld+json">{"url":"https://skills.sh/microsoft/azure-skills/azure-rbac"}</script>
+  `, async candidate => {
+    assert.equal(candidate.name, "azure-rbac");
+    return false;
+  });
+  assert.equal(found, null);
 });
 
 test("対応外の URL とリポジトリのトップは拾わない", () => {
@@ -179,7 +200,7 @@ test("上限を超えたら古い順に捨てる", () => {
 
 test("実体ツリー hash が一致するときだけ削除を許す", () => {
   const list = [collected("pdf", 1)];
-  const entry = find(list, { name: "pdf", kind: "skill", agent: "claude", root: ".claude/skills" });
+  const entry = list[0];
   assert.equal(isRemovable(entry, "hash-pdf"), true);
   assert.equal(isRemovable(entry, "changed"), false);     // 手で書き換えられた
   assert.equal(isRemovable(undefined, "hash-pdf"), false); // 自分が入れたものではない
@@ -246,7 +267,7 @@ test("リポジトリ直下の SKILL.md は候補にしない", () => {
 
 // --- カタログの予約パス -------------------------------------------------
 
-const { catalog } = require("../out/core/github.js");
+const { catalog, fromJsonLd, needsPage, SUPPORTED_SITES } = require("../out/core/github.js");
 
 test("skills.sh の site は GitHub の取得元ではない", () => {
   // /site/<ドメイン>/<名前> は GitHub 以外が配っているもの。
@@ -258,6 +279,41 @@ test("www つきのカタログも読む", () => {
   const found = lead("https://www.skills.sh/vercel-labs/agent-skills/vercel-react-best-practices");
   assert.equal(found.source.repo, "vercel-labs/agent-skills");
   assert.equal(found.name, "vercel-react-best-practices");
+});
+
+test("対応サイトの複数 Tool を検知し、導入先を選べる", () => {
+  const fixtures = [
+    ["GitHub Skill", "https://github.com/acme/tools/tree/main/skills/pdf", "skill", "pdf"],
+    ["GitHub Skill", "https://github.com/acme/tools/tree/main/skills/release", "skill", "release"],
+    ["GitHub Subagent", "https://github.com/acme/tools/blob/main/agents/reviewer.md", "subagent", "reviewer"],
+    ["GitHub Subagent", "https://github.com/acme/tools/blob/main/subagents/planner.md", "subagent", "planner"],
+    ["skills.sh", "https://skills.sh/acme/tools/pdf", "skill", "pdf"],
+    ["skills.sh", "https://skills.sh/acme/tools/release", "skill", "release"],
+    ["Agents Directory", "https://agentsdirectory.dev/skills/pdf", "skill", "pdf"],
+    ["Agents Directory", "https://agentsdirectory.dev/skills/release", "skill", "release"],
+  ];
+
+  for (const [site, url, kind, name] of fixtures) {
+    const resolved = needsPage(url) === null ? url : fromJsonLd(
+      `<script type="application/ld+json">{"codeRepository":"https://github.com/acme/tools/tree/main/skills/${name}"}</script>`,
+    );
+    const found = lead(resolved);
+    assert.equal(found?.kind, kind, site);
+    assert.equal(found?.name, name, site);
+    // File System Access API へ渡す直前の導入リクエスト。テストは実ファイルを書かない。
+    const agent = targets(found.kind)[0];
+    const destination = placement(agent, found.kind, found.name, false);
+    assert.ok(destination !== null, site);
+    assert.equal(destination.entry, found.kind === "skill" ? name : `${name}.md`, site);
+  }
+});
+
+test("対応サイト一覧は GitHub とカタログ宣言から作る", () => {
+  assert.deepEqual(SUPPORTED_SITES, [
+    { label: "GitHub", url: "https://github.com/" },
+    { label: "skills.sh", url: "https://skills.sh/" },
+    { label: "Agents Directory", url: "https://agentsdirectory.dev/" },
+  ]);
 });
 
 // --- 設定されているフォルダの状態 ---------------------------------------
@@ -276,15 +332,4 @@ test("別のフォルダが設定されていれば、その名前を返す", ()
 
 test("何も無ければ未設定", () => {
   assert.deepEqual(rootStateOf(".cursor", null), { kind: "unset" });
-  assert.deepEqual(rootStateOf(".cursor", null, []), { kind: "unset" });
-});
-
-test("旧版が覚えた下位フォルダは設定し直してもらう", () => {
-  // `skills` はどのエージェントにもあるので、どこを指しているか確かめられない。
-  assert.deepEqual(rootStateOf(".cursor", null, ["skills"]),
-    { kind: "mismatch", chosen: "skills" });
-});
-
-test("設定ディレクトリの記録があれば旧版の記録は見ない", () => {
-  assert.deepEqual(rootStateOf(".cursor", ".cursor", ["skills"]), { kind: "ok" });
 });

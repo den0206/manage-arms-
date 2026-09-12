@@ -11,6 +11,19 @@
   "tabSettings": {
     "message": "設定"
   },
+  "tabSupportedSites": {
+    "message": "対応サイト"
+  },
+  "tabSupportedSitesLink": {
+    "message": "対応サイト",
+    "description": "tabUrlLabel の中に出るリンクの文言。見出しとは別に持つ（英語で大文字小文字が変わる）。"
+  },
+  "tabSupportedSitesText": {
+    "message": "対応サイトを開くと、Skill または Subagent を見つけられます。"
+  },
+  "close": {
+    "message": "閉じる"
+  },
   "kindSkill": {
     "message": "スキル"
   },
@@ -18,7 +31,8 @@
     "message": "サブエージェント"
   },
   "tabUrlLabel": {
-    "message": "GitHub か skills.sh のリンクを貼る"
+    "message": "{}のToolリンクを貼る",
+    "description": "URL 入力欄の見出し。{} が対応サイト一覧を開くリンクに置き換わる。"
   },
   "tabUrlPlaceholder": {
     "message": "https://github.com/owner/repo/tree/main/skills/pdf"
@@ -55,6 +69,10 @@
       }
     }
   },
+  "tabOpenCollection": {
+    "message": "一覧を表示",
+    "description": "導入完了の案内から、設定内の収集一覧を開くリンク。"
+  },
   "tabCollection": {
     "message": "ここから導入したもの"
   },
@@ -63,6 +81,10 @@
   },
   "tabVerify": {
     "message": "フォルダを確認"
+  },
+  "tabUnverified": {
+    "message": "未確認 — フォルダの許可が切れているため、すでに消えている可能性があります。",
+    "description": "収集一覧の行で、フォルダを読めず実態を確かめられないときに出す。"
   },
   "tabRemove": {
     "message": "削除"
@@ -88,9 +110,6 @@
   },
   "settingsTitle": {
     "message": "Agent Tool が書き込める場所を選ぶ"
-  },
-  "settingsText": {
-    "message": "エージェントごとに 1 回ずつフォルダを選びます。エージェントのフォルダそのものを選ぶとスキルとサブエージェントの両方に使えます。スキルのフォルダだけでも構いません。選んだフォルダの外には書き込みません。"
   },
   "settingsChoose": {
     "message": "フォルダを選ぶ"
@@ -153,6 +172,14 @@
       }
     }
   },
+  "pickerUnavailable": {
+    "message": "このブラウザがフォルダの選択画面を開きませんでした。File System Access API が無効になっているようです。これが無いと、拡張はどこにも書き込めません。",
+    "description": "showDirectoryPicker が無い、または開かなかったときに出す。"
+  },
+  "pickerUnavailableBrave": {
+    "message": "Brave は File System Access API を既定で無効にしています。アドレスバーに brave://flags と入力し（リンクからは開けません）、「File System」で検索して Enabled にしてから Brave を再起動してください。この項目が無い版では有効にできないため、Chrome か Edge をお使いください。",
+    "description": "同じ状況で、Brave の直し方を添える。"
+  },
   "permissionLost": {
     "message": "フォルダの許可が切れました。もう一度お試しください。"
   },
@@ -177,6 +204,15 @@
     "message": "$PATH$ は既に埋まっていて、この拡張からは開けません。Agent Tool の IDE 拡張が張ったリンクである可能性が高く、その場合はすでに入っています。入れ直すなら IDE 拡張から削除するか、別の導入先を選んでください。",
     "placeholders": {
       "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "errorUnusableName": {
+    "message": "$NAME$ はすべての OS でファイル名に使えないため（Windows が受け付けません）、導入しませんでした。ディスク上は何も変えていません。",
+    "description": "取得物に、ファイルシステムが受け付けない名前が含まれていたときに出す。",
+    "placeholders": {
+      "name": {
         "content": "$1"
       }
     }

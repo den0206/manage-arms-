@@ -16,6 +16,29 @@ export function safeSegments(entryName: string): string[] | null {
   return parts.length === 0 ? null : parts;
 }
 
+/** Windows の予約デバイス名。拡張子が付いていても予約のまま（`aux.md` も作れない）。 */
+const RESERVED_DEVICES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i;
+
+/**
+ * 3 OS のどこかで**ファイル名として作れない**名前か。`safeSegments` とは目的が違う。
+ * あちらは展開先から脱出させないための検査で、こちらは書けるかどうかである。
+ * macOS では作れて Windows では作れない名前があるので、判定は OS に依存させない。
+ *
+ * 検知だけ通って導入で落ちるのを防ぐため、**消したり書いたりする前に**通す。
+ * 途中で落ちると、旧実体を消した後で新しいものも書けていない状態が残る。
+ */
+export const unportableName = (name: string): boolean =>
+  name === ""
+  || new TextEncoder().encode(name).length > 255
+  || /[<>:"|?*]/.test(name)
+  || /[\u0000-\u001f]/.test(name)
+  || /[. ]$/.test(name)                          // 末尾のピリオド・空白は Windows が落とす
+  || RESERVED_DEVICES.test(name);
+
+/** 展開先に書けない名前を持つ最初のパス。全部書ける場合は `null`。 */
+export const firstUnwritable = (paths: readonly string[]): string | null =>
+  paths.find(path => path.split("/").some(unportableName)) ?? null;
+
 export type TarEntry = {
   /** 検証済みのセグメント。先頭の `<repo>-<ref>/` はまだ付いている。 */
   readonly path: string[];

@@ -11,6 +11,19 @@
   "tabSettings": {
     "message": "Settings"
   },
+  "tabSupportedSites": {
+    "message": "Supported sites"
+  },
+  "tabSupportedSitesLink": {
+    "message": "supported site",
+    "description": "Inline link text inside tabUrlLabel. Lower case — it sits mid-sentence, unlike the dialog title."
+  },
+  "tabSupportedSitesText": {
+    "message": "Open a supported site to find a Skill or Subagent."
+  },
+  "close": {
+    "message": "Close"
+  },
   "kindSkill": {
     "message": "Skill"
   },
@@ -18,7 +31,8 @@
     "message": "Subagent"
   },
   "tabUrlLabel": {
-    "message": "Paste a GitHub or skills.sh link"
+    "message": "Paste a Tool link from a {}",
+    "description": "Label above the URL field. {} is replaced with a link that lists the supported sites."
   },
   "tabUrlPlaceholder": {
     "message": "https://github.com/owner/repo/tree/main/skills/pdf"
@@ -55,6 +69,10 @@
       }
     }
   },
+  "tabOpenCollection": {
+    "message": "Show the list",
+    "description": "Link on the install confirmation that opens the installed-here list in settings."
+  },
   "tabCollection": {
     "message": "Installed here"
   },
@@ -63,6 +81,10 @@
   },
   "tabVerify": {
     "message": "Check folders"
+  },
+  "tabUnverified": {
+    "message": "Not checked — folder access has expired, so this may already be gone.",
+    "description": "Shown on a collected row whose folder cannot be read."
   },
   "tabRemove": {
     "message": "Remove"
@@ -88,9 +110,6 @@
   },
   "settingsTitle": {
     "message": "Choose where Agent Tool can write"
-  },
-  "settingsText": {
-    "message": "Pick each agent's folder once. Choose the agent folder itself to cover both skills and subagents, or just the skills folder. Agent Tool writes only inside what you pick."
   },
   "settingsChoose": {
     "message": "Choose folder"
@@ -153,6 +172,14 @@
       }
     }
   },
+  "pickerUnavailable": {
+    "message": "This browser did not open the folder picker. The File System Access API looks turned off, and the extension cannot write anywhere without it.",
+    "description": "Shown when showDirectoryPicker is missing or refuses to open."
+  },
+  "pickerUnavailableBrave": {
+    "message": "Brave turns the File System Access API off by default. Type brave://flags in the address bar (links to it do not open), search for \"File System\", set that flag to Enabled, and relaunch Brave. If your version has no such flag, use Chrome or Edge instead.",
+    "description": "Same, with the Brave-specific fix."
+  },
   "permissionLost": {
     "message": "Folder access expired. Try again to grant it."
   },
@@ -177,6 +204,15 @@
     "message": "$PATH$ is already taken by something this extension cannot open — most likely a link made by the Agent Tool IDE extension, which means you already have it. To reinstall, remove it from the IDE extension first, or pick another destination.",
     "placeholders": {
       "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "errorUnusableName": {
+    "message": "$NAME$ cannot be used as a file name on every system (Windows rejects it), so this was not installed. Nothing on disk was changed.",
+    "description": "Shown when an archive contains a name the file system cannot take.",
+    "placeholders": {
+      "name": {
         "content": "$1"
       }
     }

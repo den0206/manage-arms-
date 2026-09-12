@@ -14,6 +14,11 @@ interface FileSystemDirectoryHandle {
   entries(): AsyncIterableIterator<[string, FileSystemHandle & (FileSystemDirectoryHandle | FileSystemFileHandle)]>;
 }
 
+interface Navigator {
+  /** Brave だけが持つ。ピッカーを出せないときの案内を分けるのに使う。 */
+  readonly brave?: { isBrave(): Promise<boolean> };
+}
+
 declare function showDirectoryPicker(options?: {
   id?: string;
   mode?: FileSystemPermissionMode;

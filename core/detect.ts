@@ -1,5 +1,5 @@
 import { HEAD_BYTES, parse } from "./frontmatter.js";
-import { catalog, components, GitHubSource, parseUrl } from "./github.js";
+import { catalog, components, fromJsonLd, GitHubSource, needsPage, parseUrl } from "./github.js";
 
 /**
  * ブラウザ拡張が扱う種別。MCP は URL に手がかりが無く、Plugin は CLI への登録が必要なので
@@ -78,6 +78,20 @@ export function lead(raw: string): ToolLead | null {
     name: directory[directory.length - 1] ?? source.repo,
     proofs: [parts.isFile ? file : `${file}/SKILL.md`],
   };
+}
+
+/** content script が渡した URL と JSON-LD から、ブラウザ表示用の候補を作る。 */
+export function detectPage(url: string, jsonLd = ""): ToolLead | null {
+  const resolved = needsPage(url) === null ? url : fromJsonLd(jsonLd);
+  return resolved === null ? null : lead(resolved);
+}
+
+/** カタログは実体パスを約束しないため、展開確認に通った候補だけを返す。 */
+export async function verifiedPage(
+  url: string, jsonLd: string, canExtract: (found: ToolLead) => Promise<boolean>,
+): Promise<ToolLead | null> {
+  const found = detectPage(url, jsonLd);
+  return found === null || (found.proofs.length === 0 && !await canExtract(found)) ? null : found;
 }
 
 /**
