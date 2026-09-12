@@ -177,7 +177,7 @@
     "description": "Shown when showDirectoryPicker is missing or refuses to open."
   },
   "pickerUnavailableBrave": {
-    "message": "Brave turns the File System Access API off by default. Type brave://flags in the address bar (links to it do not open), search for \"File System\", set that flag to Enabled, and relaunch Brave. If your version has no such flag, use Chrome or Edge instead.",
+    "message": "Brave turns the File System Access API off by default. Type brave://flags in the address bar (links to it do not open), search for “File System”, set that flag to Enabled, and relaunch Brave. If your version has no such flag, use Chrome or Edge instead.",
     "description": "Same, with the Brave-specific fix."
   },
   "permissionLost": {
