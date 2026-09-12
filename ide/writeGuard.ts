@@ -5,6 +5,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { BUNDLED_SKILL_ROOTS, KindId } from "../core/agent";
+import { LEDGER_DIR } from "../core/ledger";
 import { SKILL_SOURCES, SUBAGENT_SOURCES } from "./source";
 import { agentStore, disabledAgentStore, Env, managedRoots } from "./env";
 import { AgentToolError } from "../core/errors";
@@ -310,6 +311,38 @@ export function isManagedLink(path: string, target: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * ブラウザ拡張が残した取得元の台帳（セキュリティ要件 §2.2.2）。
+ * 消してよいのは、走査ルート直下の `.agent-tool/<name>.json` で、
+ * 同じルートに実体（`<name>/` か `<name>.md`）があるものだけとする。
+ */
+export function assertLedger(path: string, root: string, env: Env): void {
+  assertReadable(env);
+  const target = resolve(path);
+  const name = basename(target, ".json");
+
+  if (extname(target) !== ".json" || !isValidName(name)) {
+    throw new AgentToolError("WRITE_GUARD_DENIED", `${target} is not a source ledger`);
+  }
+  if (!isSame(dirname(target), join(root, LEDGER_DIR))) {
+    throw new AgentToolError("WRITE_GUARD_DENIED", `${target} is not in ${LEDGER_DIR}`);
+  }
+  // ルートまでの経路がすり替えられていないこと。台帳だけを消すので anchor はホーム。
+  assertSafeCreation(target, root, env.home);
+  if (!existsSync(join(root, name)) && !existsSync(join(root, `${name}.md`))) {
+    throw new AgentToolError("NOT_FOUND", `${name} has no artifact next to its ledger`);
+  }
+}
+
+/**
+ * 台帳 1 件だけを消す。指す実体には触れず、`.agent-tool` ごとの再帰削除もしない。
+ * 取り込みで消えるのは台帳だけである。
+ */
+export function removeLedger(path: string, root: string, env: Env): void {
+  assertLedger(path, root, env);
+  unlinkSync(resolve(path));
 }
 
 /** リンクだけを外す。実体は消さない。 */

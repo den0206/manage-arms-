@@ -251,6 +251,7 @@ Bearer <value>        → Bearer [REDACTED]
     "https://github.com/*",
     "https://skills.sh/*",
     "https://agentsdirectory.dev/*",
+    "https://api.github.com/*",
     "https://raw.githubusercontent.com/*",
     "https://codeload.github.com/*"
   ],
@@ -258,14 +259,18 @@ Bearer <value>        → Bearer [REDACTED]
 }
 ```
 
-- `<all_urls>` を要求しない。検知は上記 3 サイトだけで動く。
-- 取得のために `raw.githubusercontent.com` と `codeload.github.com` への通信を行う。
+- `<all_urls>` を要求しない。検知は github.com / skills.sh / agentsdirectory.dev だけで動く。
+- 取得のために `raw.githubusercontent.com`（実在確認）、`api.github.com`（commit SHA）、
+  `codeload.github.com`（アーカイブ）へ通信する。IDE 拡張と同じ公開エンドポイントだけを使う。
+- commit SHA を台帳に載せないと、IDE 拡張が取り込んだ直後に全件が「更新あり」に見える
+  （`inventory.ts` の `hasUpdate` は `latestSha !== entry.sha` で判定する）。既定ブランチ名は
+  推測せず、`HEAD` を使う。
 - 閲覧中の URL を外部サービスへ送らない。実在確認に投げるのは GitHub のパスだけである。
 - テレメトリは一切収集しない。
 
 ### 10.3 書き込みと削除
 
-- 作成前に `assertValidName`（`core/`）を通す。zip の各エントリにも同じ検証を適用する。
+- 作成前に `assertValidName`（`core/`）を通す。tar の各エントリにも同じ検証を適用する。
 - 書く直前に同名の実体を確認し、あれば上書きの確認を求める。記録ではなく実態を見る。
 - 削除前に収集一覧の実体ツリー SHA-256 を再計算し、一致する場合だけ削除する。手動変更・
   IDE 管理下への移行を含め、一致しなければ何も削除しない。

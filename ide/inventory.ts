@@ -4,7 +4,8 @@ import * as mcp from "./mcpScanner";
 import { MCPScope, summary as mcpSummary } from "./mcpServer";
 import * as plugins from "./pluginScanner";
 import { projectSkillRoots, projectSubagentRoot } from "./projectScan";
-import { Entry, load, Registry } from "./registry";
+import { Entry, load, Registry, update } from "./registry";
+import { absorb as absorbLedgers, key as ledgerKey, prune, scan as scanLedgers } from "./ledger";
 import { isLoadable, scanSkillRoot, scanSkills, scanSubagentRoot, scanSubagents, Skill } from "./skillScanner";
 
 export type InventoryItem = {
@@ -114,9 +115,15 @@ function projectItems(project: string, registry: Registry): InventoryItem[] {
 
 export async function inventory(params: {
   env: Env; projectPath: string | null; run?: Run; user?: boolean;
+  /** 未信頼ワークスペースと Remote では false。台帳の取り込みと entry の除去を行わない。 */
+  writable?: boolean;
 }): Promise<{ items: InventoryItem[]; issues: string[] }> {
   const { env, projectPath, run } = params;
   const includeUser = params.user !== false;
+  const writable = params.writable === true;
+  // 取り込みは registry を書くので、先に済ませてから一覧を組む
+  // （この走査の結果に managed として反映される）。
+  if (writable) await absorb(env);
   const registry = load(env);
   const issues: string[] = [];
 
@@ -156,11 +163,28 @@ export async function inventory(params: {
       hasUpdate: false, pinned: false, summary: `${scope} · ${mcpSummary(server)}`, mcpScope: scope,
     }));
 
-  return {
-    items: [
-      ...(includeUser ? [...userSkills(env, registry), ...userSubagents(env, registry), ...mcpItems] : []),
-      ...pluginItems, ...projectItemList, ...projectMcp,
-    ],
-    issues,
-  };
+  const items = [
+    ...(includeUser ? [...userSkills(env, registry), ...userSubagents(env, registry), ...mcpItems] : []),
+    ...pluginItems, ...projectItemList, ...projectMcp,
+  ];
+
+  // 実体を失った entry を落とす。走査できたルートの分だけを対象にする。
+  if (writable) {
+    const seen = new Set(items
+      .filter(item => item.kind === "skill" || item.kind === "subagent")
+      .map(item => ledgerKey(item.name, item.kind,
+        item.scope === "project" && projectPath !== null ? projectPath : undefined)));
+    await update(env, registry => {
+      prune(registry, { seen, scannedUser: includeUser, scannedProject: projectPath });
+    });
+  }
+
+  return { items, issues };
+}
+
+/** 台帳を取り込む。1 件も無ければ registry を開かない。 */
+async function absorb(env: Env): Promise<void> {
+  const found = scanLedgers(env);
+  if (found.length === 0) return;
+  await update(env, registry => { absorbLedgers(env, registry, found); });
 }

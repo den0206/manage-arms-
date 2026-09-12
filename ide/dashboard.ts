@@ -20,6 +20,11 @@ export type DashboardItem = {
   mcpScope?: 'user' | 'project' | 'local';
 };
 
+/** 書き込みを拒む理由。空文字なら書ける。表示と可否の判定を 1 か所にする。 */
+const readOnlyReason = (): '' | 'untrusted' | 'remote' =>
+  !vscode.workspace.isTrusted ? 'untrusted'
+    : vscode.env.remoteName !== undefined ? 'remote' : '';
+
 export class DashboardProvider
   implements vscode.WebviewViewProvider, vscode.Disposable
 {
@@ -114,6 +119,8 @@ export class DashboardProvider
       const {items, issues} = await agentTool.inventory({
         storagePath: this.storagePath,
         projectPath: folder,
+        // 未信頼・Remote では台帳の取り込みも entry の除去も行わない。
+        writable: readOnlyReason() === '',
       });
       // 待っている間に View が隠れたら、解放したはずの状態を書き戻さない。
       if (!this.view?.visible) return;
@@ -276,8 +283,7 @@ export class DashboardProvider
       type: 'inventory', items: annotated, projectName, issues, error,
       projects: this.knownProjects, environment: this.environment ?? [],
       // 書き込みを拒む理由は、操作して初めて分かるのでは遅い。一覧に出しておく。
-      readOnly: !vscode.workspace.isTrusted ? 'untrusted'
-        : vscode.env.remoteName !== undefined ? 'remote' : '',
+      readOnly: readOnlyReason(),
     });
   }
 }
