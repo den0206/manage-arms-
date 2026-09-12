@@ -47,7 +47,7 @@ Node.js の型検査・テスト・不変条件検査を 3 OS で実行する。
 
 ## D-10. ブラウザ拡張の位置づけ
 
-Chrome / Edge 向けの拡張を同じリポジトリで提供する。IDE 拡張とは独立して動作し、
+Chrome / Edge / Brave 向けの拡張を同じリポジトリで提供する。IDE 拡張とは独立して動作し、
 ブラウザ拡張だけで検知から導入まで完結する。IDE 拡張の導入も起動も前提にしない。
 
 localhost ブリッジと native messaging host は採らない。前者は IDE 拡張が待受主体になるため
@@ -105,6 +105,10 @@ IDE 拡張は、走査できたルートに属する entry だけを実体と照
 除く。走査できなかったルート（開いていないプロジェクト）の entry は残す。project スコープの
 entry を巻き込んで消さないための条件である。
 
+読めなかったルートが 1 つでもあれば除去は行わない。走査は「無い」も「読めない」も空として
+返すので、区別せずに除くと、実体が残っているのに `pinned` / `disabled` / 取得元を失う。
+除去は元に戻せないため、残しすぎる側へ倒す。
+
 ## D-16. ブラウザ拡張の検知
 
 `host_permissions` は検知用の github.com / skills.sh / agentsdirectory.dev と、取得用の
@@ -112,7 +116,15 @@ raw.githubusercontent.com / codeload.github.com に限る。content script は�
 だけで、ページへ UI を挿入しない。
 
 検知時は `raw.githubusercontent.com` へ実在確認し、成功したら service worker が popup window を
-開く。自動表示はオンボーディングで有効にする既定 ON の設定とし、同じタブ・同じ候補には
+開く。カタログ候補だけは実在確認では足りず（実体パスを約束しない）アーカイブを 1 本落として
+展開できるかを見るが、これは**他の判定を全部通ったものにだけ**行う。導入済みのものを
+見るたびに数 MB 落とさないよう、結果は URL 単位で service worker のメモリに持つ。覚えるのは
+答えが出たときだけで、取得に失敗しただけのものは覚えない。
+
+「今はしない」は覚えない。断るのはその表示に対してであって、そのページに対してではない。
+覚えると解除条件が「service worker が停止するまで」という拡張の都合になり、利用者からは
+いつ戻るのか決まらない。同じページをもう一度開けば、もう一度出す。導入済みかどうかは
+収集一覧（IndexedDB）が持っているので、service worker が別に覚える必要も無い。自動表示はオンボーディングで有効にする既定 ON の設定とし、同じタブ・同じ候補には
 セッション中 1 回だけ開く。すでに popup window があれば新規作成せず、その候補を表示して前面へ出す。
 閲覧中の URL は外部へ送らない。
 URL だけで取得元が決まらない agentsdirectory.dev は、開いているページの JSON-LD を DOM から
@@ -120,10 +132,9 @@ URL だけで取得元が決まらない agentsdirectory.dev は、開いてい�
 
 ## D-17. ブラウザ拡張の画面
 
-添付画像のような UI は `chrome.windows.create({ type: 'popup' })` で開く extension page とする。
-toolbar action、初回オンボーディング、検知のいずれも同じ window を作成または再利用する。action popup
-はフォーカスを失うと閉じるため使わない。popup window は導入中も残るので、取得と展開をそこで行い
-MV3 service worker のアイドル停止に依存しない。
+toolbar action の popup を extension page とする。検知で開けない環境ではバッジだけを出し、
+利用者が toolbar action から開けるようにする。設定と `Supported sites` は同じ popup 内で切り替え、
+後者は native dialog で GitHub と対応カタログへのリンクを表示する。別ウィンドウは作らない。
 
 ## D-18. リポジトリ構成と配布
 
@@ -131,4 +142,5 @@ MV3 service worker のアイドル停止に依存しない。
 `browser/manifest.json` を別に持つ。
 
 版は拡張ごとに独立させ、タグの接頭辞（`ide-v*` / `browser-v*`）でリリースを分岐する。片方の
-修正でもう片方をストア審査に出さないための分離である。配布は Chrome Web Store と Edge Add-ons。
+修正でもう片方をストア審査に出さないための分離である。配布は Chrome Web Store と Edge Add-ons で、
+Brave は Chrome Web Store からの導入を案内する。

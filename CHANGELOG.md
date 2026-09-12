@@ -10,12 +10,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Tools installed by the browser extension are picked up by the IDE extension on its next scan, so they can be removed, disabled, and updated from the Dashboard like anything else.
 - Registry entries whose files are gone are dropped on the next scan, so the list no longer shows tools that were deleted outside Agent Tool.
-- A browser extension for Chrome and Edge that spots skills and subagents while you browse GitHub, skills.sh, and agentsdirectory.dev, and installs them into Claude Code, Cursor, or Codex. It writes only to folders you pick, and works without the IDE extension installed.
+- A browser extension for Chrome, Edge, and Brave that spots skills and subagents while you browse GitHub, skills.sh, and agentsdirectory.dev, and installs them into Claude Code, Cursor, or Codex. It writes only to folders you pick, and works without the IDE extension installed.
+- A Supported sites dialog in the browser extension with links to GitHub and every supported catalog.
+
+### Fixed
+
+- Choosing a folder in Brave reported what went wrong instead of doing nothing: Brave turns the File System Access API off by default, and the extension now says so and walks through enabling it in brave://flags.
+- The "Installed here" list drops entries that were removed from the IDE extension. It could not read the folder to check, so it kept showing them.
 
 ## [0.1.2] — 2026-09-12
 
 ### Changed
 
+- Installing stops before anything is deleted when the download contains a name no file system can take (Windows device names, `<>:"|?*`, trailing dots), instead of failing halfway through and leaving neither the old nor the new version.
+- Registry entries are kept, not dropped, when a scanned folder cannot be read, so a temporary permission or sync problem no longer loses pinned and disabled state. The unreadable folder is reported instead.
+- Installing over an existing Skill now replaces it instead of writing on top of it, so files that only existed in the previous version no longer linger. The old copy is removed only after the new one has been fetched.
 - Dashboard rows now show an "Updates available" marker, so it is clear which tools the update count refers to.
 - Clicking the "Updates available" count filters the list down to the tools that have an update; clicking it again clears the filter.
 - The Dashboard shows a loading indicator until the first scan finishes, instead of looking like an empty or failed list.

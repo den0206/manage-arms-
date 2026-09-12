@@ -28,7 +28,7 @@ Agent Tool の判断では `docs/agent-tool-*.md` を優先する。仕様を複
 - サブプロセスの CLI は持たない。外部コマンドはプロセス一覧取得と PATH 解決だけに限る。
 - 走査・判定・書き込み・WriteGuard は `ide/` のモジュールが担当する。
 - `core/` は OS にもブラウザにも依存しない判定と取得だけを置く。MCP と Plugin は上げない。
-- ブラウザ拡張は Chrome / Edge 対象。書き込みは File System Access API だけで行い、
+- ブラウザ拡張は Chrome / Edge / Brave 対象。書き込みは File System Access API だけで行い、
   扱うのは Skill と Subagent に限る。IDE 拡張の導入も起動も前提にしない。
 - OS 分岐は `process.platform` で行い、リンクは macOS / Linux が symlink、Windows が junction / hardlink。
 

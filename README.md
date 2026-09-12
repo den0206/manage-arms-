@@ -28,6 +28,7 @@ Agent Tool keeps the resources used by your coding agents discoverable from one 
 - Install Claude Code and Codex Plugins, including Plugins in GitHub subdirectories.
 - Preview descriptions, locations, scopes, enabled state, and available updates.
 - Work across user and project resources without copying managed files.
+- Install Skills and Subagents straight from the browser with the companion Chrome/Edge extension.
 - Run on macOS, Linux, and Windows.
 
 ## Requirements
@@ -57,7 +58,17 @@ Paste a URL from any of these into the extension's URL field.
 | [skills.sh](https://skills.sh/)                  | `https://skills.sh/anthropics/skills/frontend-design` | From the URL — `owner/repo` is part of the path.                                                |
 | [Agents Directory](https://agentsdirectory.dev/) | `https://agentsdirectory.dev/skills/frontend-design/` | The page is read once, and only its schema.org JSON-LD metadata is used to find the repository. |
 
-Sites are declared in `CATALOG_SITES` in `core/github.ts`; adding or removing one is a single entry. The page HTML is never scraped — a site whose URL does not carry `owner/repo` must publish a JSON-LD `codeRepository` or `url`.
+Sites are declared in `CATALOG_SITES` in `core/github.ts`, which both extensions read, so a new site reaches both at once. The browser extension also needs the host in its manifest. The page HTML is never scraped — a site whose URL does not carry `owner/repo` must publish a JSON-LD `codeRepository` or `url`.
+
+## Browser extension
+
+A companion extension for Chrome and Edge spots Skills and Subagents while you browse the supported sources above and installs them without leaving the page. It works on its own — the Cursor extension is not required.
+
+- It writes only into folders you pick yourself, through the File System Access API. Pick an agent's config directory (`~/.claude`, `~/.cursor`, `~/.codex`, or the shared `~/.agents`) once, and Skills and Subagents are placed under it.
+- Pages you visit are never stored. Only the directory handles, the list of what it installed, and the auto-open setting are kept.
+- It records where each tool came from next to the files it wrote. If you also use the Cursor extension, it picks those up on its next scan, so the tool can be removed, disabled, and updated from the dashboard like anything else.
+
+Build it with `npm run package:browser`. That produces `vsix/agent-tool-browser.zip` for the stores, and `vsix/browser/` which you can load through **Load unpacked** on `chrome://extensions`.
 
 ## Usage
 

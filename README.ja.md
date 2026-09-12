@@ -28,6 +28,7 @@ Agent Toolは、AIコーディングエージェントのSkill、Subagent、MCP�
 - GitHubサブディレクトリ内のPluginを含むClaude Code / Codex Pluginの導入
 - 説明、場所、スコープ、有効状態、更新の確認
 - 管理対象ファイルをコピーせず、ユーザー領域とプロジェクト領域を管理
+- Chrome / Edge の拡張から、ブラウザで見つけた Skill と Subagent をそのまま導入
 - macOS / Linux / Windowsで動作
 
 ## 必要環境
@@ -57,7 +58,17 @@ code --install-extension agent-tool-X.Y.Z.vsix
 | [skills.sh](https://skills.sh/)                  | `https://skills.sh/anthropics/skills/frontend-design` | URLから決まります（パスに`owner/repo`を含みます）。                            |
 | [Agents Directory](https://agentsdirectory.dev/) | `https://agentsdirectory.dev/skills/frontend-design/` | ページを1回読み、schema.orgのJSON-LDメタデータだけからリポジトリを特定します。 |
 
-サイトは`core/github.ts`の`CATALOG_SITES`で宣言し、追加・削除は1エントリで済みます。ページのHTMLは走査しません。URLに`owner/repo`を含まないサイトは、JSON-LDの`codeRepository`または`url`を公開している必要があります。
+サイトは`core/github.ts`の`CATALOG_SITES`で宣言します。両方の拡張がここを読むので、1エントリで両方に届きます。ブラウザ拡張はこれに加えてmanifestへホストを足す必要があります。ページのHTMLは走査しません。URLに`owner/repo`を含まないサイトは、JSON-LDの`codeRepository`または`url`を公開している必要があります。
+
+## ブラウザ拡張
+
+Chrome と Edge 向けの拡張が、上の対応サイトを見ているあいだに Skill と Subagent を見つけて、ページを離れずに導入します。単体で動くので、Cursor 拡張は必要ありません。
+
+- 書き込むのは利用者が自分で選んだフォルダの中だけで、File System Access API を使います。エージェントの設定ディレクトリ（`~/.claude`・`~/.cursor`・`~/.codex`・共有の `~/.agents`）を一度選べば、Skill と Subagent はその下へ置かれます。
+- 閲覧した URL は保存しません。持つのはディレクトリハンドル、導入したものの一覧、自動表示の設定だけです。
+- 取得元は書き出したファイルの隣に記録します。Cursor 拡張も使っている場合は次回の走査で取り込まれ、他と同じようにダッシュボードから削除・無効化・更新できます。
+
+`npm run package:browser` で組み立てます。ストア提出用の `vsix/agent-tool-browser.zip` と、`chrome://extensions` の「パッケージ化されていない拡張機能を読み込む」で読める `vsix/browser/` ができます。
 
 ## 使い方
 

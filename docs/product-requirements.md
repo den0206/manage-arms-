@@ -6,7 +6,7 @@ Cursor 拡張と、Skill と Subagent の検知・導入を担うブラウザ拡
 | 項目 | IDE 拡張 | ブラウザ拡張 |
 |---|---|---|
 | 識別子 | `agent-tool` | `browser/manifest.json` |
-| 対象 | Cursor / VS Code | Chrome / Edge |
+| 対象 | Cursor / VS Code | Chrome / Edge / Brave |
 | 対象 OS | macOS / Linux / Windows | 同左 |
 | 実装 | TypeScript | TypeScript |
 | 永続メタデータ | `globalStorageUri/registry.json` | IndexedDB のディレクトリハンドル、収集一覧、自動表示設定 |
@@ -26,10 +26,12 @@ Cursor 拡張と、Skill と Subagent の検知・導入を担うブラウザ拡
 
 - 初回オンボーディングで利用する Agent の導入先を一度だけ許可する。
 - 対応サイトの閲覧中に、そのページが Skill / Subagent なら検知して popup window を開く。
+- カタログ由来の候補は、GitHub アーカイブから実体を抽出できることを確認してから検知する。
 - 貼り付けた URL を検知と同じ判定で解析する。
 - 導入先のエージェントを選び、File System Access API で実体を書き込む。
 - 自分が入れたものを削除する。
 - 導入したものをブラウザ内の収集一覧に保持する。
+- `Supported sites` から GitHub と対応カタログを開ける。
 
 MCP と Plugin は扱わない。ローカルの導入済み一覧も表示しない。スコープはユーザー全体だけとする。
 
@@ -46,4 +48,4 @@ MCP と Plugin は扱わない。ローカルの導入済み一覧も表示し�
 - `npm run typecheck`、`npm test`、不変条件検査、リリース検査が通る。
 - Linux、macOS、Windows で型検査とテストが通る。
 - Cursor Stable の E2E と VSIX の 20 MB 上限を確認する。
-- ブラウザ拡張は Chrome / Edge で検知から導入までを実機確認する。
+- ブラウザ拡張は Chrome / Edge / Brave で検知から導入までを実機確認する。
