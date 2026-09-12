@@ -1,0 +1,12 @@
+/**
+ * 取得と展開の上限。IDE 拡張とブラウザ拡張で同じ値を使う。
+ * 緩めるのは、実測で不足が確認され、新しい上限と回収経路をテストできる場合だけにする。
+ */
+
+/** monorepo のアーカイブは subdir が 20 KB でも数百 MB になり得る。 */
+export const SIZE_LIMIT = 50 * 1024 * 1024;
+export const EXTRACTED_SIZE_LIMIT = 200 * 1024 * 1024;
+export const SINGLE_FILE_LIMIT = 20 * 1024 * 1024;
+export const ENTRY_LIMIT = 10_000;
+/** カタログページの HTML。JSON-LD を読むだけなので本文は保持しない。 */
+export const PAGE_LIMIT = 2 * 1024 * 1024;
