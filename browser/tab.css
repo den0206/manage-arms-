@@ -7,53 +7,46 @@
  * `transform` と `opacity` だけを動かす（合成だけで済みレイアウトを起こさない）。
  */
 :root {
+  /* 既定はシステム追従。ライト / ダークの固定は `tab.ts` がこの値を上書きする。 */
   color-scheme: light dark;
 
   /*
    * アイコンから採った色。地は藍紫のグラデーション、節が cyan / mint / yellow / pink。
    * `--brand` の 2 色はアイコンそのままで、飾りにだけ使う（文字は載せない）。
-   * `--accent` はその紫を文字が読める濃さまで落としたもの（白地で 6.1:1）。
+   * `--accent` はその紫を文字が読める濃さまで落としたもの（白地で 6.1:1、暗地で 7.5:1）。
    * 灰も同じ紫へわずかに寄せて、全体が 1 つの色として見えるようにする。
+   *
+   * 明暗は `light-dark()` が上の `color-scheme` を見て選ぶ。`prefers-color-scheme` の
+   * 別ブロックを持たないので、固定したいときは `color-scheme` を 1 つ書き換えるだけでよい
+   * （`tab.ts` の配色設定）。`<select>` の中身やスクロールバーも同じ指定で追随する。
    */
   --brand: #8590f6;
   --brand-2: #9b7df1;
 
-  --paper: #f8f7fc;
-  --card: #ffffff;
-  --ink: #1b1a2b;
-  --muted: #5c5a72;
-  --line: #e5e3f0;
-  --accent: #5b4bd6;
-  --accent-ink: #ffffff;
-  --accent-wash: #eeebfd;
-  --danger: #c42a4c;
-  --code: #efedf7;
+  --paper: light-dark(#f8f7fc, #16151f);
+  --card: light-dark(#ffffff, #1e1d2a);
+  --ink: light-dark(#1b1a2b, #e9e7f5);
+  --muted: light-dark(#5c5a72, #9a97b4);
+  --line: light-dark(#e5e3f0, #302e41);
+  --accent: light-dark(#5b4bd6, #a99cff);
+  --accent-ink: light-dark(#ffffff, #141322);
+  --accent-wash: light-dark(#eeebfd, #272247);
+  --danger: light-dark(#c42a4c, #ff9aa2);
   --radius: 10px;
 
-  /* 深さ。影は 2 段だけ持つ。カードと、上に浮くもの（modal）。 */
-  --lift: 0 1px 2px color-mix(in srgb, var(--ink) 7%, transparent);
-  --lift-high: 0 14px 34px color-mix(in srgb, var(--ink) 24%, transparent);
+  /*
+   * 深さ。影は 2 段だけ持つ。カードと、上に浮くもの（modal）。
+   * 影の色は `--ink` から作れない — 暗いときに `--ink` は明るい色になり、白く光る。
+   */
+  --shade: light-dark(#1b1a2b12, #00000073);
+  --shade-high: light-dark(#1b1a2b3d, #00000099);
+  --lift: 0 1px 2px var(--shade);
+  --lift-high: 0 14px 34px var(--shade-high);
+  /* modal の下敷き。これも `--ink` では明暗で反転してしまう。 */
+  --scrim: light-dark(#1b1a2b4d, #0000009e);
   /* 行やボタンの下地。線を増やさずに「触れる」ことだけを示す。 */
-  --hover: color-mix(in srgb, var(--accent) 7%, transparent);
+  --hover: color-mix(in srgb, var(--accent) 10%, transparent);
   --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --paper: #16151f;
-    --card: #1e1d2a;
-    --ink: #e9e7f5;
-    --muted: #9a97b4;
-    --line: #302e41;
-    --accent: #a99cff;
-    --accent-ink: #141322;
-    --accent-wash: #272247;
-    --danger: #ff9aa2;
-    --code: #262434;
-    --lift: 0 1px 2px color-mix(in srgb, #000 45%, transparent);
-    --lift-high: 0 14px 34px color-mix(in srgb, #000 60%, transparent);
-    --hover: color-mix(in srgb, var(--accent) 12%, transparent);
-  }
 }
 
 * { box-sizing: border-box; }
@@ -216,12 +209,18 @@ select {
   padding: 6px 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: var(--card);
-  color: inherit;
+  background-color: var(--card);
+  color: var(--ink);
   font: inherit;
   font-size: 12px;
   transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
 }
+
+/*
+ * 開いたときの一覧はブラウザが描く。地と文字の色を明示しないと、暗い配色で
+ * 文字が地に沈んで読めなくなる（`color: inherit` では行まで届かない）。
+ */
+select option { background-color: var(--card); color: var(--ink); }
 
 select:hover { border-color: var(--accent); }
 
@@ -328,7 +327,7 @@ body.dialog { min-height: 330px; }
 dialog[open] { display: flex; flex-direction: column; animation: pop 0.16s var(--ease) both; }
 .sites-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 
-dialog::backdrop { background: color-mix(in srgb, var(--ink) 30%, transparent); }
+dialog::backdrop { background: var(--scrim); }
 dialog[open]::backdrop { animation: fade 0.16s var(--ease) both; }
 .dialog-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--line); }
 .dialog-head h2 { margin: 0; font-size: 14px; }
@@ -517,13 +516,18 @@ li .why { margin-top: 3px; color: var(--muted); font-size: 11px; line-height: 1.
 .root:hover .clear { border-color: var(--line); }
 .root-actions .clear:hover { border-color: var(--danger); color: var(--danger); }
 
+/* 設定のまとまり。区切り線はここが 1 本だけ持つ — 行ごとに持たせると毎行に線が入る。 */
+#prefs {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
 .switch {
   display: flex;
   gap: 8px;
   align-items: center;
-  margin: 16px 0 0;
-  padding-top: 14px;
-  border-top: 1px solid var(--line);
+  margin: 0;
   color: var(--ink);
   font-size: 12px;
   cursor: pointer;
@@ -531,6 +535,11 @@ li .why { margin-top: 3px; color: var(--muted); font-size: 11px; line-height: 1.
 
 .switch input { margin: 0; accent-color: var(--accent); }
 .switch input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* 配色の 3 択。枠は出さず、見出しと行だけを残す。 */
+#theme { margin: 13px 0 0; padding: 0; border: 0; }
+#theme legend { padding: 0; color: var(--muted); font-size: 12px; }
+#theme .switch { margin-top: 7px; }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }

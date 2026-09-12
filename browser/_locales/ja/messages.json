@@ -108,6 +108,18 @@
   "tabAutoOpenToggle": {
     "message": "Skill を見つけたらこのポップアップを開く"
   },
+  "tabThemeLabel": {
+    "message": "配色"
+  },
+  "tabThemeSystem": {
+    "message": "システム"
+  },
+  "tabThemeLight": {
+    "message": "ライト"
+  },
+  "tabThemeDark": {
+    "message": "ダーク"
+  },
   "settingsTitle": {
     "message": "Agent Tool が書き込める場所を選ぶ"
   },

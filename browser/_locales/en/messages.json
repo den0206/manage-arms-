@@ -108,6 +108,18 @@
   "tabAutoOpenToggle": {
     "message": "Open this popup when a skill is found"
   },
+  "tabThemeLabel": {
+    "message": "Theme"
+  },
+  "tabThemeSystem": {
+    "message": "System"
+  },
+  "tabThemeLight": {
+    "message": "Light"
+  },
+  "tabThemeDark": {
+    "message": "Dark"
+  },
   "settingsTitle": {
     "message": "Choose where Agent Tool can write"
   },

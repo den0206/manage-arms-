@@ -11,7 +11,9 @@ import {
   rootState,
 } from "./fs.js";
 import { install, InstallError, isExtractable, remove, willOverwrite } from "./install.js";
-import { autoOpenEnabled, forgetAll, loadCollection, setAutoOpenEnabled } from "./store.js";
+import {
+  autoOpenEnabled, forgetAll, loadCollection, setAutoOpenEnabled, setTheme, Theme, theme,
+} from "./store.js";
 
 const t = (key: string, ...args: string[]): string => chrome.i18n.getMessage(key, args);
 const byId = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -20,6 +22,29 @@ const agentLabel = (configDir: string): string =>
   t(`agent${configDir.slice(1, 2).toUpperCase()}${configDir.slice(2)}`);
 const send = (message: Record<string, unknown>): Promise<unknown> =>
   chrome.runtime.sendMessage(message).catch(() => undefined);
+
+/*
+ * 配色。持っている値は `color-scheme` にそのまま入るので、当てるのは 1 行で済む
+ * （明暗の色は `tab.css` の `light-dark()` が選ぶ）。
+ *
+ * 他の何よりも先に読む。読み終わるまではシステムの配色で出るが、既定がそれなので
+ * 変えていない利用者には何も起きない。
+ */
+const themePick = byId<HTMLFieldSetElement>("theme");
+const applyTheme = (value: string): void => {
+  document.documentElement.style.colorScheme = value;
+};
+
+themePick.addEventListener("change", event => {
+  const { value } = event.target as HTMLInputElement;
+  applyTheme(value);
+  void setTheme(value as Theme);
+});
+
+void theme().then(value => {
+  applyTheme(value);
+  for (const input of themePick.querySelectorAll("input")) input.checked = input.value === value;
+});
 
 for (const node of document.querySelectorAll<HTMLElement>("[data-i18n]")) {
   node.textContent = t(node.dataset.i18n ?? "");
