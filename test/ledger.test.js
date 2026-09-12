@@ -1,5 +1,5 @@
 const { strict: assert } = require("node:assert");
-const { existsSync, readdirSync } = require("node:fs");
+const { chmodSync, existsSync, readdirSync } = require("node:fs");
 const { join } = require("node:path");
 const { test } = require("node:test");
 const { absorb, key, prune, scan } = require("../out/ide/ledger.js");
@@ -235,6 +235,26 @@ test("実体の無い台帳は取り込まない", () => {
   f.orphan("ghost");
   f.skill("pdf");
   assert.deepEqual(scan(f.env).map(item => item.ledger.name), ["pdf"]);
+});
+
+test("読めないルートがあるときは entry を落とさない", async () => {
+  // 権限・退避されたクラウド同期・切れたネットワークホームでは走査が空になる。
+  // これを「消えた」と扱うと、実体が残っているのに pinned / disabled / 取得元を失う。
+  const f = fixture();
+  f.skill("pdf");
+  await inventory({ env: f.env, projectPath: null, run: async () => "", writable: true });
+  assert.equal(load(f.env).resources.length, 1);
+
+  chmodSync(f.root, 0o000);
+  try {
+    const { issues } = await inventory({
+      env: f.env, projectPath: null, run: async () => "", writable: true,
+    });
+    assert.equal(load(f.env).resources.length, 1);          // 残っている
+    assert.ok(issues.some(issue => issue.includes(f.root))); // 黙って諦めない
+  } finally {
+    chmodSync(f.root, 0o755);
+  }
 });
 
 test("実体の無い台帳があっても registry は安定する", async () => {

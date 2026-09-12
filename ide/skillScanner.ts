@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { accessSync, constants, existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { Env } from "./env";
 import * as frontmatter from "./frontmatter";
@@ -47,6 +47,29 @@ const entries = (root: string): string[] => {
     return [];
   }
 };
+
+/**
+ * 「無い」のか「読めない」のか。走査は両方を空として扱うが、registry から実体の
+ * 無い entry を落とす `prune` は区別しないといけない。読めないだけのルートを
+ * 「消えた」と扱うと、実体が残っているのに pinned / disabled / 取得元を失う。
+ */
+export const isUnreadable = (root: string): boolean => {
+  if (!existsSync(root)) return false;
+  try {
+    accessSync(root, constants.R_OK | constants.X_OK);
+    return false;
+  } catch {
+    return true;                                 // 権限・退避されたクラウド同期・切れたネットワークホーム
+  }
+};
+
+/** 走査できたはずなのに読めなかったルート。1 つでもあれば `prune` は行わない。 */
+export const unreadableRoots = (env: Env, extra: readonly string[] = []): string[] => [
+  ...[...SKILL_SOURCES, ...SUBAGENT_SOURCES]
+    .map(source => sourcePath(source, env))
+    .filter((root): root is string => root !== null),
+  ...extra,
+].filter(isUnreadable);
 
 /** 走査ホワイトリストの全スキルルートを見る。列挙外のパスは触らない。 */
 export const scanSkills = (env: Env): Skill[] =>
