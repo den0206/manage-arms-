@@ -141,6 +141,6 @@ toolbar action の popup を extension page とする。検知で開けない環
 `ide/` `browser/` `core/` に分け、`test/` はルートに集約する。ルートの `package.json` は 1 つ、
 `browser/manifest.json` を別に持つ。
 
-版は拡張ごとに独立させ、タグの接頭辞（`ide-v*` / `browser-v*`）でリリースを分岐する。片方の
-修正でもう片方をストア審査に出さないための分離である。配布は Chrome Web Store と Edge Add-ons で、
-Brave は Chrome Web Store からの導入を案内する。
+版は IDE 拡張とブラウザ拡張で同一にする。`release/Ver_X.Y.Z` が両方を組み立て、同じ GitHub
+Release へ添付する。利用者が両方を使う際の対応関係を明確にし、リリース手順を 1 つに保つためである。
+ブラウザの zip は Chrome Web Store と Edge Add-ons へ提出し、Brave は Chrome Web Store からの導入を案内する。
