@@ -50,34 +50,64 @@ code, .repo, .path { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo
 header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   padding: 10px 14px;
   border-bottom: 1px solid var(--line);
   background: var(--card);
 }
 
-h1 { margin: 0; font-size: 13px; font-weight: 650; letter-spacing: -0.01em; }
+h1 { flex: 1; margin: 0; font-size: 13px; font-weight: 650; letter-spacing: -0.01em; }
 
 main { max-height: 520px; overflow-y: auto; padding: 12px 14px 16px; }
 
 section + section { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
 
-/* 検知中は入力欄と設定を隠し、見つけたものだけを見せる。 */
-body.detected #url-section,
-body.detected #settings-section,
-body.detected #collection-section { display: none; }
+/*
+ * 隣接セレクタは隠れているセクションにも当たる。検知セクションが hidden でも
+ * その分の区切りと余白が入ってしまうので、各画面の先頭になるものは打ち消す。
+ */
+#url-section, #settings-view { margin-top: 0; padding-top: 0; border-top: 0; }
 
-/* --- 見つけたもの ------------------------------------------------------ */
+/* 画面は 3 つ。検知・通常・設定のどれか 1 つだけを出す。 */
+body.detected #url-section,
+body.detected #collection-section,
+body.settings #found,
+body.settings #url-section,
+body.settings #collection-section,
+body.settings #done { display: none; }
+
+/* 戻るは設定のときだけ。歯車は設定と検知のときに引っ込める。 */
+#close-settings { display: none; }
+body.settings #close-settings { display: flex; }
+body.settings #open-settings,
+body.detected #open-settings { display: none; }
+
+/* --- 見つけたもの。検知中はこれだけを出す ------------------------------ */
 
 .card {
-  padding: 14px;
+  padding: 13px 14px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--card);
 }
 
+/* 検知の一段目。種類を先に置き、名前を主役にする。 */
+.found-head { display: flex; align-items: baseline; gap: 9px; }
+
+#found-name {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 19px;
+  font-weight: 650;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+
 .kind {
-  display: inline-block;
+  flex: none;
+  order: -1;
   padding: 2px 7px;
   border-radius: 999px;
   background: var(--accent-wash);
@@ -86,59 +116,31 @@ body.detected #collection-section { display: none; }
   font-weight: 600;
 }
 
-#found-name {
-  margin: 8px 0 2px;
-  font-size: 21px;
-  font-weight: 650;
-  line-height: 1.2;
-  letter-spacing: -0.02em;
-  word-break: break-word;
-}
+.repo { display: block; margin-top: 3px; color: var(--muted); font-size: 11.5px; overflow-wrap: anywhere; }
 
-.repo { display: block; color: var(--muted); font-size: 12px; }
+/* 二段目。導入を押してから出す。 */
+#destination { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+#destination .repo:first-child { margin-top: 0; }
 
-/* --- 導入先。ここが一番つまずくので、ここに予算を使う ------------------- */
+/* 導入先は 1 行。候補を並べて場所を取らない。 */
+.choose { display: flex; gap: 9px; align-items: center; margin-top: 11px; }
 
-fieldset { margin: 14px 0 0; padding: 0; border: 0; }
-legend { padding: 0 0 6px; color: var(--muted); font-size: 12px; }
+.choose label { flex: none; margin: 0; }
 
-.target {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 2px 9px;
-  align-items: center;
-  padding: 9px 10px;
+select {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  cursor: pointer;
+  border-radius: 7px;
+  background: var(--card);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
 }
 
-.target + .target { margin-top: 6px; }
-.target:hover { border-color: var(--accent); }
-.target:has(input:checked) { border-color: var(--accent); background: var(--accent-wash); }
-.target input { margin: 0; accent-color: var(--accent); }
-.target > span { display: contents; }
-
-.target-name { font-weight: 550; }
-
-/* パスは内容。行の全幅を使い、名前の下にぶら下げる。 */
-.target code {
-  grid-column: 2;
-  color: var(--muted);
-  font-size: 11.5px;
-  overflow-wrap: anywhere;
-}
-
-.badge {
-  grid-column: 2;
-  justify-self: start;
-  margin-top: 3px;
-  padding: 1px 6px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  color: var(--muted);
-  font-size: 11px;
-}
+select:focus-visible { border-color: var(--accent); outline: none; }
+#target-path { margin-top: 5px; }
 
 /* --- 操作 -------------------------------------------------------------- */
 
@@ -166,21 +168,25 @@ button.primary {
   color: var(--accent-ink);
 }
 
-button.icon {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border-color: transparent;
+/* 見出しの操作。アイコンだけでは何のボタンか伝わらないので、必ず文字を添える。 */
+button.chip {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  padding: 5px 10px 5px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 550;
   color: var(--muted);
 }
 
-button.icon:hover { border-color: var(--line); color: var(--ink); }
+button.chip:hover { border-color: var(--accent); color: var(--accent); }
+button.chip svg { flex: none; }
 
 /* --- 状態の知らせ ------------------------------------------------------ */
 
-.status:empty { display: none; }
+.hint:empty, .status:empty { display: none; }
+.hint { margin: 10px 0 0; color: var(--muted); font-size: 11.5px; }
 .status { margin: 10px 0 0; color: var(--muted); font-size: 12px; }
 .status.error, .error { color: var(--danger); }
 
@@ -242,7 +248,37 @@ li.unverified .name { opacity: 0.6; }
 
 /* --- 設定 -------------------------------------------------------------- */
 
-.switch { display: flex; gap: 8px; align-items: center; margin: 0; color: var(--ink); font-size: 12px; }
+#settings-view h2 { margin: 0 0 4px; font-size: 14px; font-weight: 650; letter-spacing: -0.01em; }
+.lead { margin: 0 0 6px; color: var(--muted); font-size: 12px; }
+#settings-view .hint { margin: 0 0 14px; }
+
+.root {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--card);
+}
+
+.root + .root { margin-top: 7px; }
+.root-name { font-weight: 600; }
+.root code { color: var(--muted); font-size: 11.5px; }
+.root button { flex: none; padding: 5px 10px; font-size: 11.5px; white-space: nowrap; }
+
+.switch {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 16px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  color: var(--ink);
+  font-size: 12px;
+}
+
 .switch input { margin: 0; accent-color: var(--accent); }
 
 @media (prefers-reduced-motion: reduce) {

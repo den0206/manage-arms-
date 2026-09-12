@@ -6,7 +6,7 @@ import { treeHash, TreeFile } from "../core/hash.js";
 import { ledger, LEDGER_DIR, ledgerPath } from "../core/ledger.js";
 import { CATALOG_EXTRACT_LIMIT, ENTRY_LIMIT, SINGLE_FILE_LIMIT, SIZE_LIMIT } from "../core/limits.js";
 import { Placement, rootOf } from "../core/placement.js";
-import { exists, readTree, removeEntry, writeTree } from "./fs.js";
+import { exists, readTree, removeEntry, reserve, writeTree } from "./fs.js";
 import { collect, forget } from "./store.js";
 
 /**
@@ -35,7 +35,10 @@ export async function commitSha(source: GitHubSource): Promise<string | undefine
 }
 
 export class InstallError extends Error {
-  constructor(readonly kind: "tooLarge" | "fetchFailed" | "notFound", message: string) {
+  constructor(
+    readonly kind: "tooLarge" | "fetchFailed" | "notFound" | "blocked",
+    message: string,
+  ) {
     super(message);
   }
 }
@@ -122,16 +125,36 @@ export const willOverwrite = (request: Omit<InstallRequest, "overwrite">): Promi
 /** 取得・展開・書き込み・台帳・収集一覧までを 1 回で行う。 */
 export async function install(request: InstallRequest): Promise<Collected> {
   const { lead, placement, root } = request;
-  if (!request.overwrite && await exists(root, placement.entry)) {
+  const taken = await exists(root, placement.entry);
+  if (!request.overwrite && taken) {
     throw new InstallError("notFound", "it already exists");
   }
-  const { files, sha } = await download(lead);
 
-  const base = placement.isDirectory ? [placement.entry] : [];
-  const laid = placement.isDirectory
-    ? files
-    : [{ path: placement.entry, bytes: files[0].bytes }];
-  await writeTree(root, base, laid);
+  // 先に置き場を確保する。IDE 拡張が張った symlink は一覧にも出ず、作ろうとして
+  // 初めて失敗する。取得の前に分かれば、無駄に落とさずに済む。
+  try {
+    await reserve(root, placement.entry, placement.isDirectory);
+  } catch {
+    throw new InstallError("blocked", placement.entry);
+  }
+  const created = !taken;
+
+  let files: TreeFile[];
+  let sha: string | undefined;
+  try {
+    ({ files, sha } = await download(lead));
+    const base = placement.isDirectory ? [placement.entry] : [];
+    const laid = placement.isDirectory
+      ? files
+      : [{ path: placement.entry, bytes: files[0].bytes }];
+    await writeTree(root, base, laid);
+  } catch (error) {
+    // 自分で作った空の置き場は片付ける。元からあったものには触らない。
+    if (created) {
+      await removeEntry(root, placement.entry, placement.isDirectory).catch(() => undefined);
+    }
+    throw error;
+  }
 
   // 台帳は IDE 拡張へ取得元を渡すためだけのもの。削除の可否には使わない。
   await writeTree(root, [], [{

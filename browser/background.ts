@@ -24,24 +24,31 @@ async function exists(found: ToolLead): Promise<boolean> {
   return false;
 }
 
-/** 既に入っているものを毎回勧めない。許可済みのルートは実態を見る。 */
+/**
+ * 既に入っているものを毎回勧めない。許可済みのルートは実態を見る。
+ *
+ * 名前が一覧に出れば入っているとみなす。IDE 拡張が張った symlink は
+ * `getDirectoryHandle` では見つからないので、それだけだと毎回勧めてしまう。
+ */
 async function alreadyInstalled(found: ToolLead): Promise<boolean> {
   const entry = found.kind === "skill" ? found.name : `${found.name}.md`;
   for (const root of await knownRoots()) {
     const config = await loadHandle(root);
     if (config === undefined || await config.queryPermission({ mode: "read" }) !== "granted") continue;
-    for (const sub of ["skills", "agents"]) {
-      const dir = await config.getDirectoryHandle(sub).catch(() => null);
+    // 保存しているのが設定ディレクトリか置き場そのものかで、見る階層が変わる。
+    const dirs = splitRoot(root).sub === ""
+      ? await Promise.all(["skills", "agents"].map(sub =>
+          config.getDirectoryHandle(sub).catch(() => null)))
+      : [config];
+    for (const dir of dirs) {
       if (dir === null) continue;
-      const hit = found.kind === "skill"
-        ? await dir.getDirectoryHandle(entry).then(() => true, () => false)
-        : await dir.getFileHandle(entry).then(() => true, () => false);
-      if (hit) return true;
+      try {
+        for await (const [name] of dir.entries()) if (name === entry) return true;
+      } catch { /* 読めないルートは判断しない */ }
     }
   }
   return (await loadCollection()).some(item =>
-    item.name === found.name && item.kind === found.kind
-    && splitRoot(item.root).configDir !== "");
+    item.name === found.name && item.kind === found.kind);
 }
 
 const clear = async (tabId: number): Promise<void> => {
@@ -91,7 +98,6 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     void visit(payload.url, sender.tab?.id, payload.jsonLd);
     return false;
   }
-  if (payload.type === "setup") { void chrome.runtime.openOptionsPage(); return false; }
   if (payload.type === "dismiss") { void forgetActive(); return false; }
   if (payload.type === "installed" && payload.name !== undefined && payload.kind !== undefined) {
     installed.add(`${payload.kind}:${payload.name}`);

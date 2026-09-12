@@ -7,30 +7,49 @@
   </head>
   <body>
     <header>
-      <h1 data-i18n="tabTitle"></h1>
-      <button id="open-settings" class="icon" data-i18n-title="tabSettings" type="button">
-        <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-          <path fill="currentColor" d="M8 10.2a2.2 2.2 0 1 1 0-4.4 2.2 2.2 0 0 1 0 4.4Zm5.6-1.4.9-.8-1.1-2-1.2.4a4.6 4.6 0 0 0-1-.6L10.9 4.5H8.7l-.3 1.3a4.6 4.6 0 0 0-1 .6l-1.2-.4-1.1 2 .9.8a4.7 4.7 0 0 0 0 1.2l-.9.8 1.1 2 1.2-.4c.3.2.7.4 1 .6l.3 1.3h2.2l.3-1.3c.4-.2.7-.4 1-.6l1.2.4 1.1-2-.9-.8a4.7 4.7 0 0 0 0-1.2Z"/>
+      <button id="close-settings" class="chip" type="button">
+        <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
+          <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                stroke-linejoin="round" d="M11.5 4.5 6 10l5.5 5.5"/>
         </svg>
+        <span data-i18n="back"></span>
+      </button>
+      <h1 data-i18n="tabTitle"></h1>
+      <button id="open-settings" class="chip" type="button">
+        <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true">
+          <g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+            <circle cx="10" cy="10" r="2.7"/>
+            <path d="M10 1.9v2.2M10 15.9v2.2M18.1 10h-2.2M4.1 10H1.9
+                     M15.7 4.3l-1.5 1.5M5.8 14.2l-1.5 1.5M15.7 15.7l-1.5-1.5M5.8 5.8 4.3 4.3"/>
+          </g>
+        </svg>
+        <span data-i18n="tabSettings"></span>
       </button>
     </header>
 
     <main>
       <p id="done" class="done" hidden></p>
 
-      <!-- 検知したとき。ここだけが主役になる。 -->
+      <!-- 検知したとき。出すのは種類と名前だけ。取得元と導入先は次の段で見せる。 -->
       <section id="found" hidden>
         <div class="card">
-          <span id="found-kind" class="kind"></span>
-          <h2 id="found-name"></h2>
-          <code id="found-repo" class="repo"></code>
+          <div class="found-head">
+            <span id="found-kind" class="kind"></span>
+            <h2 id="found-name"></h2>
+          </div>
 
-          <fieldset>
-            <legend data-i18n="tabTargetLabel"></legend>
-            <div id="targets"></div>
-          </fieldset>
+          <div id="destination" hidden>
+            <code id="found-repo" class="repo"></code>
+            <div class="choose">
+              <label for="target" data-i18n="tabTargetLabel"></label>
+              <select id="target"></select>
+            </div>
+            <code id="target-path" class="repo"></code>
+            <p id="picker-hint" class="hint"></p>
+          </div>
 
           <p id="status" class="status" role="status"></p>
+
           <div class="actions">
             <button id="install" class="primary" type="button" data-i18n="tabInstall"></button>
             <button id="dismiss" type="button" data-i18n="tabDismiss"></button>
@@ -53,7 +72,14 @@
         <p id="collection-empty" class="empty" data-i18n="tabCollectionEmpty"></p>
       </section>
 
-      <section id="settings-section">
+      <!-- 設定。別タブへ飛ばさず、ここで完結させる。 -->
+      <section id="settings-view" hidden>
+        <h2 data-i18n="settingsTitle"></h2>
+        <p class="lead" data-i18n="settingsText"></p>
+        <p id="hint" class="hint"></p>
+        <div id="roots"></div>
+        <p id="settings-status" class="status" role="status"></p>
+
         <label class="switch">
           <input id="auto-open" type="checkbox">
           <span data-i18n="tabAutoOpenToggle"></span>

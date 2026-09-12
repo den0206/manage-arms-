@@ -5,7 +5,6 @@
 declare namespace chrome {
   namespace runtime {
     function getURL(path: string): string;
-    function openOptionsPage(): Promise<void>;
     function sendMessage<T = unknown, R = unknown>(message: T): Promise<R>;
     const onMessage: {
       addListener(handler: (
