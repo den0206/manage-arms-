@@ -5,11 +5,12 @@ const { mkdtempSync, rmSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const { test } = require("node:test");
-const { cliName, displayName } = require("../out/agent.js");
-const { parseVersion } = require("../out/detector.js");
-const { run } = require("../out/exec.js");
-const { add, read, remove } = require("../out/mcpScanner.js");
-const { read: readPlugins } = require("../out/pluginScanner.js");
+const { displayName } = require("../out/core/agent.js");
+const { cliName } = require("../out/ide/agent.js");
+const { parseVersion } = require("../out/ide/detector.js");
+const { run } = require("../out/ide/exec.js");
+const { add, read, remove } = require("../out/ide/mcpScanner.js");
+const { read: readPlugins } = require("../out/ide/pluginScanner.js");
 
 const agent = process.env.COMPAT_AGENT;
 

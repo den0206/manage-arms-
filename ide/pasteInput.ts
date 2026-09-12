@@ -1,5 +1,5 @@
-import { AgentToolError } from "./errors";
-import { GitHubSource, parseUrl } from "./github";
+import { AgentToolError } from "../core/errors";
+import { GitHubSource, parseUrl } from "../core/github";
 import { MCPServer, parse as parseServer, parseAll } from "./mcpServer";
 
 /** 入力欄は 1 つだけ。貼り付けられた文字列を見て分岐する。 */

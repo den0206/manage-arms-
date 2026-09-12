@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { AgentToolError } from "./errors";
+import { AgentToolError } from "../core/errors";
 import { redact } from "./mcpServer";
 
 /** 出力とタイムアウトの上限。拡張のメモリにも CLI の待ち時間にも効く。 */

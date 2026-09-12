@@ -2,11 +2,12 @@ const { strict: assert } = require("node:assert");
 const { symlinkSync } = require("node:fs");
 const { join } = require("node:path");
 const { test } = require("node:test");
-const { parse, read, HEAD_BYTES } = require("../out/frontmatter.js");
-const { scanSkillRoot, scanSubagentRoot, isLoadable } = require("../out/skillScanner.js");
-const { stripComments } = require("../out/mcpScanner.js");
-const { parseAll, redact, summary, floatingPackage } = require("../out/mcpServer.js");
-const { projectSkillRoots, knownProjects } = require("../out/projectScan.js");
+const { parse, HEAD_BYTES } = require("../out/core/frontmatter.js");
+const { read } = require("../out/ide/frontmatter.js");
+const { scanSkillRoot, scanSubagentRoot, isLoadable } = require("../out/ide/skillScanner.js");
+const { stripComments } = require("../out/ide/mcpScanner.js");
+const { parseAll, redact, summary, floatingPackage } = require("../out/ide/mcpServer.js");
+const { projectSkillRoots, knownProjects } = require("../out/ide/projectScan.js");
 const { fakeEnv, makeDir, writeFileIn } = require("./helpers.js");
 
 const skill = (root, name, body) => writeFileIn(join(root, name, "SKILL.md"), body);

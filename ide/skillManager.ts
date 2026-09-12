@@ -1,7 +1,7 @@
 import { join } from "node:path";
-import { KindId } from "./agent";
+import { KindId } from "../core/agent";
 import { agentStore, claudeSkills, disabledAgentStore, disabledStore, Env, skillStore } from "./env";
-import { AgentToolError } from "./errors";
+import { AgentToolError } from "../core/errors";
 import { entry, Entry, Registry, upsert } from "./registry";
 import * as guard from "./writeGuard";
 

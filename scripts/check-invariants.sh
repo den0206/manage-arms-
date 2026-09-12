@@ -15,7 +15,7 @@ WRITERS='/(writeGuard|registry|mcpScanner|fetcher)\.ts:'
 # openSyncは読み取り（frontmatterの先頭4 KB）にも使うので、実際に書くwriteSyncの側を見る。
 FS_WRITES='\b(writeFileSync|appendFileSync|renameSync|rmSync|rmdirSync|unlinkSync|mkdirSync|symlinkSync|linkSync|cpSync|copyFileSync|truncateSync|utimesSync|chmodSync|writeSync|createWriteStream|mkdtempSync)\('
 
-LEAKS=$(grep -rnE "$FS_WRITES" src/ --include='*.ts' \
+LEAKS=$(grep -rnE "$FS_WRITES" ide/ core/ --include='*.ts' \
         | grep -vE "$WRITERS" \
         | grep -vE ':[0-9]+:[[:space:]]*(//|\*)')
 if [ -n "$LEAKS" ]; then
@@ -24,27 +24,35 @@ else
     echo "✓ ファイル書き込みは3経路と一時領域に限定されています"
 fi
 
-LEAKS=$(grep -rn 'node:fs/promises' src/ --include='*.ts' | grep -vE "$WRITERS")
+LEAKS=$(grep -rn 'node:fs/promises' ide/ core/ --include='*.ts' | grep -vE "$WRITERS")
 if [ -n "$LEAKS" ]; then
     fail "node:fs/promises経由の書き込み経路が増えています" "$LEAKS"
 fi
 
-if grep -qE 'from "\./env"' src/fetcher.ts; then
+if grep -qE 'from "\./env"' ide/fetcher.ts; then
     fail "fetcher.tsが./envを読み込んでいます（一時領域の外へ書ける経路になります）"
-elif ! grep -q 'mkdtempSync(join(tmpdir()' src/writeGuard.ts; then
+elif ! grep -q 'mkdtempSync(join(tmpdir()' ide/writeGuard.ts; then
     fail "一時領域がOSの一時ディレクトリから作られていません"
 else
     echo "✓ 取得と更新の作業領域はOSの一時領域に限定されています"
 fi
 
 for file in skillManager installer updater; do
-    grep -q 'assertMutable\|assertValidName' "src/$file.ts" \
-        || fail "src/$file.tsがWriteGuardの検査を呼んでいません"
+    grep -q 'assertMutable\|assertValidName' "ide/$file.ts" \
+        || fail "ide/$file.tsがWriteGuardの検査を呼んでいません"
 done
 echo "✓ 取得物の名前と可変性は作成前に検査されています"
 
+# core/はOSにもブラウザにも依存しない。node:の読み込み自体を持たせない。
+LEAKS=$(grep -rn "from \"node:" core/ --include='*.ts')
+if [ -n "$LEAKS" ]; then
+    fail "core/がNode標準モジュールを読み込んでいます（ブラウザで動かなくなります）" "$LEAKS"
+else
+    echo "✓ core/はNode標準モジュールに依存していません"
+fi
+
 # 走査はホワイトリストだけを見る。ホームやワークスペース全体を再帰走査しない。
-LEAKS=$(grep -rnE '\b(readdirSync|opendirSync|globSync)\(' src/ --include='*.ts' \
+LEAKS=$(grep -rnE '\b(readdirSync|opendirSync|globSync)\(' ide/ core/ --include='*.ts' \
         | grep -vE '/(source|skillScanner|projectScan|fetcher|updater)\.ts:')
 if [ -n "$LEAKS" ]; then
     fail "走査がホワイトリストの外に漏れています" "$LEAKS"

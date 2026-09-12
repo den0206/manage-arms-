@@ -57,7 +57,7 @@ code --install-extension agent-tool-X.Y.Z.vsix
 | [skills.sh](https://skills.sh/)                  | `https://skills.sh/anthropics/skills/frontend-design` | URLから決まります（パスに`owner/repo`を含みます）。                            |
 | [Agents Directory](https://agentsdirectory.dev/) | `https://agentsdirectory.dev/skills/frontend-design/` | ページを1回読み、schema.orgのJSON-LDメタデータだけからリポジトリを特定します。 |
 
-サイトは`src/github.ts`の`CATALOG_SITES`で宣言し、追加・削除は1エントリで済みます。ページのHTMLは走査しません。URLに`owner/repo`を含まないサイトは、JSON-LDの`codeRepository`または`url`を公開している必要があります。
+サイトは`core/github.ts`の`CATALOG_SITES`で宣言し、追加・削除は1エントリで済みます。ページのHTMLは走査しません。URLに`owner/repo`を含まないサイトは、JSON-LDの`codeRepository`または`url`を公開している必要があります。
 
 ## 使い方
 

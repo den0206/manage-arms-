@@ -10,9 +10,9 @@ function loadExtension(stub, tool) {
   Module._load = (request, ...rest) => request === "vscode" ? stub
     : request === "./agentTool" && tool !== undefined ? tool : load(request, ...rest);
   try {
-    delete require.cache[require.resolve("../out/extension.js")];
-    delete require.cache[require.resolve("../out/dashboard.js")];
-    return require("../out/extension.js");
+    delete require.cache[require.resolve("../out/ide/extension.js")];
+    delete require.cache[require.resolve("../out/ide/dashboard.js")];
+    return require("../out/ide/extension.js");
   } finally {
     Module._load = load;
   }
@@ -133,7 +133,7 @@ test("Webview の HTML は構文が通り、文言を l10n から引く", () => 
     env: { remoteName: undefined, language: "en", clipboard: { readText: async () => "" } },
     l10n: { t: text => bundle[text] ?? text },
   });
-  const { DashboardProvider } = loadExtension(stub) && require("../out/dashboard.js");
+  const { DashboardProvider } = loadExtension(stub) && require("../out/ide/dashboard.js");
   const provider = new DashboardProvider(fakeEnv().appSupport);
   let html = "";
   provider.resolveWebviewView({
@@ -174,7 +174,7 @@ test("遅い MCP 状態確認を重ねて起動しない", async () => {
       calls += 1;
       return new Promise(resolve => { finish = resolve; });
     },
-  }) && require("../out/dashboard.js");
+  }) && require("../out/ide/dashboard.js");
   const provider = new DashboardProvider(fakeEnv().appSupport);
   const view = {
     webview: { options: {}, cspSource: "vscode-resource:", html: "", onDidReceiveMessage: () => ({ dispose() {} }), postMessage: () => Promise.resolve(true) },
@@ -326,7 +326,7 @@ function runWebviewScript() {
     env: { remoteName: undefined, language: "en", clipboard: { readText: async () => "" } },
     l10n: { t: text => bundle[text] ?? text },
   });
-  const { DashboardProvider } = loadExtension(stub) && require("../out/dashboard.js");
+  const { DashboardProvider } = loadExtension(stub) && require("../out/ide/dashboard.js");
   const provider = new DashboardProvider(fakeEnv().appSupport);
   let html = "";
   provider.resolveWebviewView({

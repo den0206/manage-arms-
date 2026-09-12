@@ -2,11 +2,11 @@ const { strict: assert } = require("node:assert");
 const { existsSync, readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const { test } = require("node:test");
-const { agentStore, claudeSkills, disabledStore, skillStore } = require("../out/env.js");
-const { install } = require("../out/installer.js");
-const { disable, enable, layout, remove, removeUnmanaged } = require("../out/skillManager.js");
-const { empty, upsert } = require("../out/registry.js");
-const { isManagedLink } = require("../out/writeGuard.js");
+const { agentStore, claudeSkills, disabledStore, skillStore } = require("../out/ide/env.js");
+const { install } = require("../out/ide/installer.js");
+const { disable, enable, layout, remove, removeUnmanaged } = require("../out/ide/skillManager.js");
+const { empty, upsert } = require("../out/ide/registry.js");
+const { isManagedLink } = require("../out/ide/writeGuard.js");
 const { fakeEnv, makeDir, writeFileIn } = require("./helpers.js");
 
 const code = expected => error => error.code === expected;

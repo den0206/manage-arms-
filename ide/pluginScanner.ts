@@ -1,6 +1,7 @@
-import { AgentId, AGENT_IDS, cliName } from "./agent";
+import { AgentId, AGENT_IDS } from "../core/agent";
+import { cliName } from "./agent";
 import { Env, Run } from "./env";
-import { AgentToolError } from "./errors";
+import { AgentToolError } from "../core/errors";
 import { readJsonc } from "./mcpScanner";
 import { join } from "node:path";
 

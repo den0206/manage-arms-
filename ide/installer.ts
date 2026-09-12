@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { Env } from "./env";
-import { AgentToolError } from "./errors";
+import { AgentToolError } from "../core/errors";
 import { Candidate, Staging } from "./fetcher";
 import { Registry, upsert } from "./registry";
 import { enable, layout, Place, USER } from "./skillManager";

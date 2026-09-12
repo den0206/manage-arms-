@@ -5,7 +5,8 @@
 docs/**
 scripts/**
 test/**
-src/**
+core/**
+ide/**
 vsix/**
 media/demo.gif
 .gitignore

@@ -1,12 +1,12 @@
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import { AgentId, KindId, ScopeId } from "./agent";
+import { AgentId, KindId, ScopeId } from "../core/agent";
 import { AgentInfo, scanPath as detectAgents } from "./detector";
 import { Env, Run } from "./env";
-import { AgentToolError } from "./errors";
+import { AgentToolError } from "../core/errors";
 import { run as runCommand } from "./exec";
 import { Candidate, discard, fetchPage, stage } from "./fetcher";
-import { fromJsonLd, GitHubSource, needsPage, parseUrl, skillHint } from "./github";
+import { fromJsonLd, GitHubSource, needsPage, parseUrl, skillHint } from "../core/github";
 import { install } from "./installer";
 import { inventory as buildInventory, InventoryItem } from "./inventory";
 import * as mcp from "./mcpScanner";
@@ -18,8 +18,8 @@ import { disable, enable, Place, remove as removeManaged, removeUnmanaged, USER 
 import { SOURCES, sourcePath } from "./source";
 import { updateApply as applyUpdate, Http, updatePreview as previewUpdate, resolveSha, UpdateDiff } from "./updater";
 
-export { AgentToolError } from "./errors";
-export type { ErrorCode } from "./errors";
+export { AgentToolError } from "../core/errors";
+export type { ErrorCode } from "../core/errors";
 export type { AgentInfo } from "./detector";
 export type { InventoryItem } from "./inventory";
 export type { UpdateDiff } from "./updater";

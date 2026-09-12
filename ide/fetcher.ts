@@ -5,10 +5,10 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { open as openZip, Entry, ZipFile } from "yauzl";
-import { KindId } from "./agent";
-import { AgentToolError } from "./errors";
+import { KindId } from "../core/agent";
+import { AgentToolError } from "../core/errors";
 import * as frontmatter from "./frontmatter";
-import { archiveUrl, GitHubSource } from "./github";
+import { archiveUrl, GitHubSource } from "../core/github";
 import { isValidName } from "./writeGuard";
 
 /**

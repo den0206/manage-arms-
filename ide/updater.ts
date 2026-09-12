@@ -1,10 +1,10 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
-import { KindId } from "./agent";
+import { KindId } from "../core/agent";
 import { Env } from "./env";
-import { AgentToolError } from "./errors";
+import { AgentToolError } from "../core/errors";
 import { Candidate, discard, stage, Staging } from "./fetcher";
-import { GitHubSource } from "./github";
+import { GitHubSource } from "../core/github";
 import { Entry, Registry, update as updateRegistry, upsert } from "./registry";
 import { layout, Place, USER } from "./skillManager";
 import * as guard from "./writeGuard";

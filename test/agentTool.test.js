@@ -2,10 +2,10 @@ const { strict: assert } = require("node:assert");
 const { existsSync, readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const { test } = require("node:test");
-const agentTool = require("../out/agentTool.js");
-const { hasUpdate, inventory } = require("../out/inventory.js");
-const { CONFIG_SIZE_LIMIT, addCommand, readJsonc, removeCommand, editCursor, validate } = require("../out/mcpScanner.js");
-const { parseAll } = require("../out/mcpServer.js");
+const agentTool = require("../out/ide/agentTool.js");
+const { hasUpdate, inventory } = require("../out/ide/inventory.js");
+const { CONFIG_SIZE_LIMIT, addCommand, readJsonc, removeCommand, editCursor, validate } = require("../out/ide/mcpScanner.js");
+const { parseAll } = require("../out/ide/mcpServer.js");
 const { fakeEnv, makeDir, writeFileIn } = require("./helpers.js");
 
 const code = expected => error => error.code === expected;
@@ -13,7 +13,7 @@ const server = (name, definition) => parseAll({ mcpServers: { [name]: definition
 
 /** プロセス境界が無いので版ずれは起きない。互換判定は registry の schemaVersion だけ。 */
 test("互換判定は registry の schemaVersion が持つ", () => {
-  const { SCHEMA_VERSION, decode } = require("../out/registry.js");
+  const { SCHEMA_VERSION, decode } = require("../out/ide/registry.js");
   assert.equal(SCHEMA_VERSION, "1");
   assert.throws(() => decode({ schemaVersion: "2" }), code("SCHEMA_UNSUPPORTED"));
 });
@@ -184,7 +184,7 @@ test("GitHub サブディレクトリの Plugin は Marketplace のルートを�
 
 /** Windows は `.cmd` のために shell 実行が要るが、Node は引数をクォートしない。 */
 test("Windows で shell 構文を含むコマンドは実行しない", () => {
-  const { hasShellSyntax } = require("../out/exec.js");
+  const { hasShellSyntax } = require("../out/ide/exec.js");
   assert.ok(hasShellSyntax(["npx", "-y", "pkg & calc.exe"]));
   assert.ok(hasShellSyntax(["npx", "a | b"]));
   assert.ok(hasShellSyntax(["npx", "%PATH%"]));
@@ -218,7 +218,7 @@ test("ワークスペースが無いまま project を指定したら user へ�
 /** ここが走らないと registry.repos が空のままで、更新の導線が一生出ない。 */
 test("更新確認は最新 SHA を registry に記録する", async () => {
   const env = fakeEnv();
-  const { empty, save, read } = require("../out/registry.js");
+  const { empty, save, read } = require("../out/ide/registry.js");
   const registry = empty();
   registry.resources = [
     { name: "pdf", kind: "skill", repo: "o/r", sha: "old", pinned: false, disabled: false },
@@ -247,7 +247,7 @@ test("更新確認は最新 SHA を registry に記録する", async () => {
 
 test("確認できなかった取得元は理由を返し、他の記録は残す", async () => {
   const env = fakeEnv();
-  const { empty, save, read } = require("../out/registry.js");
+  const { empty, save, read } = require("../out/ide/registry.js");
   const registry = empty();
   registry.resources = [
     { name: "ok", kind: "skill", repo: "o/ok", sha: "a", pinned: false, disabled: false },
