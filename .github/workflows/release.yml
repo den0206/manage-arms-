@@ -50,7 +50,7 @@ jobs:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           npm version "$RELEASE_VERSION" --no-git-tag-version --allow-same-version
-          node -e "const fs=require('node:fs'); const file='browser/manifest.json'; const manifest=JSON.parse(fs.readFileSync(file, 'utf8')); manifest.version=process.env.RELEASE_VERSION; fs.writeFileSync(file, JSON.stringify(manifest, null, 2) + '\\n')"
+          MANIFEST_VERSION="${RELEASE_VERSION%%-*}" node -e "const fs=require('node:fs'); const file='browser/manifest.json'; const manifest=JSON.parse(fs.readFileSync(file, 'utf8')); manifest.version=process.env.MANIFEST_VERSION; fs.writeFileSync(file, JSON.stringify(manifest, null, 2) + '\\n')"
       - name: Cut changelog section
         run: ./scripts/release-changelog.sh "${{ steps.version.outputs.version }}" "$(date -u +%F)"
       - name: Package VSIX
@@ -64,7 +64,8 @@ jobs:
           npm run package:browser
           sha256sum vsix/agent-tool-browser.zip | tee vsix/agent-tool-browser.zip.sha256
       - name: Submit browser extension to Chrome Web Store
-        if: ${{ env.CHROME_CLIENT_ID != '' && env.CHROME_CLIENT_SECRET != '' && env.CHROME_REFRESH_TOKEN != '' && env.CHROME_PUBLISHER_ID != '' && env.CHROME_EXTENSION_ID != '' }}
+        # alpha / beta はGitHub Releasesだけに公開する。ストアは安定版だけへ出す。
+        if: ${{ !contains(steps.version.outputs.version, '-') && env.CHROME_CLIENT_ID != '' && env.CHROME_CLIENT_SECRET != '' && env.CHROME_REFRESH_TOKEN != '' && env.CHROME_PUBLISHER_ID != '' && env.CHROME_EXTENSION_ID != '' }}
         run: |
           access_token="$(curl --fail --silent --show-error https://oauth2.googleapis.com/token \
             --data-urlencode "client_id=$CHROME_CLIENT_ID" \
@@ -101,7 +102,7 @@ jobs:
           git fetch origin main
           git switch -f -C main origin/main
           npm version "$RELEASE_VERSION" --no-git-tag-version --allow-same-version
-          node -e "const fs=require('node:fs'); const file='browser/manifest.json'; const manifest=JSON.parse(fs.readFileSync(file, 'utf8')); manifest.version=process.env.RELEASE_VERSION; fs.writeFileSync(file, JSON.stringify(manifest, null, 2) + '\\n')"
+          MANIFEST_VERSION="${RELEASE_VERSION%%-*}" node -e "const fs=require('node:fs'); const file='browser/manifest.json'; const manifest=JSON.parse(fs.readFileSync(file, 'utf8')); manifest.version=process.env.MANIFEST_VERSION; fs.writeFileSync(file, JSON.stringify(manifest, null, 2) + '\\n')"
           ./scripts/release-changelog.sh "$RELEASE_VERSION" "$(date -u +%F)"
           git add package.json package-lock.json browser/manifest.json CHANGELOG.md
           git diff --cached --quiet && exit 0
