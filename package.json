@@ -109,7 +109,7 @@
     "vscode:prepublish": "npm run compile",
     "compile": "node -e \"require('node:fs').rmSync('out',{recursive:true,force:true})\" && tsc -p ./ && tsc -p browser/tsconfig.json && node -e \"require('node:fs').writeFileSync('out/web/package.json','{\\\"type\\\":\\\"module\\\"}\\n')\"",
     "typecheck": "tsc -p ./ --noEmit && tsc -p browser/tsconfig.json --noEmit",
-    "test": "npm run compile && node --test test/*.test.js",
+    "test": "npm run compile && node scripts/run-tests.mjs",
     "test:browser-catalogs": "npm run compile && node scripts/test-browser-catalogs.mjs",
     "test:cursor": "./scripts/test-cursor-e2e.sh",
     "package": "node -e \"require('node:fs').mkdirSync('vsix',{recursive:true})\" && vsce package --out vsix/agent-tool.vsix",
