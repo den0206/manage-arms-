@@ -3,7 +3,7 @@ const { existsSync, readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const { tmpdir } = require("node:os");
 const { test } = require("node:test");
-const { extract, fetchPage, identify, safeJoin, singleTopLevel, stage } = require("../out/ide/fetcher.js");
+const { discard, extract, fetchPage, identify, safeJoin, singleTopLevel, stage } = require("../out/ide/fetcher.js");
 const { PAGE_LIMIT } = require("../out/core/limits.js");
 const { archiveUrl, catalog, fromJsonLd, needsPage, parseUrl, skillHint } = require("../out/core/github.js");
 const { fakeEnv, makeDir, writeFileIn } = require("./helpers.js");
@@ -212,6 +212,44 @@ test("書き込み量でも上限を打ち切る", async () => {
     body: (async function* () { for (let i = 0; i < 60; i++) yield chunk; })(),
   });
   await assert.rejects(stage({ repo: "o/r" }, { fetchImpl }), /too large/);
+});
+
+// --- 取り出す範囲の symlink ---
+
+/** zip の中身をそのまま返す `fetch`。stage の経路を通したいので本物の zip を流す。 */
+const serveZip = archive => async () => ({
+  ok: true, status: 200, headers: new Map(),
+  body: (async function* () { yield readFileSync(archive); })(),
+});
+
+/**
+ * symlink は展開していない。入れるものの中にあるまま候補に出すと、
+ * 欠けたファイルごと導入が成功したように見える。
+ */
+test("取り出す候補の中に symlink があれば候補にしない", async () => {
+  const env = fakeEnv();
+  const archive = writeZip(join(makeDir(env.home), "inside.zip"), [
+    { name: "repo-main/skills/pdf/SKILL.md", data: "---\nname: pdf\n---\n" },
+    { name: "repo-main/skills/pdf/ref.md", data: "../../../etc/passwd", unixMode: 0o120777 },
+  ]);
+  await assert.rejects(
+    stage({ repo: "o/r", subdir: "skills/pdf" }, { fetchImpl: serveZip(archive) }),
+    /is a link and cannot be installed/);
+});
+
+test("取り出す範囲の外の symlink は取得を妨げない", async () => {
+  const env = fakeEnv();
+  const archive = writeZip(join(makeDir(env.home), "outside.zip"), [
+    { name: "repo-main/CLAUDE.md", data: "skills/pdf/SKILL.md", unixMode: 0o120777 },
+    { name: "repo-main/skills/pdf/SKILL.md", data: "---\nname: pdf\n---\n" },
+  ]);
+  const staging = await stage({ repo: "o/r", subdir: "skills/pdf" },
+    { fetchImpl: serveZip(archive) });
+  try {
+    assert.deepEqual(staging.candidates.map(c => [c.kind, c.name]), [["skill", "pdf"]]);
+  } finally {
+    discard(staging);
+  }
 });
 
 test("HTTP エラーは FETCH_FAILED にする", async () => {
