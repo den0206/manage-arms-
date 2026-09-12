@@ -1,4 +1,4 @@
-import { AgentId, AGENT_IDS, BUNDLED_SKILL_ROOTS, KindId, ScopeId, skillRoots, subagentRoots } from "./agent";
+import { AgentId, AGENT_IDS, BUNDLED_SKILL_ROOTS, KindId, ScopeId, skillRoots, subagentRoots } from "../core/agent";
 import { agentStore, disabledAgentStore, disabledStore, Env, Run, skillStore } from "./env";
 import * as mcp from "./mcpScanner";
 import { MCPScope, summary as mcpSummary } from "./mcpServer";

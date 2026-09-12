@@ -1,6 +1,7 @@
 import { statSync } from "node:fs";
 import { delimiter, join } from "node:path";
-import { AgentId, AGENT_IDS, cliName, configDir, displayName } from "./agent";
+import { AgentId, AGENT_IDS, configDir, displayName } from "../core/agent";
+import { cliName } from "./agent";
 import { Env, Run } from "./env";
 
 /**

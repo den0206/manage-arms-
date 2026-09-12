@@ -1,5 +1,6 @@
 import { basename } from "node:path";
-import { AgentId, AGENT_IDS, cliName, processMarkers } from "./agent";
+import { AgentId, AGENT_IDS } from "../core/agent";
+import { cliName, processMarkers } from "./agent";
 import { Run } from "./env";
 import { MCPServer } from "./mcpServer";
 

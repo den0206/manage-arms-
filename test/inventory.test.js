@@ -1,8 +1,8 @@
 const { strict: assert } = require("node:assert");
 const { join } = require("node:path");
 const { test } = require("node:test");
-const { disabledStore, registryFile, skillStore } = require("../out/env.js");
-const { inventory, hasUpdate } = require("../out/inventory.js");
+const { disabledStore, registryFile, skillStore } = require("../out/ide/env.js");
+const { inventory, hasUpdate } = require("../out/ide/inventory.js");
 const { fakeEnv, makeDir, writeFileIn } = require("./helpers.js");
 
 const skill = (root, name, description = "d") =>

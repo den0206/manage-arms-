@@ -1,8 +1,9 @@
 import { chmodSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { AgentId, AGENT_IDS, mcpSource, supports } from "./agent";
+import { AgentId, AGENT_IDS, supports } from "../core/agent";
+import { mcpSource } from "./agent";
 import { Env, Run } from "./env";
-import { AgentToolError } from "./errors";
+import { AgentToolError } from "../core/errors";
 import { MCPScope, MCPServer, parse, parseAll } from "./mcpServer";
 import { sourcePath } from "./source";
 import { assertSafeCreation } from "./writeGuard";

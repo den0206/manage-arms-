@@ -4,10 +4,10 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
-import { BUNDLED_SKILL_ROOTS, KindId } from "./agent";
+import { BUNDLED_SKILL_ROOTS, KindId } from "../core/agent";
 import { SKILL_SOURCES, SUBAGENT_SOURCES } from "./source";
 import { agentStore, disabledAgentStore, Env, managedRoots } from "./env";
-import { AgentToolError } from "./errors";
+import { AgentToolError } from "../core/errors";
 import { assertReadable, entry, Registry } from "./registry";
 
 /**

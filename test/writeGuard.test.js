@@ -1,11 +1,11 @@
 const { strict: assert } = require("node:assert");
 const { join } = require("node:path");
 const { test } = require("node:test");
-const { claudeSkills, skillStore } = require("../out/env.js");
+const { claudeSkills, skillStore } = require("../out/ide/env.js");
 const {
   assertMutable, assertSafeCreation, assertValidName, isValidName,
-} = require("../out/writeGuard.js");
-const { empty, upsert } = require("../out/registry.js");
+} = require("../out/ide/writeGuard.js");
+const { empty, upsert } = require("../out/ide/registry.js");
 const { fakeEnv, link, makeDir, writeFileIn } = require("./helpers.js");
 
 const code = expected => error => error.code === expected;

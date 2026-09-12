@@ -2,9 +2,9 @@ const { strict: assert } = require("node:assert");
 const { readdirSync, readFileSync, utimesSync, writeFileSync } = require("node:fs");
 const { join } = require("node:path");
 const { test } = require("node:test");
-const { registryFile } = require("../out/env.js");
+const { registryFile } = require("../out/ide/env.js");
 const { REGISTRY_SIZE_LIMIT, decode, empty, entry, load, read, save, update, upsert, withRegistryLock } =
-  require("../out/registry.js");
+  require("../out/ide/registry.js");
 const { fakeEnv, makeDir, writeFileIn } = require("./helpers.js");
 
 const seed = (env, body) => writeFileIn(registryFile(env), body);

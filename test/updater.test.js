@@ -3,7 +3,7 @@ const { mkdirSync, mkdtempSync, rmSync, writeFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const { test } = require("node:test");
-const { API_RESPONSE_LIMIT, DIFF_TOTAL_LIMIT, diffFiles, readLimitedText } = require("../out/updater.js");
+const { API_RESPONSE_LIMIT, DIFF_TOTAL_LIMIT, diffFiles, readLimitedText } = require("../out/ide/updater.js");
 
 test("大きすぎる GitHub 応答は読み切らずに落とす", async () => {
   const body = {

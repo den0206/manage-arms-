@@ -1,8 +1,8 @@
 import { closeSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { AgentId, AGENT_IDS, KindId } from "./agent";
+import { AgentId, AGENT_IDS, KindId } from "../core/agent";
 import { Env, registryFile } from "./env";
-import { AgentToolError } from "./errors";
+import { AgentToolError } from "../core/errors";
 
 export const SCHEMA_VERSION = "1";
 export const REGISTRY_SIZE_LIMIT = 2 * 1024 * 1024;

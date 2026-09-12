@@ -3,9 +3,9 @@ const { strict: assert } = require("node:assert");
 const { existsSync, symlinkSync } = require("node:fs");
 const { join } = require("node:path");
 const { test } = require("node:test");
-const { claudeSkills, skillStore } = require("../out/env.js");
-const { removeUnmanaged } = require("../out/skillManager.js");
-const { assertUserArtifact, userRoots } = require("../out/writeGuard.js");
+const { claudeSkills, skillStore } = require("../out/ide/env.js");
+const { removeUnmanaged } = require("../out/ide/skillManager.js");
+const { assertUserArtifact, userRoots } = require("../out/ide/writeGuard.js");
 const { fakeEnv, link, makeDir, writeFileIn } = require("./helpers.js");
 
 const code = expected => error => error.code === expected;

@@ -57,7 +57,7 @@ Paste a URL from any of these into the extension's URL field.
 | [skills.sh](https://skills.sh/)                  | `https://skills.sh/anthropics/skills/frontend-design` | From the URL — `owner/repo` is part of the path.                                                |
 | [Agents Directory](https://agentsdirectory.dev/) | `https://agentsdirectory.dev/skills/frontend-design/` | The page is read once, and only its schema.org JSON-LD metadata is used to find the repository. |
 
-Sites are declared in `CATALOG_SITES` in `src/github.ts`; adding or removing one is a single entry. The page HTML is never scraped — a site whose URL does not carry `owner/repo` must publish a JSON-LD `codeRepository` or `url`.
+Sites are declared in `CATALOG_SITES` in `core/github.ts`; adding or removing one is a single entry. The page HTML is never scraped — a site whose URL does not carry `owner/repo` must publish a JSON-LD `codeRepository` or `url`.
 
 ## Usage
 

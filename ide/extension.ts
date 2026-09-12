@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as agentTool from "./agentTool";
-import { AgentId, KindId } from "./agent";
-import { AgentToolError } from "./errors";
+import { AgentId, KindId } from "../core/agent";
+import { AgentToolError } from "../core/errors";
 import { mcpServers } from "./pasteInput";
 import { DashboardItem, DashboardProvider } from "./dashboard";
 

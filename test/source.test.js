@@ -2,8 +2,9 @@ const { strict: assert } = require("node:assert");
 const { test } = require("node:test");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
-const { AGENT_IDS, mcpSource, skillRoots, subagentRoots, supports } = require("../out/agent.js");
-const { MCP_SOURCES, SOURCES, relativePath, sourcePath } = require("../out/source.js");
+const { AGENT_IDS, skillRoots, subagentRoots, supports } = require("../out/core/agent.js");
+const { mcpSource } = require("../out/ide/agent.js");
+const { MCP_SOURCES, SOURCES, relativePath, sourcePath } = require("../out/ide/source.js");
 
 /** 踏むと数百 MB の I/O が走る、または触ってはいけない領域。 */
 const forbidden = [

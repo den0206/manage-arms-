@@ -1,5 +1,6 @@
 import { join } from "node:path";
-import { AGENT_IDS, mcpSource, pluginSources, skillRoots, subagentRoots, Source } from "./agent";
+import { AGENT_IDS, skillRoots, subagentRoots, Source } from "../core/agent";
+import { mcpSource, pluginSources } from "./agent";
 import { Env } from "./env";
 
 /**

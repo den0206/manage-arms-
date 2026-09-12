@@ -23,8 +23,8 @@ allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git a
 
 | グループ例 | 対象の目安 |
 |---|---|
-| `core` | `src/`の走査・追加・更新・集計・権限 |
-| `extension` | `src/`・`test/` の Cursor UI・CLI 境界・テスト |
+| `core` | `core/`・`ide/`の走査・追加・更新・集計・権限 |
+| `extension` | `ide/`・`test/` の Cursor UI・CLI 境界・テスト |
 | `i18n` | `l10n/` |
 | `build` | `package.json`・`scripts/`・`.vscode/` |
 | `release` | `.github/workflows/`・リリーススクリプト・`CHANGELOG.md` |

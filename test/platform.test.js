@@ -1,13 +1,13 @@
 const { strict: assert } = require("node:assert");
 const { join } = require("node:path");
 const { test } = require("node:test");
-const { parseVersion, resolvePath, which } = require("../out/detector.js");
+const { parseVersion, resolvePath, which } = require("../out/ide/detector.js");
 const {
   agentOfCommand, mcpStatus, owner, parsePs, parseWindows, running, signatures, stripVersion,
-} = require("../out/processScanner.js");
-const { classify, commandWords, mcpServers, parseCommand } = require("../out/pasteInput.js");
-const { parseUrl, skillHint } = require("../out/github.js");
-const { parseAll } = require("../out/mcpServer.js");
+} = require("../out/ide/processScanner.js");
+const { classify, commandWords, mcpServers, parseCommand } = require("../out/ide/pasteInput.js");
+const { parseUrl, skillHint } = require("../out/core/github.js");
+const { parseAll } = require("../out/ide/mcpServer.js");
 const { fakeEnv, makeDir, writeFileIn } = require("./helpers.js");
 
 const code = expected => error => error.code === expected;
