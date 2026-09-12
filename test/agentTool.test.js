@@ -174,6 +174,19 @@ test("Plugin は marketplace を登録してから追加し、削除時は登録
     ["claude", "plugin", "remove", "tool@market", "-s", "local"]);
 });
 
+test("IDE の4種別はそれぞれの追加経路を解釈する", () => {
+  assert.equal(agentTool.isSupportedUrl("https://github.com/acme/tools/tree/main/skills/pdf"), true);
+  assert.equal(agentTool.isSupportedUrl("https://skills.sh/acme/tools/pdf"), true);
+  const { mcpServers } = require("../out/ide/pasteInput.js");
+  assert.deepEqual(mcpServers('{"mcpServers":{"docs":{"command":"npx","args":["-y","docs-mcp"]}}}', "unused"), [
+    { name: "docs", transport: { type: "stdio", command: "npx", args: ["-y", "docs-mcp"], env: {} },
+      isProtected: false, enabled: true },
+  ]);
+  assert.deepEqual(agentTool.pluginAddCommands("claude", "tool@market"), [
+    ["claude", "plugin", "install", "tool@market", "-s", "user"],
+  ]);
+});
+
 test("GitHub サブディレクトリの Plugin は Marketplace のルートを登録する", () => {
   assert.deepEqual(agentTool.pluginAddCommands("claude", "context7",
     "https://github.com/anthropics/claude-plugins-official/tree/main/external_plugins/context7"), [

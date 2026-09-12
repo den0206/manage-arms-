@@ -6,7 +6,9 @@ import * as plugins from "./pluginScanner";
 import { projectSkillRoots, projectSubagentRoot } from "./projectScan";
 import { Entry, load, Registry, update } from "./registry";
 import { absorb as absorbLedgers, key as ledgerKey, prune, scan as scanLedgers } from "./ledger";
-import { isLoadable, scanSkillRoot, scanSkills, scanSubagentRoot, scanSubagents, Skill } from "./skillScanner";
+import {
+  isLoadable, scanSkillRoot, scanSkills, scanSubagentRoot, scanSubagents, Skill, unreadableRoots,
+} from "./skillScanner";
 
 export type InventoryItem = {
   readonly name: string;
@@ -169,7 +171,16 @@ export async function inventory(params: {
   ];
 
   // 実体を失った entry を落とす。走査できたルートの分だけを対象にする。
-  if (writable) {
+  // 読めなかったルートが 1 つでもあれば行わない — 読めないだけのものを「消えた」と
+  // 扱うと、実体が残っているのに pinned / disabled / 取得元が永久に失われる。
+  const blocked = writable ? unreadableRoots(env, [
+    disabledStore(env), disabledAgentStore(env),
+    ...(projectPath === null ? []
+      : [...projectSkillRoots(projectPath).map(root => root.path), projectSubagentRoot(projectPath)]),
+  ]) : [];
+  // 失敗を握り潰さない。読めなかったから消さなかった、と利用者に見せる。
+  for (const root of blocked) issues.push(`${root}: not readable, its entries were kept`);
+  if (writable && blocked.length === 0) {
     const seen = new Set(items
       .filter(item => item.kind === "skill" || item.kind === "subagent")
       .map(item => ledgerKey(item.name, item.kind,
