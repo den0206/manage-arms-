@@ -1,35 +1,148 @@
 {
-  "extensionName": { "message": "Agent Tool" },
+  "extensionName": {
+    "message": "Agent Tool"
+  },
   "extensionDescription": {
     "message": "Detect Skills and Subagents while you browse, and install them into your AI coding agents."
   },
-  "bannerSkill": { "message": "Found the skill \"$NAME$\"", "placeholders": { "name": { "content": "$1" } } },
-  "bannerSubagent": { "message": "Found the subagent \"$NAME$\"", "placeholders": { "name": { "content": "$1" } } },
-  "bannerInstall": { "message": "Install" },
-  "bannerDismiss": { "message": "Not now" },
-  "tabTitle": { "message": "Agent Tool" },
-  "tabUrlLabel": { "message": "Paste a GitHub or catalog URL" },
-  "tabUrlPlaceholder": { "message": "https://github.com/owner/repo/tree/main/skills/pdf" },
-  "tabUrlUnsupported": { "message": "This URL does not point to a skill or subagent." },
-  "tabTargetLabel": { "message": "Install into" },
-  "tabNeedsPermission": { "message": "permission required" },
-  "tabInstall": { "message": "Install" },
-  "tabInstalling": { "message": "Installing…" },
-  "tabInstalled": { "message": "Installed $NAME$ into $ROOT$", "placeholders": { "name": { "content": "$1" }, "root": { "content": "$2" } } },
-  "tabCollection": { "message": "Installed by this extension" },
-  "tabCollectionEmpty": { "message": "Nothing installed yet." },
-  "tabRemove": { "message": "Remove" },
-  "tabRemoveConfirm": { "message": "Remove $NAME$? This cannot be undone.", "placeholders": { "name": { "content": "$1" } } },
-  "tabRemoveChanged": { "message": "$NAME$ was changed after it was installed, so this extension will not remove it.", "placeholders": { "name": { "content": "$1" } } },
-  "tabSettings": { "message": "Settings" },
-  "tabBannerToggle": { "message": "Show a banner when a skill or subagent is found" },
-  "pickerIntroMac": { "message": "Choose the folder $PATH$. Press Cmd+Shift+. in the picker to show hidden folders.", "placeholders": { "path": { "content": "$1" } } },
-  "pickerIntroLinux": { "message": "Choose the folder $PATH$. Press Ctrl+H in the picker to show hidden folders.", "placeholders": { "path": { "content": "$1" } } },
-  "pickerIntroWindows": { "message": "Choose the folder $PATH$.", "placeholders": { "path": { "content": "$1" } } },
-  "pickerWrongFolder": { "message": "You chose \"$NAME$\". Choose the folder $PATH$ itself.", "placeholders": { "name": { "content": "$1" }, "path": { "content": "$2" } } },
-  "permissionLost": { "message": "Permission to write to this folder expired." },
-  "permissionGrant": { "message": "Grant again" },
-  "overwriteConfirm": { "message": "$NAME$ already exists there. Overwrite it?", "placeholders": { "name": { "content": "$1" } } },
-  "errorTooLarge": { "message": "The download exceeded the limit and was stopped." },
-  "errorFetchFailed": { "message": "The download failed." }
+  "bannerSkill": {
+    "message": "Found the skill \"$NAME$\"",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "bannerSubagent": {
+    "message": "Found the subagent \"$NAME$\"",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "bannerInstall": {
+    "message": "Install"
+  },
+  "bannerDismiss": {
+    "message": "Not now"
+  },
+  "tabTitle": {
+    "message": "Agent Tool"
+  },
+  "tabUrlLabel": {
+    "message": "Paste a GitHub or catalog URL"
+  },
+  "tabUrlPlaceholder": {
+    "message": "https://github.com/owner/repo/tree/main/skills/pdf"
+  },
+  "tabUrlUnsupported": {
+    "message": "This URL does not point to a skill or subagent."
+  },
+  "tabTargetLabel": {
+    "message": "Install into"
+  },
+  "tabNeedsPermission": {
+    "message": "permission required"
+  },
+  "tabInstall": {
+    "message": "Install"
+  },
+  "tabInstalling": {
+    "message": "Installing…"
+  },
+  "tabInstalled": {
+    "message": "Installed $NAME$ into $ROOT$",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      },
+      "root": {
+        "content": "$2"
+      }
+    }
+  },
+  "tabCollection": {
+    "message": "Installed by this extension"
+  },
+  "tabCollectionEmpty": {
+    "message": "Nothing installed yet."
+  },
+  "tabRemove": {
+    "message": "Remove"
+  },
+  "tabRemoveConfirm": {
+    "message": "Remove $NAME$? This cannot be undone.",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "tabRemoveChanged": {
+    "message": "$NAME$ was changed after it was installed, so this extension will not remove it.",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "tabSettings": {
+    "message": "Settings"
+  },
+  "tabBannerToggle": {
+    "message": "Show a banner when a skill or subagent is found"
+  },
+  "pickerIntroMac": {
+    "message": "Choose the folder $PATH$. Press Cmd+Shift+. in the picker to show hidden folders.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "pickerIntroLinux": {
+    "message": "Choose the folder $PATH$. Press Ctrl+H in the picker to show hidden folders.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "pickerIntroWindows": {
+    "message": "Choose the folder $PATH$.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "pickerWrongFolder": {
+    "message": "You chose \"$NAME$\". Choose the folder $PATH$ itself.",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      },
+      "path": {
+        "content": "$2"
+      }
+    }
+  },
+  "permissionLost": {
+    "message": "Permission to write to this folder expired."
+  },
+  "overwriteConfirm": {
+    "message": "$NAME$ already exists there. Overwrite it?",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "errorTooLarge": {
+    "message": "The download exceeded the limit and was stopped."
+  },
+  "errorFetchFailed": {
+    "message": "The download failed."
+  }
 }

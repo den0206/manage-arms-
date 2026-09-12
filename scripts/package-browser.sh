@@ -1,22 +1,26 @@
 #!/bin/bash
-# ブラウザ拡張の zip を組み立てる。Chrome Web Store と Edge Add-ons へ同じものを出す。
+# ブラウザ拡張を組み立てる。Chrome Web Store と Edge Add-ons へ同じ zip を出す。
+# `vsix/browser/` は Chrome の「パッケージ化されていない拡張機能を読み込む」で読める形にする。
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+STAGE="vsix/browser"
 OUT="vsix/agent-tool-browser.zip"
-STAGE="$(mktemp -d)"
-trap 'rm -rf "$STAGE"' EXIT
 
 npx tsc -p browser/tsconfig.json
 
-mkdir -p "$STAGE/browser" vsix
+rm -rf "$STAGE"
+mkdir -p "$STAGE/browser"
 cp browser/manifest.json "$STAGE/"
 cp -R browser/_locales "$STAGE/_locales"
 cp browser/tab.html browser/tab.css "$STAGE/browser/"
 cp -R out/web/browser/. "$STAGE/browser/"
 cp -R out/web/core "$STAGE/core"
 
+# manifest と HTML が指すものが実際にあるか。読み込んで初めて気づくのを避ける。
+node scripts/check-browser-package.mjs "$STAGE"
+
 rm -f "$OUT"
 (cd "$STAGE" && zip -qr "$OLDPWD/$OUT" .)
-echo "$OUT $(wc -c < "$OUT" | tr -d ' ') bytes"
-unzip -Z1 "$OUT" | sed "s/^/  /"
+echo "$STAGE  (読み込み用)"
+echo "$OUT  $(wc -c < "$OUT" | tr -d ' ') bytes"
