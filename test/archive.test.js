@@ -100,9 +100,17 @@ test("512 の倍数でない中身も正しく切り出す", async () => {
   assert.equal(new TextDecoder().decode(entry.bytes), body);
 });
 
-test("symlink と hardlink を拒否する", async () => {
-  await rejects(tarGz([["a/link", "", "2", { link: "/etc/passwd" }]]), "link");
-  await rejects(tarGz([["a/link", "", "1", { link: "a/real" }]]), "link");
+test("symlink と hardlink は中身を返さず link として渡す", async () => {
+  // リポジトリ直下の CLAUDE.md が symlink というだけで取得ごと諦めさせない。
+  // 取り出したいものの中にあるかは呼び出し側が判断する。
+  const found = await readAll(tarGz([
+    ["a/link", "", "2", { link: "/etc/passwd" }],
+    ["a/hard", "", "1", { link: "a/real" }],
+    ["a/real.md", "body"],
+  ]));
+  assert.deepEqual(found.map(entry => entry.kind), ["link", "link", "file"]);
+  assert.deepEqual(found[0].bytes, new Uint8Array(0));
+  assert.equal(new TextDecoder().decode(found[2].bytes), "body");
 });
 
 test("デバイスなどの特殊ファイルを拒否する", async () => {

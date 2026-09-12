@@ -1,3 +1,4 @@
+import { HEAD_BYTES, parse } from "./frontmatter.js";
 import { catalog, components, GitHubSource, parseUrl } from "./github.js";
 
 /**
@@ -77,4 +78,35 @@ export function lead(raw: string): ToolLead | null {
     name: directory[directory.length - 1] ?? source.repo,
     proofs: [parts.isFile ? file : `${file}/SKILL.md`],
   };
+}
+
+/**
+ * 展開した中身から、カタログが指すスキルのディレクトリを探す。
+ *
+ * カタログの名前はディレクトリ名とは限らない。`skills.sh` が出す
+ * `vercel-react-best-practices` の実体は `skills/react-best-practices` で、
+ * 一致するのは **SKILL.md の frontmatter `name`** の方である。
+ * ディレクトリ名で当たらなければ frontmatter を読んで突き合わせる。
+ */
+export function locateSkill(
+  files: readonly { readonly path: string; readonly bytes: Uint8Array }[],
+  name: string,
+): string[] | null {
+  const decoder = new TextDecoder();
+  const candidates = files
+    .map(file => ({ file, parts: file.path.split("/") }))
+    .filter(item => item.parts[item.parts.length - 1] === "SKILL.md" && item.parts.length >= 2)
+    .sort((a, b) => a.parts.length - b.parts.length);      // 浅い方を先に見る
+
+  const byDirectory = candidates.find(item => item.parts[item.parts.length - 2] === name);
+  if (byDirectory !== undefined) return byDirectory.parts.slice(0, -1);
+
+  for (const item of candidates) {
+    const head = decoder.decode(item.file.bytes.subarray(0, HEAD_BYTES));
+    const result = parse(head);
+    if (result.status === "parsed" && result.matter.name === name) {
+      return item.parts.slice(0, -1);
+    }
+  }
+  return null;
 }

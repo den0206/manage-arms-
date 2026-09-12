@@ -19,7 +19,12 @@ export function safeSegments(entryName: string): string[] | null {
 export type TarEntry = {
   /** 検証済みのセグメント。先頭の `<repo>-<ref>/` はまだ付いている。 */
   readonly path: string[];
-  readonly kind: "file" | "directory";
+  /**
+   * `link` は symlink と hardlink。**中身は返さない**。
+   * 取り出したいものの外にあるだけなら無視してよいので、拒否は呼び出し側が決める
+   * （リポジトリ直下の `CLAUDE.md` が symlink というだけで導入を諦めさせない）。
+   */
+  readonly kind: "file" | "directory" | "link";
   readonly bytes: Uint8Array;
 };
 
@@ -70,8 +75,8 @@ const fail: (message: string) => never = message => { throw new ArchiveError(mes
 /**
  * gzip された tar を読む。`DecompressionStream` はブラウザにも Node にもある。
  *
- * 通常ファイルとディレクトリだけを返し、symlink・hardlink・デバイスは拒否する
- * （zip 側と同じ方針）。上限を超えたらその場で失敗させ、残りを読まない。
+ * 通常ファイル・ディレクトリ・リンクを返し、デバイスなどの特殊ファイルは拒否する。
+ * リンクの中身は返さない。上限を超えたらその場で失敗させ、残りを読まない。
  */
 export async function* readTarGz(
   stream: ReadableStream<Uint8Array>,
@@ -110,8 +115,8 @@ export async function* readTarGz(
     const name = override ?? (prefix === "" ? text(header, 0, 100) : `${prefix}/${text(header, 0, 100)}`);
     override = null;
 
-    if (flag === "1" || flag === "2") fail("the archive contains a link");
-    if (flag !== "0" && flag !== "\0" && flag !== "5") {
+    const isLink = flag === "1" || flag === "2";
+    if (!isLink && flag !== "0" && flag !== "\0" && flag !== "5") {
       fail("the archive contains an unsupported file type");
     }
 
@@ -121,6 +126,11 @@ export async function* readTarGz(
     entries += 1;
     if (entries > limits.entries) fail("too many files in the archive");
 
+    if (isLink) {
+      await reader.take(padded);                 // リンクに中身は無いが、念のため読み飛ばす
+      yield { path, kind: "link", bytes: new Uint8Array(0) };
+      continue;
+    }
     if (flag === "5") {
       yield { path, kind: "directory", bytes: new Uint8Array(0) };
       continue;
