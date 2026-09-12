@@ -100,6 +100,9 @@ export function parseUrl(raw: string): GitHubSource | null {
 const RESERVED: ReadonlySet<string> = new Set([
   "about", "agent", "agents", "api", "docs", "login", "new", "search",
   "terms", "privacy", "_next", "favicon.ico",
+  // `skills.sh/site/<ドメイン>/<名前>` は GitHub 以外が配っているもの。
+  // `site/open.feishu.cn` のような取得元にならない repo を作らない。
+  "site",
 ]);
 
 /**

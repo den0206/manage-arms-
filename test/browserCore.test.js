@@ -188,3 +188,57 @@ test("長さを混ぜるので境界をずらしても衝突しない", async ()
   const second = [{ path: "a", bytes: bytes("x") }, { path: "b", bytes: bytes("yz") }];
   assert.notEqual(await treeHash(first), await treeHash(second));
 });
+
+// --- カタログの実体を探す -----------------------------------------------
+
+const { locateSkill } = require("../out/core/detect.js");
+const file = (path, body = "") => ({ path, bytes: new TextEncoder().encode(body) });
+
+test("ディレクトリ名が一致すればそれを採る", () => {
+  assert.deepEqual(locateSkill([
+    file("skills/pdf/SKILL.md", "---\nname: pdf\n---\n"),
+    file("skills/other/SKILL.md", "---\nname: other\n---\n"),
+  ], "pdf"), ["skills", "pdf"]);
+});
+
+test("ディレクトリ名が違えば frontmatter の name で探す", () => {
+  // skills.sh は vercel-react-best-practices と出すが、実体は skills/react-best-practices。
+  assert.deepEqual(locateSkill([
+    file("skills/react-best-practices/SKILL.md", "---\nname: vercel-react-best-practices\n---\n"),
+    file("skills/deploy/SKILL.md", "---\nname: deploy-to-vercel\n---\n"),
+  ], "vercel-react-best-practices"), ["skills", "react-best-practices"]);
+});
+
+test("候補が複数あれば浅い方を採る", () => {
+  assert.deepEqual(locateSkill([
+    file("examples/nested/pdf/SKILL.md", "---\nname: pdf\n---\n"),
+    file("skills/pdf/SKILL.md", "---\nname: pdf\n---\n"),
+  ], "pdf"), ["skills", "pdf"]);
+});
+
+test("どちらでも当たらなければ null", () => {
+  assert.equal(locateSkill([file("skills/other/SKILL.md", "---\nname: other\n---\n")], "pdf"), null);
+  assert.equal(locateSkill([file("README.md", "x")], "pdf"), null);
+  assert.equal(locateSkill([], "pdf"), null);
+});
+
+test("リポジトリ直下の SKILL.md は候補にしない", () => {
+  // 親ディレクトリが無いと名前が決まらない。
+  assert.equal(locateSkill([file("SKILL.md", "---\nname: pdf\n---\n")], "pdf"), null);
+});
+
+// --- カタログの予約パス -------------------------------------------------
+
+const { catalog } = require("../out/core/github.js");
+
+test("skills.sh の site は GitHub の取得元ではない", () => {
+  // /site/<ドメイン>/<名前> は GitHub 以外が配っているもの。
+  assert.equal(catalog("https://www.skills.sh/site/open.feishu.cn/lark-vc-agent"), null);
+  assert.equal(lead("https://www.skills.sh/site/open.feishu.cn/lark-vc-agent"), null);
+});
+
+test("www つきのカタログも読む", () => {
+  const found = lead("https://www.skills.sh/vercel-labs/agent-skills/vercel-react-best-practices");
+  assert.equal(found.source.repo, "vercel-labs/agent-skills");
+  assert.equal(found.name, "vercel-react-best-practices");
+});

@@ -135,12 +135,18 @@ test("展開先の外を指すエントリを拒否する", async () => {
   assert.equal(existsSync(join(env.home, "escaped.md")), false);
 });
 
-test("symlink を含むアーカイブを拒否する", async () => {
+test("symlink は書かずに飛ばし、アーカイブごと諦めない", async () => {
+  // 実在のスキル集はリポジトリ直下の CLAUDE.md を symlink にしていることがある。
+  // それだけで取得を失敗させると、中のスキルが 1 つも入れられなくなる。
   const env = fakeEnv();
   const archive = writeZip(join(makeDir(env.home), "link.zip"), [
     { name: "repo-main/evil", data: "/etc/passwd", unixMode: 0o120777 },
+    { name: "repo-main/skills/pdf/SKILL.md", data: "---\nname: pdf\n---\n" },
   ]);
-  await assert.rejects(extract(archive, join(env.home, "out")), /symbolic link/);
+  const out = join(env.home, "out");
+  await extract(archive, out);
+  assert.equal(existsSync(join(out, "repo-main", "evil")), false);
+  assert.equal(existsSync(join(out, "repo-main", "skills", "pdf", "SKILL.md")), true);
 });
 
 // --- 種別判定 ---

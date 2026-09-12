@@ -161,7 +161,9 @@ export function extract(archive: string, destination: string): Promise<void> {
 
         // 上位 16 bit が Unix のモード。symlink と特殊ファイルは取り出さない。
         const mode = (entry.externalFileAttributes >>> 16) & 0o170000;
-        if (mode === 0o120000) return abort("the archive contains a symbolic link");
+        // symlink は書かずに飛ばす。リポジトリ直下の `CLAUDE.md` が symlink というだけで
+        // 取得ごと諦めさせない。取り出したいものの中にあれば、後段の identify が見つけない。
+        if (mode === 0o120000) return zip.readEntry();
         if (mode !== 0 && mode !== 0o100000 && mode !== 0o040000) {
           return abort("the archive contains an unsupported file type");
         }

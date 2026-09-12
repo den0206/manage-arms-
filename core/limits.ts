@@ -10,3 +10,9 @@ export const SINGLE_FILE_LIMIT = 20 * 1024 * 1024;
 export const ENTRY_LIMIT = 10_000;
 /** カタログページの HTML。JSON-LD を読むだけなので本文は保持しない。 */
 export const PAGE_LIMIT = 2 * 1024 * 1024;
+
+/**
+ * カタログ URL は取得元の subdir が分からず、一度まとめてメモリに載せてから探す。
+ * 実測でスキル集のアーカイブは 0.5〜4 MB なので、ここだけ低く抑える。
+ */
+export const CATALOG_EXTRACT_LIMIT = 64 * 1024 * 1024;
