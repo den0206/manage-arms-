@@ -43,6 +43,28 @@ for file in skillManager installer updater; do
 done
 echo "✓ 取得物の名前と可変性は作成前に検査されています"
 
+# UI文言は英語と日本語を同時に更新する（不変条件6）。形式は揃えず、キーだけを突き合わせる。
+MISMATCH=$(node -e '
+const fs = require("node:fs");
+const read = path => JSON.parse(fs.readFileSync(path, "utf8"));
+const pairs = [
+  ["l10n/bundle.l10n.json", "l10n/bundle.l10n.ja.json"],
+  ["browser/_locales/en/messages.json", "browser/_locales/ja/messages.json"],
+];
+for (const [en, ja] of pairs) {
+  if (!fs.existsSync(en) || !fs.existsSync(ja)) continue;
+  const a = Object.keys(read(en)).sort(), b = Object.keys(read(ja)).sort();
+  const only = (x, y) => x.filter(key => !y.includes(key));
+  for (const key of only(a, b)) console.log(`${ja}: ${key} がありません`);
+  for (const key of only(b, a)) console.log(`${en}: ${key} がありません`);
+}
+')
+if [ -n "$MISMATCH" ]; then
+    fail "英語と日本語の文言キーが揃っていません" "$MISMATCH"
+else
+    echo "✓ 英語と日本語の文言キーが揃っています"
+fi
+
 # core/はOSにもブラウザにも依存しない。node:の読み込み自体を持たせない。
 LEAKS=$(grep -rn "from \"node:" core/ --include='*.ts')
 if [ -n "$LEAKS" ]; then

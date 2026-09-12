@@ -1,4 +1,4 @@
-import { DetectKind } from "./detect";
+import { DetectKind } from "./detect.js";
 
 /**
  * ブラウザ拡張の収集一覧の 1 件。IndexedDB に置く（設計決定 D-11）。

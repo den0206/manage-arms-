@@ -1,0 +1,43 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Agent Tool</title>
+    <link rel="stylesheet" href="tab.css">
+  </head>
+  <body>
+    <main>
+      <h1 data-i18n="tabTitle"></h1>
+
+      <section>
+        <label for="url" data-i18n="tabUrlLabel"></label>
+        <input id="url" type="url" autocomplete="off">
+        <p id="url-error" class="error" hidden data-i18n="tabUrlUnsupported"></p>
+      </section>
+
+      <section id="found" hidden>
+        <h2 id="found-title"></h2>
+        <p id="found-repo" class="muted"></p>
+        <fieldset>
+          <legend data-i18n="tabTargetLabel"></legend>
+          <div id="targets"></div>
+        </fieldset>
+        <p id="picker-intro" class="muted"></p>
+        <button id="install" class="primary" data-i18n="tabInstall"></button>
+        <p id="status" role="status"></p>
+      </section>
+
+      <section>
+        <h2 data-i18n="tabCollection"></h2>
+        <ul id="collection"></ul>
+        <p id="collection-empty" class="muted" data-i18n="tabCollectionEmpty"></p>
+      </section>
+
+      <section>
+        <h2 data-i18n="tabSettings"></h2>
+        <label><input id="banner" type="checkbox"> <span data-i18n="tabBannerToggle"></span></label>
+      </section>
+    </main>
+    <script type="module" src="tab.js"></script>
+  </body>
+</html>

@@ -1,4 +1,4 @@
-import { ENTRY_LIMIT, EXTRACTED_SIZE_LIMIT, SINGLE_FILE_LIMIT } from "./limits";
+import { ENTRY_LIMIT, EXTRACTED_SIZE_LIMIT, SINGLE_FILE_LIMIT } from "./limits.js";
 
 /**
  * アーカイブの読み取りと検証。Web 標準だけで書き、IDE 拡張とブラウザ拡張で共有する。
@@ -135,10 +135,4 @@ export async function* readTarGz(
     if (body === null) fail("the archive ended in the middle of an entry");
     yield { path, kind: "file", bytes: body.slice(0, size) };
   }
-}
-
-/** アーカイブは `<repo>-<ref>/` を 1 段かぶせる。全部が同じ 1 段なら剥がす。 */
-export function stripTopLevel(paths: readonly (readonly string[])[]): number {
-  const tops = new Set(paths.map(path => path[0]).filter(top => top !== undefined));
-  return tops.size === 1 ? 1 : 0;
 }

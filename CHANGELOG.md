@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- A browser extension for Chrome and Edge that spots skills and subagents while you browse GitHub, skills.sh, and agentsdirectory.dev, and installs them into Claude Code, Cursor, or Codex. It writes only to folders you pick, and works without the IDE extension installed.
+
 ## [0.1.2] — 2026-09-12
 
 ### Changed
@@ -70,4 +74,3 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Unused registry fields (`usage`, `projects`, `excludedProjects`, per-agent `enabled`). Nothing read or wrote them; usage history would require scanning the agents' log directories, which the scan whitelist deliberately excludes.
 
 - Deleting a tool no longer moves it to the Trash and no longer offers a 30-second undo; the confirmation dialog states that the removal is permanent.
-
