@@ -7,6 +7,7 @@ import { pipeline } from "node:stream/promises";
 import { open as openZip, Entry, ZipFile } from "yauzl";
 import { KindId } from "../core/agent";
 import { AgentToolError } from "../core/errors";
+import { ENTRY_LIMIT, EXTRACTED_SIZE_LIMIT, PAGE_LIMIT, SINGLE_FILE_LIMIT, SIZE_LIMIT } from "../core/limits";
 import * as frontmatter from "./frontmatter";
 import { archiveUrl, GitHubSource } from "../core/github";
 import { isValidName } from "./writeGuard";
@@ -31,14 +32,6 @@ export type Staging = {
   readonly candidates: Candidate[];
   readonly resolvedSha?: string;
 };
-
-/** monorepo の zipball は subdir が 20 KB でも数百 MB になり得る。 */
-export const SIZE_LIMIT = 50 * 1024 * 1024;
-export const EXTRACTED_SIZE_LIMIT = 200 * 1024 * 1024;
-export const SINGLE_FILE_LIMIT = 20 * 1024 * 1024;
-export const ENTRY_LIMIT = 10_000;
-/** カタログページの上限。取得元の URL を 1 つ読むだけなので小さくてよい。 */
-export const PAGE_LIMIT = 2 * 1024 * 1024;
 
 const fail = (message: string): never => {
   throw new AgentToolError("FETCH_FAILED", message);
