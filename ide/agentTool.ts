@@ -68,10 +68,13 @@ async function mutate(storagePath: string,
 
 export async function inventory(params: {
   storagePath: string; projectPath: string | null; user?: boolean;
+  /** 未信頼ワークスペースと Remote では渡さない。台帳の取り込みと entry の除去を止める。 */
+  writable?: boolean;
 }): Promise<{ items: InventoryItem[]; issues: string[] }> {
   const env = envOf(params.storagePath);
   return buildInventory({
     env, projectPath: params.projectPath, run: runnerFor(env), user: params.user,
+    writable: params.writable,
   });
 }
 

@@ -13,6 +13,7 @@ Node.js `node:test` で TypeScript モジュールと VS Code API モックを�
 | Plugin | CLI コマンドと scope |
 | Dashboard | 表示中のみポーリングし、重複実行せず非表示時に解放 |
 | 台帳の取り込み | 未取り込みの台帳を registry へ入れ、読んだ台帳だけを消す |
+| 台帳の WriteGuard | 実体が無い台帳、`.agent-tool` の外、名前が不正なものを消さない |
 | 実体を失った entry | 走査できたルートの分だけ除き、開いていないプロジェクトを残す |
 
 ブラウザ拡張は `core/` の純粋関数を同じ `node:test` で検証する。

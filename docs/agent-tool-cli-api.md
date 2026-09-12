@@ -403,8 +403,9 @@ Claude の削除には一覧から取得した `scope` をそのまま渡す。M
 1. **純粋関数** — URL 解析（`github.ts`）、frontmatter の読み取り（`frontmatter.ts`）、
    エージェントの定義（`agent.ts`）、名前検証と拒否リスト、エラー型（`errors.ts`）、
    貼り付け入力の判別（`pasteInput.ts`）、種別判定と配置先の決定、台帳の生成と解釈
-2. **取得ポリシー** — URL、各上限、展開後エントリの検証。IDE は zip、ブラウザは tar.gz の
-   読み取りをそれぞれの層に置く
+2. **アーカイブ** — エントリ名の検証（`safeSegments`）と各上限（`limits.ts`）。tar.gz の
+   読み取り（`archive.ts`）は `DecompressionStream` だけで書けるので `core/` に置く。
+   zip は `yauzl` を使うので `ide/` に残す
 
 I/O を伴うものは `core/` に入れない。実体ツリー hash はパスと内容の一覧を受け取って値を返し、
 収集一覧の退避は一覧を受け取って捨てる対象を返す。ツリーの走査と IndexedDB の読み書きは

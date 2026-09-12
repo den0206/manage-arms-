@@ -74,8 +74,11 @@ else
 fi
 
 # 走査はホワイトリストだけを見る。ホームやワークスペース全体を再帰走査しない。
+# ledger.tsを許すのは、読むのがSKILL_SOURCES / SUBAGENT_SOURCESのルート直下の
+# `.agent-tool`だけで、ルート自体はホワイトリストから来るため。ここから
+# ホームやワークスペースへ広がる経路が無い = ユーザーデータへ到達しない。
 LEAKS=$(grep -rnE '\b(readdirSync|opendirSync|globSync)\(' ide/ core/ --include='*.ts' \
-        | grep -vE '/(source|skillScanner|projectScan|fetcher|updater)\.ts:')
+        | grep -vE '/(source|skillScanner|projectScan|fetcher|updater|ledger)\.ts:')
 if [ -n "$LEAKS" ]; then
     fail "走査がホワイトリストの外に漏れています" "$LEAKS"
 else

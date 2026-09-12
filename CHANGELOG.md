@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Tools installed by the browser extension are picked up by the IDE extension on its next scan, so they can be removed, disabled, and updated from the Dashboard like anything else.
+- Registry entries whose files are gone are dropped on the next scan, so the list no longer shows tools that were deleted outside Agent Tool.
 - A browser extension for Chrome and Edge that spots skills and subagents while you browse GitHub, skills.sh, and agentsdirectory.dev, and installs them into Claude Code, Cursor, or Codex. It writes only to folders you pick, and works without the IDE extension installed.
 
 ## [0.1.2] — 2026-09-12
