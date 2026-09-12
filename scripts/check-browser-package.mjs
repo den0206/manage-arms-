@@ -11,6 +11,7 @@ if (root === undefined) {
 
 const problems = [];
 const check = (path, why) => {
+  if (path === undefined) return;                 // manifest に無い項目は見ない
   if (!existsSync(join(root, path))) problems.push(`${why}: ${path} がありません`);
 };
 

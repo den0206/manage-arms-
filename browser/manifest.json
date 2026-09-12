@@ -12,7 +12,6 @@
     "default_title": "__MSG_extensionName__",
     "default_popup": "browser/tab.html"
   },
-  "options_page": "browser/settings.html",
   "permissions": [
     "unlimitedStorage",
     "webNavigation"

@@ -1,6 +1,6 @@
 import { safeSegments } from "../core/archive.js";
 import { TreeFile } from "../core/hash.js";
-import { loadHandle, saveHandle } from "./store.js";
+import { dropHandle, loadHandle, saveHandle } from "./store.js";
 
 /**
  * File System Access API はハンドルから basename しか返さない。絶対パスは持てないので、
@@ -13,62 +13,94 @@ export class PickerError extends Error {
   }
 }
 
-/**
- * エージェントの設定ディレクトリのハンドルを得る。覚えていれば再利用し、権限が切れていれば
- * 利用者の操作の中で requestPermission を呼ぶ（ブラウザ再起動ごとに 1 回）。
- *
- * `pick` が false のときはピッカーを出さない。許可済みかどうかの確認に使う。
- */
-export async function configHandle(
-  configDir: string, pick: boolean,
+/** 覚えているハンドルを使えるようにする。権限が切れていれば操作の中で訊き直す。 */
+async function revive(
+  key: string, pick: boolean,
 ): Promise<FileSystemDirectoryHandle | null> {
-  const saved = await loadHandle(configDir);
-  if (saved !== undefined) {
-    if (await saved.queryPermission({ mode: "readwrite" }) === "granted") return saved;
-    if (!pick) return null;
-    if (await saved.requestPermission({ mode: "readwrite" }) === "granted") return saved;
+  const saved = await loadHandle(key);
+  if (saved === undefined) return null;
+  if (await saved.queryPermission({ mode: "readwrite" }) === "granted") return saved;
+  if (!pick) return null;
+  return await saved.requestPermission({ mode: "readwrite" }) === "granted" ? saved : null;
+}
+
+/**
+ * 置き場のハンドルを得る。`pick` が false ならピッカーを出さない（許可済みかの確認に使う）。
+ *
+ * 選んでもらうのは `~/.claude` だが、**`~/.claude/skills` を選ばれても受け取る**。
+ * 利用者が探しに行くのは「スキルの入っているフォルダ」の方で、そちらを選ぶのが自然だから。
+ * 設定ディレクトリを選んでもらえれば `skills` と `agents` の両方を辿れて、ピッカーが 1 回で済む。
+ */
+export async function placeHandle(
+  where: { configDir: string; sub: string }, pick: boolean,
+  /** 覚えているものを使わず、必ずピッカーを開く。「選び直す」はこれを使う。 */
+  force = false,
+): Promise<FileSystemDirectoryHandle | null> {
+  if (!force) {
+    const config = await revive(where.configDir, pick);
+    if (config !== null) return await config.getDirectoryHandle(where.sub, { create: true });
+
+    const direct = await revive(`${where.configDir}/${where.sub}`, pick);
+    if (direct !== null) return direct;
   }
   if (!pick) return null;
 
   let handle: FileSystemDirectoryHandle;
   try {
+    // `startIn` は指定しない。ホームは指せず、Documents から始めても遠いだけ。
+    // `id` を渡しておくと、2 回目からは前回の場所から開く。
     handle = await showDirectoryPicker({
-      id: configDir.replace(/[^\w]/g, "_"), mode: "readwrite", startIn: "documents",
+      id: where.configDir.replace(/[^\w]/g, "_"), mode: "readwrite",
     });
   } catch {
     throw new PickerError("cancelled");
   }
-  // 取り違えは検出できない（別のエージェントの設定ディレクトリも隠しフォルダで似た名前）。
-  // 末尾の名前だけは見て、明らかに違うものは受け取らない。
-  if (handle.name !== configDir) throw new PickerError("wrongFolder", handle.name);
-  await saveHandle(configDir, handle);
-  return handle;
+
+  // 絶対パスは得られないので、確かめられるのは末尾の名前だけ。
+  // 設定ディレクトリなら両方を辿れる。置き場そのものならそれだけを覚える。
+  // 選び直したときに古い方が残ると、どちらが効いているのか分からなくなる。
+  if (handle.name === where.configDir) {
+    await dropHandle(`${where.configDir}/${where.sub}`);
+    await saveHandle(where.configDir, handle);
+    return await handle.getDirectoryHandle(where.sub, { create: true });
+  }
+  if (handle.name === where.sub) {
+    await dropHandle(where.configDir);
+    await saveHandle(`${where.configDir}/${where.sub}`, handle);
+    return handle;
+  }
+  throw new PickerError("wrongFolder", handle.name);
 }
 
 /**
- * 設定ディレクトリの下の置き場。無ければ作る（`~/.claude/agents` が未作成のことがある）。
+ * 隠しフォルダはピッカーに出ない。開く前に OS 別の手順を出す。
+ * ピッカーの表示は拡張から操作できないので、助けられるのは文言だけ。
  */
-export const subHandle = (
-  config: FileSystemDirectoryHandle, sub: string,
-): Promise<FileSystemDirectoryHandle> => config.getDirectoryHandle(sub, { create: true });
+export const pickerHint = (path: string): string => {
+  const agent = navigator.userAgent;
+  const key = agent.includes("Mac") ? "pickerIntroMac"
+    : agent.includes("Windows") ? "pickerIntroWindows" : "pickerIntroLinux";
+  return chrome.i18n.getMessage(key, [path]);
+};
 
-/** 置き場のハンドルを 1 回で得る。許可が無ければ null。 */
-export async function placeHandle(
-  where: { configDir: string; sub: string }, pick: boolean,
-): Promise<FileSystemDirectoryHandle | null> {
-  const config = await configHandle(where.configDir, pick);
-  return config === null ? null : await subHandle(config, where.sub);
+
+/**
+ * 書き込みの失敗は握りつぶさない。`NotAllowedError` なのか `TypeMismatchError` なのかで
+ * 手の打ちようが変わるのに、「作れませんでした」だけでは何も分からない。
+ */
+export class WriteError extends Error {
+  constructor(readonly path: string, readonly cause: unknown) {
+    const reason = cause instanceof DOMException ? `${cause.name}: ${cause.message}`
+      : cause instanceof Error ? cause.message : String(cause);
+    super(`${path}: ${reason}`);
+  }
 }
 
 const dirOf = async (root: FileSystemDirectoryHandle, segments: string[],
-                     create: boolean): Promise<FileSystemDirectoryHandle | null> => {
+                     create: boolean): Promise<FileSystemDirectoryHandle> => {
   let current = root;
   for (const segment of segments) {
-    try {
-      current = await current.getDirectoryHandle(segment, { create });
-    } catch {
-      return null;
-    }
+    current = await current.getDirectoryHandle(segment, { create });
   }
   return current;
 };
@@ -79,16 +111,20 @@ export async function writeTree(
 ): Promise<void> {
   for (const file of files) {
     const segments = safeSegments(file.path);
-    if (segments === null) throw new Error(`unsafe path: ${file.path}`);
-    const parent = await dirOf(root, [...base, ...segments.slice(0, -1)], true);
-    if (parent === null) throw new Error(`could not create ${file.path}`);
-    const handle = await parent.getFileHandle(segments[segments.length - 1], { create: true });
-    const writable = await handle.createWritable();
+    if (segments === null) throw new WriteError(file.path, "unsafe path");
+    const full = [...base, ...segments].join("/");
     try {
-      // DOM 型は SharedArrayBuffer 由来を受けない。実際に渡すのは通常の Uint8Array。
-      await writable.write(file.bytes as unknown as BufferSource);
-    } finally {
-      await writable.close();
+      const parent = await dirOf(root, [...base, ...segments.slice(0, -1)], true);
+      const handle = await parent.getFileHandle(segments[segments.length - 1], { create: true });
+      const writable = await handle.createWritable();
+      try {
+        // DOM 型は SharedArrayBuffer 由来を受けない。実際に渡すのは通常の Uint8Array。
+        await writable.write(file.bytes as unknown as BufferSource);
+      } finally {
+        await writable.close();
+      }
+    } catch (error) {
+      throw error instanceof WriteError ? error : new WriteError(full, error);
     }
   }
 }
@@ -117,6 +153,25 @@ export async function readTree(
   };
   await walk(dir, "");
   return files;
+}
+
+/**
+ * 置き場を確保する。**作ってみるまで使えるかは分からない。**
+ *
+ * IDE 拡張が張った symlink は、`getDirectoryHandle` でも `entries()` でも見えないのに
+ * 名前は埋まっている。`create: true` で `NotFoundError` になって初めて分かる。
+ * 呼び出し側はここで失敗したら「触れない名前」として扱う。
+ */
+export async function reserve(
+  root: FileSystemDirectoryHandle, entry: string, isDirectory: boolean,
+): Promise<FileSystemDirectoryHandle | FileSystemFileHandle> {
+  try {
+    return isDirectory
+      ? await root.getDirectoryHandle(entry, { create: true })
+      : await root.getFileHandle(entry, { create: true });
+  } catch (error) {
+    throw new WriteError(entry, error);
+  }
 }
 
 export const exists = async (root: FileSystemDirectoryHandle, entry: string): Promise<boolean> => {

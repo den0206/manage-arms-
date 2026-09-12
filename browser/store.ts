@@ -41,6 +41,9 @@ export const saveHandle = (root: string, handle: FileSystemDirectoryHandle): Pro
 export const loadHandle = (root: string): Promise<FileSystemDirectoryHandle | undefined> =>
   run(HANDLES, "readonly", store => store.get(root));
 
+export const dropHandle = (root: string): Promise<undefined> =>
+  run(HANDLES, "readwrite", store => store.delete(root));
+
 export const knownRoots = (): Promise<string[]> =>
   run(HANDLES, "readonly", store => store.getAllKeys() as IDBRequest<string[]>);
 

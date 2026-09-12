@@ -30,7 +30,7 @@
     "message": "Install into"
   },
   "tabNeedsPermission": {
-    "message": "needs folder access"
+    "message": "not set up"
   },
   "tabPickTarget": {
     "message": "Choose where to install it."
@@ -90,7 +90,7 @@
     "message": "Choose where Agent Tool can write"
   },
   "settingsText": {
-    "message": "Pick each agent's folder once. Agent Tool writes only inside the folders you pick."
+    "message": "Pick each agent's folder once. Choose the agent folder itself to cover both skills and subagents, or just the skills folder. Agent Tool writes only inside what you pick."
   },
   "settingsChoose": {
     "message": "Choose folder"
@@ -119,7 +119,7 @@
     "message": "Shared with Cursor and Codex"
   },
   "pickerIntroMac": {
-    "message": "Press Cmd+Shift+. in the picker to show hidden folders such as $PATH$.",
+    "message": "Hidden folders start with a dot. Press Cmd+Shift+. in the picker to show $PATH$.",
     "placeholders": {
       "path": {
         "content": "$1"
@@ -127,7 +127,7 @@
     }
   },
   "pickerIntroLinux": {
-    "message": "Press Ctrl+H in the picker to show hidden folders such as $PATH$.",
+    "message": "Hidden folders start with a dot. Press Ctrl+H in the picker to show $PATH$.",
     "placeholders": {
       "path": {
         "content": "$1"
@@ -135,7 +135,7 @@
     }
   },
   "pickerIntroWindows": {
-    "message": "Folders such as $PATH$ start with a dot.",
+    "message": "Hidden folders start with a dot, such as $PATH$.",
     "placeholders": {
       "path": {
         "content": "$1"
@@ -143,13 +143,16 @@
     }
   },
   "pickerWrongFolder": {
-    "message": "You chose $NAME$. Choose $PATH$ itself.",
+    "message": "You chose $NAME$. Choose $CONFIG$ or $ROOT$.",
     "placeholders": {
       "name": {
         "content": "$1"
       },
-      "path": {
+      "config": {
         "content": "$2"
+      },
+      "root": {
+        "content": "$3"
       }
     }
   },
@@ -172,5 +175,16 @@
   },
   "errorFetchFailed": {
     "message": "The download failed. Check your connection and try again."
+  },
+  "errorBlocked": {
+    "message": "$PATH$ is already taken by something this extension cannot open — most likely a link made by the Agent Tool IDE extension, which means you already have it. To reinstall, remove it from the IDE extension first, or pick another destination.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
+  },
+  "back": {
+    "message": "Back"
   }
 }

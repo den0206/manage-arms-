@@ -3,10 +3,12 @@ import { Collected } from "../core/collection.js";
 import { lead, ToolLead } from "../core/detect.js";
 import { fromJsonLd, needsPage } from "../core/github.js";
 import { PAGE_LIMIT } from "../core/limits.js";
-import { placement, rootOf, SHARED_CONFIG_DIR, splitRoot, targets } from "../core/placement.js";
-import { configHandle, exists, PickerError, placeHandle } from "./fs.js";
+import {
+  CONFIG_DIRS, placement, Placement, rootOf, SHARED_CONFIG_DIR, splitRoot, targets,
+} from "../core/placement.js";
+import { exists, PickerError, pickerHint, placeHandle } from "./fs.js";
 import { install, InstallError, remove, willOverwrite } from "./install.js";
-import { autoOpenEnabled, forget, loadCollection, setAutoOpenEnabled } from "./store.js";
+import { autoOpenEnabled, forget, knownRoots, loadCollection, setAutoOpenEnabled } from "./store.js";
 
 const t = (key: string, ...args: string[]): string => chrome.i18n.getMessage(key, args);
 const byId = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -19,9 +21,6 @@ const send = (message: Record<string, unknown>): Promise<unknown> =>
 for (const node of document.querySelectorAll<HTMLElement>("[data-i18n]")) {
   node.textContent = t(node.dataset.i18n ?? "");
 }
-for (const node of document.querySelectorAll<HTMLElement>("[data-i18n-title]")) {
-  node.title = t(node.dataset.i18nTitle ?? "");
-}
 byId<HTMLInputElement>("url").placeholder = t("tabUrlPlaceholder");
 
 let current: ToolLead | null = null;
@@ -29,44 +28,53 @@ let chosen: AgentId | null = null;
 
 // --- 導入先の選択 -------------------------------------------------------
 
+/** 導入先の候補。選ばれているものを `chosen` に持つ。 */
+let options: { agent: AgentId; where: Placement; configured: boolean }[] = [];
+
+/**
+ * フォルダを設定済みか。
+ *
+ * **実際の許可は見ない。** File System Access API の許可は origin のタブが全部閉じると
+ * 消えるので、popup では毎回「未許可」になる。利用者が決めたのは「どのフォルダを使うか」
+ * なので、覚えているかどうかで見せる。足りない許可は導入を押したときに 1 回訊けばよい。
+ */
+async function configuredRoots(): Promise<(configDir: string) => boolean> {
+  const roots = await knownRoots();
+  return configDir => roots.some(root => root === configDir || root.startsWith(`${configDir}/`));
+}
+
+/** 選択に合わせて、入る場所と足りない許可を出し分ける。 */
+function showTarget(): void {
+  const picked = options.find(option => option.agent === chosen);
+  byId("target-path").textContent = picked === undefined ? "" : `~/${rootOf(picked.where)}`;
+  byId("picker-hint").textContent = picked === undefined || picked.configured
+    ? "" : pickerHint(`~/${picked.where.configDir}`);
+}
+
 async function renderTargets(found: ToolLead): Promise<void> {
-  const shared = await configHandle(SHARED_CONFIG_DIR, false) !== null;
-  const box = byId("targets");
-  box.replaceChildren();
-  chosen = null;
+  const isConfigured = await configuredRoots();
+  const shared = isConfigured(SHARED_CONFIG_DIR);
+  const select = byId<HTMLSelectElement>("target");
+  select.replaceChildren();
+  options = [];
 
   for (const agent of targets(found.kind)) {
     const where = placement(agent, found.kind, found.name, shared);
     if (where === null) continue;
-    const granted = await configHandle(where.configDir, false) !== null;
+    const configured = isConfigured(where.configDir);
+    options.push({ agent, where, configured });
 
-    const label = document.createElement("label");
-    label.className = "target";
-    const radio = document.createElement("input");
-    radio.type = "radio";
-    radio.name = "agent";
-    radio.value = agent;
-    radio.addEventListener("change", () => { chosen = agent; });
-
-    const text = document.createElement("span");
-    const name = document.createElement("span");
-    name.className = "target-name";
-    name.textContent = agentLabel(where.configDir);
-    const path = document.createElement("code");
-    path.textContent = `~/${rootOf(where)}`;
-    text.append(name, path);
-    if (!granted) {
-      const badge = document.createElement("span");
-      badge.className = "badge";
-      badge.textContent = t("tabNeedsPermission");
-      text.append(badge);
-    }
-    label.append(radio, text);
-    box.append(label);
+    const option = document.createElement("option");
+    option.value = agent;
+    option.textContent = configured
+      ? agentLabel(where.configDir)
+      : `${agentLabel(where.configDir)}（${t("tabNeedsPermission")}）`;
+    select.append(option);
   }
-  // 選択肢が 1 つなら選ばせない。押す回数を増やさない。
-  const only = box.querySelector<HTMLInputElement>("input[type=radio]");
-  if (box.children.length === 1 && only !== null) { only.checked = true; chosen = only.value as AgentId; }
+  // 設定済みのものがあればそれを初期値にする。無ければ先頭。
+  chosen = (options.find(option => option.configured) ?? options[0])?.agent ?? null;
+  if (chosen !== null) select.value = chosen;
+  showTarget();
 }
 
 /** URL だけで取得元が決まらないカタログは、ページを 1 回読んで JSON-LD から採る。 */
@@ -93,20 +101,21 @@ async function showLead(raw: string): Promise<void> {
   byId("url-error").hidden = found === null || raw === "";
   byId("status").textContent = "";
   byId("status").className = "status";
-  byId<HTMLButtonElement>("install").hidden = false;
+  byId("picker-hint").textContent = "";
   setMode(found !== null);
   if (found === null) return;
 
   byId("found-kind").textContent = t(found.kind === "skill" ? "kindSkill" : "kindSubagent");
   byId("found-name").textContent = found.name;
   byId("found-repo").textContent = found.source.repo;
-  await renderTargets(found);
+  byId("destination").hidden = true;             // 導入を押してから出す
 }
 
 /** 検知の表示をやめて通常の画面に戻す。導入後とタブを移ったときに呼ぶ。 */
 function backToNormal(): void {
   current = null;
   chosen = null;
+  byId("destination").hidden = true;
   setMode(false);
   byId<HTMLInputElement>("url").value = "";
   byId("url-error").hidden = true;
@@ -118,6 +127,11 @@ byId<HTMLInputElement>("url").addEventListener("change", event => {
   void showLead(value);
 });
 
+byId<HTMLSelectElement>("target").addEventListener("change", event => {
+  chosen = (event.target as HTMLSelectElement).value as AgentId;
+  showTarget();
+});
+
 byId<HTMLButtonElement>("dismiss").addEventListener("click", () => {
   void send({ type: "dismiss" });
   backToNormal();
@@ -126,14 +140,24 @@ byId<HTMLButtonElement>("dismiss").addEventListener("click", () => {
 // --- 導入 ---------------------------------------------------------------
 
 byId<HTMLButtonElement>("install").addEventListener("click", async () => {
-  const found = current, agent = chosen;
+  const found = current;
   const status = byId("status");
   if (found === null) return;
-  if (agent === null) { status.className = "status error"; status.textContent = t("tabPickTarget"); return; }
 
-  const shared = await configHandle(SHARED_CONFIG_DIR, false) !== null;
-  const where = placement(agent, found.kind, found.name, shared);
-  if (where === null) return;
+  // 検知の時点では種類と名前だけを出している。どこへ入れるかはここで見せる。
+  if (byId("destination").hidden) {
+    byId("destination").hidden = false;
+    await renderTargets(found);
+    return;
+  }
+
+  const picked = options.find(option => option.agent === chosen);
+  if (picked === undefined) {
+    status.className = "status error";
+    status.textContent = t("tabPickTarget");
+    return;
+  }
+  const { agent, where } = picked;
 
   const button = byId<HTMLButtonElement>("install");
   button.disabled = true;
@@ -158,22 +182,26 @@ byId<HTMLButtonElement>("install").addEventListener("click", async () => {
     setTimeout(() => { done.hidden = true; }, 6000);
   } catch (error) {
     status.className = "status error";
-    status.textContent = message(error, where.configDir);
+    status.textContent = message(error, where);
   } finally {
     button.disabled = false;
   }
 });
 
-const message = (error: unknown, configDir: string): string => {
+const message = (error: unknown, where: Placement): string => {
   if (error instanceof PickerError) {
     return error.kind === "cancelled" ? ""
-      : t("pickerWrongFolder", error.chosen ?? "", `~/${configDir}`);
+      : t("pickerWrongFolder", error.chosen ?? "", `~/${where.configDir}`, `~/${rootOf(where)}`);
   }
   if (error instanceof InstallError) {
     if (error.kind === "tooLarge") return t("errorTooLarge");
     if (error.kind === "notFound") return t("errorNotFound");
+    if (error.kind === "blocked") return t("errorBlocked", `~/${rootOf(where)}/${where.entry}`);
+    return t("errorFetchFailed");
   }
-  return t("errorFetchFailed");
+  // 想定していない失敗を「接続を確かめて」で塗りつぶさない。理由をそのまま見せる。
+  console.error("Agent Tool:", error);
+  return error instanceof Error ? error.message : String(error);
 };
 
 // --- 収集一覧 -----------------------------------------------------------
@@ -224,8 +252,8 @@ async function renderCollection(): Promise<void> {
 
 /** 許可が切れているルートをまとめて許可し直す。1 回の操作で全部を訊く。 */
 byId<HTMLButtonElement>("verify").addEventListener("click", async () => {
-  const roots = new Set((await loadCollection()).map(item => splitRoot(item.root).configDir));
-  for (const configDir of roots) await configHandle(configDir, true).catch(() => null);
+  const roots = new Set((await loadCollection()).map(item => item.root));
+  for (const root of roots) await placeHandle(splitRoot(root), true).catch(() => null);
   await renderCollection();
 });
 
@@ -244,11 +272,71 @@ async function removeItem(item: Collected): Promise<void> {
   await renderCollection();
 }
 
+// --- 設定。別タブへ飛ばさず popup の中で切り替える ----------------------
+
+function setSettings(open: boolean): void {
+  document.body.classList.toggle("settings", open);
+  byId("settings-view").hidden = !open;
+  if (open) void renderRoots();
+}
+
+async function renderRoots(): Promise<void> {
+  // 覚えているのは設定ディレクトリか、その下の置き場。どちらでも「許可済み」とする。
+  const granted = await knownRoots();
+  const isGranted = (configDir: string): boolean =>
+    granted.some(root => root === configDir || root.startsWith(`${configDir}/`));
+
+  const box = byId("roots");
+  box.replaceChildren();
+  for (const configDir of CONFIG_DIRS) {
+    const done = isGranted(configDir);
+    const row = document.createElement("div");
+    row.className = "root";
+
+    const text = document.createElement("div");
+    const name = document.createElement("div");
+    name.className = "root-name";
+    name.textContent = agentLabel(configDir);
+    const path = document.createElement("code");
+    path.textContent = `~/${configDir}`;
+    text.append(name, path);
+
+    const button = document.createElement("button");
+    button.textContent = done ? t("settingsGranted") : t("settingsChoose");
+    if (!done) button.className = "primary";
+    button.addEventListener("click", () => void grant(configDir, done));
+
+    row.append(text, button);
+    box.append(row);
+  }
+}
+
+/** `again` が真なら、覚えているフォルダを使わず必ずピッカーを開く。 */
+async function grant(configDir: string, again: boolean): Promise<void> {
+  const status = byId("settings-status");
+  status.className = "status";
+  status.textContent = "";
+  try {
+    const handle = await placeHandle({ configDir, sub: "skills" }, true, again);
+    if (handle !== null) status.textContent = t("settingsSaved", `~/${configDir}`);
+    await renderRoots();
+  } catch (error) {
+    if (error instanceof PickerError && error.kind !== "cancelled") {
+      status.className = "status error";
+      status.textContent = t("pickerWrongFolder", error.chosen ?? "",
+        `~/${configDir}`, `~/${configDir}/skills`);
+    }
+  }
+}
+
+byId("hint").textContent = pickerHint("~/.claude");
+byId<HTMLButtonElement>("open-settings").addEventListener("click", () => setSettings(true));
+byId<HTMLButtonElement>("close-settings").addEventListener("click", () => setSettings(false));
+
 // --- 起動 ---------------------------------------------------------------
 
 const autoOpen = byId<HTMLInputElement>("auto-open");
 autoOpen.addEventListener("change", () => void setAutoOpenEnabled(autoOpen.checked));
-byId<HTMLButtonElement>("open-settings").addEventListener("click", () => void send({ type: "setup" }));
 
 void (async () => {
   autoOpen.checked = await autoOpenEnabled();
