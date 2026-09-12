@@ -16,6 +16,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - A unified `release/Ver_<semver>` workflow that gives both extensions the same version, packages and checksums their artifacts, and attaches them to one GitHub Release, plus a privacy policy (`PRIVACY.md`) and a Chrome Web Store listing checklist (`docs/browser-store-listing.md`).
 - Conditional Chrome Web Store submission from that workflow, skipped until all of its required GitHub Secrets are configured; submit the approved zip to Edge Add-ons manually.
 
+### Changed
+
+- Installing stops before anything is deleted when the download contains a name no file system can take (Windows device names, `<>:"|?*`, trailing dots), instead of failing halfway through and leaving neither the old nor the new version.
+- Registry entries are kept, not dropped, when a scanned folder cannot be read, so a temporary permission or sync problem no longer loses pinned and disabled state. The unreadable folder is reported instead.
+- Installing over an existing Skill now replaces it instead of writing on top of it, so files that only existed in the previous version no longer linger. The old copy is removed only after the new one has been fetched.
+- The browser extension's popup uses a palette matching the extension icon, with a few short, `prefers-reduced-motion`-aware animations (the detected-card entrance, the install spinner, the dialog open).
+
 ### Fixed
 
 - Choosing a folder in Brave reported what went wrong instead of doing nothing: Brave turns the File System Access API off by default, and the extension now says so and walks through enabling it in brave://flags.
@@ -29,16 +36,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- Installing stops before anything is deleted when the download contains a name no file system can take (Windows device names, `<>:"|?*`, trailing dots), instead of failing halfway through and leaving neither the old nor the new version.
-- Registry entries are kept, not dropped, when a scanned folder cannot be read, so a temporary permission or sync problem no longer loses pinned and disabled state. The unreadable folder is reported instead.
-- Installing over an existing Skill now replaces it instead of writing on top of it, so files that only existed in the previous version no longer linger. The old copy is removed only after the new one has been fetched.
 - Dashboard rows now show an "Updates available" marker, so it is clear which tools the update count refers to.
 - Clicking the "Updates available" count filters the list down to the tools that have an update; clicking it again clears the filter.
 - The Dashboard shows a loading indicator until the first scan finishes, instead of looking like an empty or failed list.
 - The tool list is posted before the agent CLI scan, so the first view no longer waits on spawning login shells.
 - MCP status checks no longer start a new round while the previous one is still running.
 - Packaging now starts from a clean build directory.
-- The browser extension's popup uses a palette matching the extension icon, with a few short, `prefers-reduced-motion`-aware animations (the detected-card entrance, the install spinner, the dialog open).
 
 ### Fixed
 
