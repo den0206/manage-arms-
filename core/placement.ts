@@ -1,5 +1,5 @@
-import { AgentId, configDir, skillRoots, subagentRoots, supports } from "./agent";
-import { DetectKind } from "./detect";
+import { AgentId, configDir, skillRoots, subagentRoots, supports } from "./agent.js";
+import { DetectKind } from "./detect.js";
 
 /**
  * ブラウザ拡張の導入先。ホーム相対のルートと、その下に作る名前だけを決める。

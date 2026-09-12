@@ -1,5 +1,5 @@
-import { DetectKind } from "./detect";
-import { GitHubSource } from "./github";
+import { DetectKind } from "./detect.js";
+import { GitHubSource } from "./github.js";
 
 /**
  * 取得元の台帳（設計決定 D-14）。ブラウザ拡張が書き、IDE 拡張が registry へ取り込んで消す。

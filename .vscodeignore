@@ -7,6 +7,8 @@ scripts/**
 test/**
 core/**
 ide/**
+browser/**
+out/web/**
 vsix/**
 media/demo.gif
 .gitignore

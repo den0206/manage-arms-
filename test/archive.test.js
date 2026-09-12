@@ -1,7 +1,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { gzipSync } = require("node:zlib");
-const { readTarGz, safeSegments, stripTopLevel, ArchiveError } =
+const { readTarGz, safeSegments, ArchiveError } =
   require("../out/core/archive.js");
 
 // --- tar を組み立てる（テスト用。実装側は読むだけ） ---------------------
@@ -158,16 +158,4 @@ test("上限を超えたら読むのをやめる", async () => {
 test("途中で切れたアーカイブを黙って受け入れない", async () => {
   const whole = Buffer.concat([header("a/b.txt", 1000, "0"), Buffer.alloc(200, 0x78)]);
   await rejects(gzipSync(whole), "ended in the middle");
-});
-
-// --- 1 段目を剥がす -----------------------------------------------------
-
-test("全部が同じ 1 段なら剥がす", () => {
-  assert.equal(stripTopLevel([["repo-main", "a.md"], ["repo-main", "b", "c.md"]]), 1);
-  assert.equal(stripTopLevel([["repo-main"]]), 1);
-});
-
-test("1 段目が割れていたら剥がさない", () => {
-  assert.equal(stripTopLevel([["a", "x.md"], ["b", "y.md"]]), 0);
-  assert.equal(stripTopLevel([]), 0);
 });

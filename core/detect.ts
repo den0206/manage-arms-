@@ -1,4 +1,4 @@
-import { catalog, components, GitHubSource, parseUrl } from "./github";
+import { catalog, components, GitHubSource, parseUrl } from "./github.js";
 
 /**
  * ブラウザ拡張が扱う種別。MCP は URL に手がかりが無く、Plugin は CLI への登録が必要なので
