@@ -80,10 +80,32 @@
         <div id="roots"></div>
         <p id="settings-status" class="status" role="status"></p>
 
-        <label class="switch">
-          <input id="auto-open" type="checkbox">
-          <span data-i18n="tabAutoOpenToggle"></span>
-        </label>
+        <div id="prefs">
+          <label class="switch">
+            <input id="auto-open" type="checkbox">
+            <span data-i18n="tabAutoOpenToggle"></span>
+          </label>
+
+          <!--
+            配色。3 つから 1 つなので radio にする（checkbox は 3 つとも入る状態を作れる）。
+            見た目は上の行に合わせる。値は `color-scheme` にそのまま入る。
+          -->
+          <fieldset id="theme">
+            <legend data-i18n="tabThemeLabel"></legend>
+            <label class="switch">
+              <input type="radio" name="theme" value="light dark">
+              <span data-i18n="tabThemeSystem"></span>
+            </label>
+            <label class="switch">
+              <input type="radio" name="theme" value="light">
+              <span data-i18n="tabThemeLight"></span>
+            </label>
+            <label class="switch">
+              <input type="radio" name="theme" value="dark">
+              <span data-i18n="tabThemeDark"></span>
+            </label>
+          </fieldset>
+        </div>
 
         <!-- ここから導入したもの。普段は畳んでおく。開閉は `details` に任せる。 -->
         <details id="collection-section">

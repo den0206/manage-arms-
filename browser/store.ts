@@ -3,7 +3,7 @@ import {
 } from "../core/collection.js";
 
 /**
- * 永続化するのはディレクトリハンドルと収集一覧だけ（設計決定 D-11）。
+ * 永続化するのはディレクトリハンドル、収集一覧、設定 2 つだけ（設計決定 D-11）。
  * 閲覧した URL・ログ・診断履歴は持たない。
  */
 const DB = "agent-tool";
@@ -77,9 +77,18 @@ export async function forgetAll(items: readonly Collected[]): Promise<Collected[
 
 export const forget = (item: Collected): Promise<Collected[]> => forgetAll([item]);
 
-/** バナーの ON / OFF。設定は 1 つだけなので chrome.storage を使わず既定値と往復する。 */
+/** 設定は 2 つだけなので chrome.storage を使わず、収集一覧と同じ store に置く。 */
 export const autoOpenEnabled = async (): Promise<boolean> =>
   (await run<boolean | undefined>(COLLECTION, "readonly", store => store.get("autoOpen"))) ?? true;
 
 export const setAutoOpenEnabled = (on: boolean): Promise<IDBValidKey> =>
   run(COLLECTION, "readwrite", store => store.put(on, "autoOpen"));
+
+/** 配色。CSS の `color-scheme` にそのまま入る値を持つ。既定はシステム追従。 */
+export type Theme = "light dark" | "light" | "dark";
+
+export const theme = async (): Promise<Theme> =>
+  (await run<Theme | undefined>(COLLECTION, "readonly", store => store.get("theme"))) ?? "light dark";
+
+export const setTheme = (value: Theme): Promise<IDBValidKey> =>
+  run(COLLECTION, "readwrite", store => store.put(value, "theme"));
