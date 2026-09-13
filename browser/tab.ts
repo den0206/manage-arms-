@@ -1,7 +1,7 @@
 import { AgentId } from "../core/agent.js";
 import { Collected } from "../core/collection.js";
-import { ToolLead, verifiedPage } from "../core/detect.js";
-import { needsPage, SUPPORTED_SITES } from "../core/github.js";
+import { skillIndex, ToolLead, verifiedPage } from "../core/detect.js";
+import { GitHubSource, needsPage, SUPPORTED_SITES } from "../core/github.js";
 import { PAGE_LIMIT } from "../core/limits.js";
 import {
   CONFIG_DIRS, placement, Placement, rootOf, RootState, SHARED_CONFIG_DIR, splitRoot, targets,
@@ -10,7 +10,10 @@ import {
   clearRoot, configHandle, exists, PickerError, pickerHint, pickerUnavailable, placeHandle,
   rootState,
 } from "./fs.js";
-import { install, InstallError, isExtractable, remove, willOverwrite } from "./install.js";
+import {
+  filesFor, install, InstallError, isExtractable, remove, willOverwrite,
+} from "./install.js";
+import { listSkills, SkillEntry } from "../core/tree.js";
 import {
   autoOpenEnabled, forgetAll, loadCollection, setAutoOpenEnabled, setTheme, Theme, theme,
 } from "./store.js";
@@ -199,6 +202,16 @@ function setMode(detected: boolean): void {
 }
 
 async function showLead(raw: string, vetted = false): Promise<void> {
+  // Skill が並ぶディレクトリなら一覧を出す。列挙は GitHub API を 1 回だけ使う。
+  const at = skillIndex(raw);
+  if (at !== null) {
+    const entries = await listSkills(at.source, at.subdir, getJson);
+    if (entries.length > 0) {
+      byId("url-error").hidden = true;
+      await showIndex({ ...at, entries });
+      return;
+    }
+  }
   const found = await resolve(raw, vetted);
   current = found;
   // 対応外の URL でこそ出す。検知できたときは `#url-section` ごと隠れる。
@@ -206,6 +219,9 @@ async function showLead(raw: string, vetted = false): Promise<void> {
   byId("status").textContent = "";
   byId("status").className = "status";
   byId("picker-hint").textContent = "";
+  index = null;
+  byId("index").hidden = true;
+  byId("found").hidden = found === null;
   setMode(found !== null);
   if (found === null) return;
 
@@ -219,7 +235,9 @@ async function showLead(raw: string, vetted = false): Promise<void> {
 function backToNormal(): void {
   current = null;
   chosen = null;
+  index = null;
   byId("destination").hidden = true;
+  byId("index").hidden = true;
   setMode(false);
   byId<HTMLInputElement>("url").value = "";
   byId("url-error").hidden = true;
@@ -318,6 +336,162 @@ const message = (error: unknown, where: Placement): string => {
   console.error("Agent Tool:", error);
   return error instanceof Error ? error.message : String(error);
 };
+
+// --- Skill が並ぶディレクトリ -------------------------------------------
+
+/**
+ * 1 件ではなく一覧を出す。**まとめては入れない** — 行ごとに利用者が決める。
+ *
+ * 実体はアーカイブではなくファイル単位で取るので、取得上限を超える大きいリポジトリ
+ * （実測 116 MB）からも入れられる。列挙は service worker が済ませていればそれを使う。
+ */
+type SkillIndex = {
+  readonly url: string; readonly source: GitHubSource;
+  readonly subdir: string; readonly entries: SkillEntry[];
+};
+let index: SkillIndex | null = null;
+let indexOptions: { agent: AgentId; where: Placement; state: RootState }[] = [];
+let indexAgent: AgentId | null = null;
+/** 共有ストアが許可済みか。行ごとに置き場を組み直すのに要る。 */
+let indexShared = false;
+
+const getJson = async (url: string): Promise<unknown | null> => {
+  const response = await fetch(url, { cache: "no-store" }).catch(() => null);
+  return response === null || !response.ok ? null : await response.json().catch(() => null);
+};
+
+function showIndexTarget(): void {
+  const picked = indexOptions.find(option => option.agent === indexAgent);
+  const path = byId("index-path");
+  const hint = byId("index-hint");
+  path.className = "repo";
+  hint.className = "hint";
+  hint.textContent = "";
+  path.textContent = picked === undefined ? "" : `~/${rootOf(picked.where)}`;
+  if (picked === undefined || picked.state.kind === "ok") return;
+  if (picked.state.kind === "unset") {
+    hint.textContent = pickerHint(`~/${picked.where.configDir}`);
+    return;
+  }
+  path.className = "repo error";
+  path.textContent = `~/${picked.where.configDir} → ${picked.state.chosen}`;
+  hint.className = "hint error";
+  hint.textContent = t("rootMismatch", `~/${picked.where.configDir}`, picked.state.chosen);
+}
+
+async function renderIndexTargets(sample: string): Promise<void> {
+  const roots = await readRoots();
+  const stateOf = (configDir: string): RootState => roots.get(configDir) ?? { kind: "unset" };
+  indexShared = stateOf(SHARED_CONFIG_DIR).kind === "ok";
+  const select = byId<HTMLSelectElement>("index-target");
+  select.replaceChildren();
+  indexOptions = [];
+
+  for (const agent of targets("skill")) {
+    const where = placement(agent, "skill", sample, indexShared);
+    if (where === null) continue;
+    const state = stateOf(where.configDir);
+    indexOptions.push({ agent, where, state });
+    const option = document.createElement("option");
+    option.value = agent;
+    option.textContent = `${agentLabel(where.configDir)}${stateLabel(state)}`;
+    select.append(option);
+  }
+  indexAgent = (indexOptions.find(option => option.state.kind === "ok") ?? indexOptions[0])?.agent ?? null;
+  if (indexAgent !== null) select.value = indexAgent;
+  showIndexTarget();
+}
+
+async function showIndex(at: SkillIndex): Promise<void> {
+  index = at;
+  current = null;
+  setMode(true);
+  byId("found").hidden = true;
+  byId("index").hidden = false;
+  byId("index-title").textContent = t("tabIndexTitle", String(at.entries.length));
+  byId("index-repo").textContent = `${at.source.repo}/${at.subdir}`;
+  byId("index-status").textContent = "";
+  byId("index-status").className = "status";
+  await renderIndexTargets(at.entries[0].name);
+
+  const box = byId("index-list");
+  box.replaceChildren();
+  for (const entry of at.entries) {
+    const row = document.createElement("li");
+    const text = document.createElement("div");
+    text.className = "name";
+    text.textContent = entry.name;
+    const count = document.createElement("span");
+    count.className = "count";
+    count.textContent = t("tabIndexFiles", String(entry.files.length));
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = t("tabInstall");
+    button.addEventListener("click", () => void installOne(entry, button));
+    row.append(text, count, button);
+    box.append(row);
+  }
+}
+
+/** 一覧の 1 件を入れる。押した行だけを触り、他の行は残す。 */
+async function installOne(entry: SkillEntry, button: HTMLButtonElement): Promise<void> {
+  const status = byId("index-status");
+  const picked = indexOptions.find(option => option.agent === indexAgent);
+  status.className = "status";
+  if (index === null || picked === undefined) {
+    status.className = "status error";
+    status.textContent = t("tabPickTarget");
+    return;
+  }
+  // 別のフォルダが設定されたままなら入れない。意図しない場所へ書かない。
+  if (picked.state.kind === "mismatch") {
+    status.className = "status error";
+    status.textContent = t("rootMismatch", `~/${picked.where.configDir}`, picked.state.chosen);
+    return;
+  }
+  const where = placement(picked.agent, "skill", entry.name, indexShared);
+  if (where === null) return;
+
+  const label = button.textContent ?? "";
+  button.disabled = true;
+  status.textContent = t("tabInstalling");
+  try {
+    const root = await placeHandle(where, true, { create: true });
+    if (root === null) { status.textContent = t("permissionLost"); button.textContent = label; return; }
+
+    const lead: ToolLead = {
+      url: index.url, source: index.source, kind: "skill", name: entry.name, proofs: [],
+    };
+    const request = {
+      lead, agent: picked.agent, placement: where, root,
+      // アーカイブではなくファイル単位で取る。大きいリポジトリでも 1 件ぶんで済む。
+      fetchFiles: filesFor(index.source, index.subdir, entry),
+    };
+    if (await willOverwrite(request) && !confirm(t("overwriteConfirm", entry.name))) {
+      status.textContent = "";
+      button.textContent = label;
+      return;
+    }
+    await install({ ...request, overwrite: true });
+    status.textContent = t("tabInstalled", entry.name, `~/${rootOf(where)}`);
+    button.textContent = t("tabInstalledShort");   // 入ったものは押せないままにする
+  } catch (error) {
+    status.className = "status error";
+    status.textContent = message(error, where);
+    button.textContent = label;
+    button.disabled = false;
+  }
+}
+
+byId<HTMLSelectElement>("index-target").addEventListener("change", event => {
+  indexAgent = (event.target as HTMLSelectElement).value as AgentId;
+  showIndexTarget();
+});
+
+byId<HTMLButtonElement>("index-dismiss").addEventListener("click", () => {
+  void send({ type: "dismiss" });
+  backToNormal();
+});
 
 // --- 収集一覧 -----------------------------------------------------------
 
@@ -537,9 +711,15 @@ autoOpen.addEventListener("change", () => void setAutoOpenEnabled(autoOpen.check
 void (async () => {
   autoOpen.checked = await autoOpenEnabled();
   // 検知の候補は「今見ているタブのもの」だけを受け取る（別のタブのものを出さない）。
-  const candidate = await send({ type: "candidate" });
-  if (typeof candidate === "string" && candidate !== "") {
-    byId<HTMLInputElement>("url").value = candidate;
-    await showLead(candidate, true);
+  const candidate = await send({ type: "candidate" }) as
+    { url?: string; index?: SkillIndex | null } | undefined;
+  // 列挙済みの一覧があればそれを使う。popup から API をもう一度叩かない。
+  if (candidate?.index != null && candidate.index.entries.length > 0) {
+    await showIndex(candidate.index);
+    return;
+  }
+  if (typeof candidate?.url === "string" && candidate.url !== "") {
+    byId<HTMLInputElement>("url").value = candidate.url;
+    await showLead(candidate.url, true);
   }
 })();

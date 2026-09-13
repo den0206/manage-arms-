@@ -115,7 +115,7 @@ npm run package:browser
 
 ### 使い方
 
-1. GitHub、skills.sh、Agents DirectoryのSkillまたはSubagentページを開きます。検知するとポップアップが自動で開きます。
+1. GitHub、skills.sh、Agents DirectoryのSkillまたはSubagentページを開きます。検知するとポップアップが自動で開きます。`github.com/<owner>/<repo>/tree/<branch>/skills`のようにSkillが並ぶフォルダや、カタログのリポジトリページを開くと、一覧を出して1件ずつ導入できます。
 
    <p align="center">
      <img src="media/auto-detect-browser.png" width="720" alt="対応ページでSkillを検知して自動的に開いたAgent Toolのポップアップ">

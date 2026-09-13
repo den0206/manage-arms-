@@ -253,5 +253,29 @@
   },
   "settingsClear": {
     "message": "Clear this folder"
+  },
+  "tabIndexTitle": {
+    "message": "$COUNT$ skills in this folder",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "20"
+      }
+    }
+  },
+  "tabIndexLead": {
+    "message": "Install them one at a time."
+  },
+  "tabInstalledShort": {
+    "message": "Installed"
+  },
+  "tabIndexFiles": {
+    "message": "$COUNT$ files",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "20"
+      }
+    }
   }
 }
