@@ -10,6 +10,7 @@ import {
   clearRoot, configHandle, exists, PickerError, pickerHint, pickerUnavailable, placeHandle,
   rootState,
 } from "./fs.js";
+import { fetchJson } from "./fetch.js";
 import {
   filesFor, install, InstallError, isExtractable, remove, willOverwrite,
 } from "./install.js";
@@ -205,7 +206,7 @@ async function showLead(raw: string, vetted = false): Promise<void> {
   // Skill が並ぶディレクトリなら一覧を出す。列挙は GitHub API を 1 回だけ使う。
   const at = skillIndex(raw);
   if (at !== null) {
-    const entries = await listSkills(at.source, at.subdir, getJson);
+    const entries = await listSkills(at.source, at.subdir, fetchJson);
     if (entries.length > 0) {
       byId("url-error").hidden = true;
       await showIndex({ ...at, entries });
@@ -354,11 +355,6 @@ let indexOptions: { agent: AgentId; where: Placement; state: RootState }[] = [];
 let indexAgent: AgentId | null = null;
 /** 共有ストアが許可済みか。行ごとに置き場を組み直すのに要る。 */
 let indexShared = false;
-
-const getJson = async (url: string): Promise<unknown | null> => {
-  const response = await fetch(url, { cache: "no-store" }).catch(() => null);
-  return response === null || !response.ok ? null : await response.json().catch(() => null);
-};
 
 function showIndexTarget(): void {
   const picked = indexOptions.find(option => option.agent === indexAgent);
