@@ -7,8 +7,30 @@ const { decode, ledger, ledgerPath, LEDGER_DIR } = require("../out/core/ledger.j
 const { add, isRemovable, MAX_BROWSER_COLLECTION_ENTRIES } =
   require("../out/core/collection.js");
 const { treeHash } = require("../out/core/hash.js");
+const { PAGE_LIMIT } = require("../out/core/limits.js");
 
 // --- 検知 ---------------------------------------------------------------
+
+test("ブラウザの JSON 読み込みは上限を超えたら中止する", async () => {
+  const { fetchJson } = await import("../out/web/browser/fetch.js");
+  let cancelled = false;
+  let reads = 0;
+  const response = {
+    ok: true,
+    headers: { get: () => null },
+    body: {
+      getReader: () => ({
+        read: async () => reads++ === 0
+          ? { done: false, value: new Uint8Array(PAGE_LIMIT + 1) }
+          : { done: true, value: undefined },
+        cancel: async () => { cancelled = true; },
+        releaseLock: () => {},
+      }),
+    },
+  };
+  assert.equal(await fetchJson("https://api.github.com/example", async () => response), null);
+  assert.equal(cancelled, true);
+});
 
 test("パス名から Skill と Subagent を当てる", () => {
   assert.equal(kindOf(["skills", "pdf"]), "skill");

@@ -5,6 +5,7 @@ import { rootStateOf, splitRoot } from "../core/placement.js";
 import { MAX_BROWSER_COLLECTION_ENTRIES } from "../core/collection.js";
 import { autoOpenEnabled, knownRoots, loadCollection, loadHandle } from "./store.js";
 import { isExtractable } from "./install.js";
+import { fetchJson } from "./fetch.js";
 
 /**
  * 検知の判定はここで行う。content script は URL を送るだけにする
@@ -51,17 +52,11 @@ const shown = new Map<number, Index>();
  */
 const listed = new Map<string, SkillEntry[]>();
 
-const getJson = async (url: string): Promise<unknown | null> => {
-  const response = await fetch(url, { cache: "no-store" }).catch(() => null);
-  // 枠切れ（403）も通信失敗も同じ扱い。覚え込まず、次に開けばもう一度試す。
-  return response === null || !response.ok ? null : await response.json().catch(() => null);
-};
-
 async function enumerate(at: { source: GitHubSource; subdir: string }): Promise<SkillEntry[]> {
   const key = `${at.source.repo}\n${at.source.branch ?? ""}\n${at.subdir}`;
   const cached = listed.get(key);
   if (cached !== undefined) return cached;
-  const entries = await listSkills(at.source, at.subdir, getJson);
+  const entries = await listSkills(at.source, at.subdir, fetchJson);
   if (entries.length === 0) return entries;    // 取れなかっただけのものを固定しない
   const oldest = listed.keys().next().value;
   if (listed.size >= MAX_BROWSER_COLLECTION_ENTRIES && oldest !== undefined) listed.delete(oldest);

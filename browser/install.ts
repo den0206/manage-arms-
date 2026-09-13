@@ -9,6 +9,7 @@ import { Placement, rootOf } from "../core/placement.js";
 import { fetchFiles, listFiles, SkillEntry, TreeFetchError } from "../core/tree.js";
 import { exists, readTree, removeEntry, removeLedgerFile, reserve, writeTree } from "./fs.js";
 import { collect, forget } from "./store.js";
+import { fetchJson } from "./fetch.js";
 
 /**
  * codeload は tar.gz を返す。gzip は DecompressionStream で解ける。
@@ -80,7 +81,7 @@ async function fromFiles(
     // tree / raw は同じ commit を読む。別々の ref で読むと、途中の push で
     // 一覧と実体と台帳が食い違う。
     const pinned = sha === undefined ? source : { ...source, branch: sha };
-    const listed = await listFiles(pinned, base, getJson);
+    const listed = await listFiles(pinned, base, fetchJson);
     if (listed === null) {
       throw new InstallError("notFound", `${lead.name} was not found in ${source.repo}`);
     }
@@ -216,11 +217,6 @@ const getBytes = async (url: string, limit: number): Promise<Uint8Array | null |
   let offset = 0;
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
   return bytes;
-};
-
-const getJson = async (url: string): Promise<unknown | null> => {
-  const response = await fetch(url, { cache: "no-store" }).catch(() => null);
-  return response === null || !response.ok ? null : await response.json().catch(() => null);
 };
 
 const asInstallError = (error: unknown): unknown =>
