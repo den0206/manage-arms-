@@ -451,9 +451,10 @@ async function installOne(entry: SkillEntry, button: HTMLButtonElement): Promise
   const label = button.textContent ?? "";
   button.disabled = true;
   status.textContent = t("tabInstalling");
+  let installed = false;
   try {
     const root = await placeHandle(where, true, { create: true });
-    if (root === null) { status.textContent = t("permissionLost"); button.textContent = label; return; }
+    if (root === null) { status.textContent = t("permissionLost"); return; }
 
     const lead: ToolLead = {
       url: index.url, source: index.source, kind: "skill", name: entry.name, proofs: [],
@@ -465,17 +466,19 @@ async function installOne(entry: SkillEntry, button: HTMLButtonElement): Promise
     };
     if (await willOverwrite(request) && !confirm(t("overwriteConfirm", entry.name))) {
       status.textContent = "";
-      button.textContent = label;
       return;
     }
     await install({ ...request, overwrite: true });
+    installed = true;
     status.textContent = t("tabInstalled", entry.name, `~/${rootOf(where)}`);
     button.textContent = t("tabInstalledShort");   // 入ったものは押せないままにする
   } catch (error) {
     status.className = "status error";
     status.textContent = message(error, where);
-    button.textContent = label;
-    button.disabled = false;
+  } finally {
+    // **入ったときだけ**押せないままにする。許可が取れなかった・上書きをやめた・
+    // 取得に失敗した行は必ず戻す。押せない行を残さない。
+    if (!installed) { button.textContent = label; button.disabled = false; }
   }
 }
 
