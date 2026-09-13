@@ -1,11 +1,12 @@
 import { ArchiveError, firstUnwritable, readTarGz } from "../core/archive.js";
 import { Collected, isRemovable } from "../core/collection.js";
 import { locateSkill, ToolLead } from "../core/detect.js";
-import { GitHubSource } from "../core/github.js";
+import { GitHubSource, narrowToSkill } from "../core/github.js";
 import { treeHash, TreeFile } from "../core/hash.js";
 import { ledger, ledgerPath } from "../core/ledger.js";
 import { CATALOG_EXTRACT_LIMIT, ENTRY_LIMIT, SINGLE_FILE_LIMIT, SIZE_LIMIT } from "../core/limits.js";
 import { Placement, rootOf } from "../core/placement.js";
+import { fetchFiles, listFiles, SkillEntry, TreeFetchError } from "../core/tree.js";
 import { exists, readTree, removeEntry, removeLedgerFile, reserve, writeTree } from "./fs.js";
 import { collect, forget } from "./store.js";
 
@@ -50,14 +51,54 @@ export class InstallError extends Error {
  * カタログ URL は subdir を持たないので一度まとめて持ち、`locateSkill` で
  * ディレクトリ名か SKILL.md の frontmatter `name` を突き合わせて探す。
  */
-export async function download(lead: ToolLead): Promise<{ files: TreeFile[]; sha?: string }> {
-  const sha = await commitSha(lead.source);
-  const response = await fetch(archiveUrl(lead.source, sha), { cache: "no-store" }).catch(() => null);
+export async function download(
+  lead: ToolLead,
+): Promise<{ files: TreeFile[]; sha?: string; source: GitHubSource }> {
+  // カタログは subdir を約束しない。規約どおりの置き場を先に 1 回だけ確かめる。
+  // 当たれば、要らないものをその場で捨てながら読める。
+  const source = await narrowToSkill(lead.source, lead.kind === "skill" ? lead.name : undefined);
+  // SHA はどちらの経路も同じものを使う。落ちてから調べ直すと API を 1 回余計に使う
+  // （未認証は 60 req/時）。読めなければ両経路とも従来どおり HEAD を使う。
+  const sha = await commitSha(source);
+  try {
+    return await fromArchive(lead, source, sha);
+  } catch (error) {
+    // アーカイブが取得上限を超えるリポジトリでも、置き場が分かっていればファイル単位で
+    // 取れる（実測: 圧縮 116 MB のリポジトリから 104 KB だけを取る）。**落ちたときだけ**
+    // ここへ来るので、アーカイブで取れているものの経路は変えない。
+    if (!(error instanceof InstallError) || error.kind !== "tooLarge") throw error;
+    if (lead.kind !== "skill" || source.subdir === undefined) throw error;
+    return fromFiles(lead, source, source.subdir, sha);
+  }
+}
+
+/** 置き場が分かっているものを、アーカイブに触れずに取り出す。 */
+async function fromFiles(
+  lead: ToolLead, source: GitHubSource, base: string, sha: string | undefined,
+): Promise<{ files: TreeFile[]; sha?: string; source: GitHubSource }> {
+  try {
+    // tree / raw は同じ commit を読む。別々の ref で読むと、途中の push で
+    // 一覧と実体と台帳が食い違う。
+    const pinned = sha === undefined ? source : { ...source, branch: sha };
+    const listed = await listFiles(pinned, base, getJson);
+    if (listed === null) {
+      throw new InstallError("notFound", `${lead.name} was not found in ${source.repo}`);
+    }
+    return { files: await fetchFiles(pinned, base, listed, getBytes), sha, source };
+  } catch (error) {
+    throw asInstallError(error);
+  }
+}
+
+async function fromArchive(
+  lead: ToolLead, source: GitHubSource, sha: string | undefined,
+): Promise<{ files: TreeFile[]; sha?: string; source: GitHubSource }> {
+  const response = await fetch(archiveUrl(source, sha), { cache: "no-store" }).catch(() => null);
   if (response === null) {
     throw new InstallError("fetchFailed", "the archive could not be fetched");
   }
   if (response.status === 404) {
-    throw new InstallError("notFound", `${lead.source.repo} was not found on GitHub`);
+    throw new InstallError("notFound", `${source.repo} was not found on GitHub`);
   }
   if (!response.ok || response.body === null) {
     throw new InstallError("fetchFailed", `the archive could not be fetched (${response.status})`);
@@ -68,7 +109,7 @@ export async function download(lead: ToolLead): Promise<{ files: TreeFile[]; sha
     throw new InstallError("tooLarge", "the archive is too large");
   }
 
-  const want = lead.source.subdir === undefined ? null : lead.source.subdir.split("/");
+  const want = source.subdir === undefined ? null : source.subdir.split("/");
   const limits = want === null
     ? { entries: ENTRY_LIMIT, single: SINGLE_FILE_LIMIT, total: CATALOG_EXTRACT_LIMIT }
     : undefined;
@@ -91,7 +132,7 @@ export async function download(lead: ToolLead): Promise<{ files: TreeFile[]; sha
 
   const base = want ?? locateSkill(kept, lead.name);
   if (base === null) {
-    throw new InstallError("notFound", `${lead.name} was not found in ${lead.source.repo}`);
+    throw new InstallError("notFound", `${lead.name} was not found in ${source.repo}`);
   }
 
   // 入れるものの中にリンクがあれば止める。外にあるだけなら関係ない。
@@ -108,9 +149,9 @@ export async function download(lead: ToolLead): Promise<{ files: TreeFile[]; sha
   // Subagent は .md 1 つ。取得元の subdir はその親ディレクトリなので名前で絞る。
   if (lead.kind === "subagent") files = files.filter(file => file.path === `${lead.name}.md`);
   if (files.length === 0) {
-    throw new InstallError("notFound", `${lead.name} was not found in ${lead.source.repo}`);
+    throw new InstallError("notFound", `${lead.name} was not found in ${source.repo}`);
   }
-  return { files, sha };
+  return { files, sha, source };
 }
 
 /**
@@ -129,6 +170,9 @@ export async function isExtractable(lead: ToolLead): Promise<boolean | null> {
   }
 }
 
+/** 実体の取り方。既定はアーカイブ 1 本。 */
+export type Fetched = { files: TreeFile[]; sha?: string; source: GitHubSource };
+
 export type InstallRequest = {
   readonly lead: ToolLead;
   readonly agent: string;
@@ -136,6 +180,71 @@ export type InstallRequest = {
   readonly root: FileSystemDirectoryHandle;
   /** 同名があったときに上書きしてよいか。呼び出し側が利用者に確認してから渡す。 */
   readonly overwrite: boolean;
+  /**
+   * 取得のしかたを差し替える。アーカイブが上限を超えるリポジトリでは、呼び出し側が
+   * `filesFor` を渡してファイル単位で取る。書き込み・台帳・収集一覧は同じ経路を通す。
+   */
+  readonly fetchFiles?: () => Promise<Fetched>;
+};
+
+/** 実体 1 ファイル。`raw` は CDN なので、API の 60 req/時 を件数ぶん食わない。 */
+const getBytes = async (url: string, limit: number): Promise<Uint8Array | null | "tooLarge"> => {
+  const response = await fetch(url, { cache: "no-store" }).catch(() => null);
+  if (response === null || !response.ok || response.body === null) return null;
+  if (Number(response.headers.get("content-length") ?? 0) > limit) {
+    await response.body.cancel();
+    return "tooLarge";
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) break;
+      size += next.value.length;
+      if (size > limit) {
+        await reader.cancel();
+        return "tooLarge";
+      }
+      chunks.push(next.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+  return bytes;
+};
+
+const getJson = async (url: string): Promise<unknown | null> => {
+  const response = await fetch(url, { cache: "no-store" }).catch(() => null);
+  return response === null || !response.ok ? null : await response.json().catch(() => null);
+};
+
+const asInstallError = (error: unknown): unknown =>
+  error instanceof TreeFetchError
+    ? new InstallError(error.kind === "tooLarge" ? "tooLarge" : "fetchFailed", error.message)
+    : error;
+
+/**
+ * 一覧の 1 件を、アーカイブに触れずに取り出す。
+ * 大きいリポジトリはアーカイブが取得上限を超えるので、こちらでしか入れられない。
+ */
+export const filesFor = (
+  source: GitHubSource, subdir: string, entry: SkillEntry,
+) => async (): Promise<Fetched> => {
+  const base = `${subdir}/${entry.name}`;
+  try {
+    // 一覧を出してから導入されるまでに branch が進んでも、1 件の内容は混ぜない。
+    const sha = await commitSha(source);
+    const pinned = sha === undefined ? source : { ...source, branch: sha };
+    const files = await fetchFiles(pinned, base, entry.files, getBytes);
+    return { files, sha, source: { ...source, subdir: base } };
+  } catch (error) {
+    throw asInstallError(error);
+  }
 };
 
 export const willOverwrite = (request: Omit<InstallRequest, "overwrite">): Promise<boolean> =>
@@ -163,8 +272,11 @@ export async function install(request: InstallRequest): Promise<Collected> {
 
   let files: TreeFile[];
   let sha: string | undefined;
+  // 絞り込みが当たれば subdir が付く。台帳と収集一覧へはそちらを残す
+  // （IDE 拡張の更新検知も、次からは要る分だけを見る）。
+  let source: GitHubSource;
   try {
-    ({ files, sha } = await download(lead));
+    ({ files, sha, source } = await (request.fetchFiles ?? (() => download(lead)))());
   } catch (error) {
     // 確保しただけの空の置き場は片付ける。元からあったものには触っていない。
     if (!taken) {
@@ -218,15 +330,15 @@ export async function install(request: InstallRequest): Promise<Collected> {
   await writeTree(root, [], [{
     path: ledgerPath(lead.name),
     bytes: new TextEncoder().encode(
-      JSON.stringify(ledger(lead.name, lead.kind, lead.source, sha), null, 2) + "\n"),
+      JSON.stringify(ledger(lead.name, lead.kind, source, sha), null, 2) + "\n"),
   }]).catch(error => { console.error("Agent Tool: ledger", error); });
 
   const written = await readTree(root, placement.entry, placement.isDirectory);
   const item: Collected = {
     name: lead.name, kind: lead.kind, agent: request.agent, root: rootOf(placement),
-    repo: lead.source.repo,
-    ...(lead.source.branch === undefined ? {} : { branch: lead.source.branch }),
-    ...(lead.source.subdir === undefined ? {} : { subdir: lead.source.subdir }),
+    repo: source.repo,
+    ...(source.branch === undefined ? {} : { branch: source.branch }),
+    ...(source.subdir === undefined ? {} : { subdir: source.subdir }),
     ...(sha === undefined ? {} : { sha }),
     treeHash: await treeHash(written ?? []),
     installedAt: Date.now(),

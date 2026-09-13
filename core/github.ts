@@ -207,5 +207,35 @@ function flatten(value: unknown): Record<string, unknown>[] {
   return [node, ...flatten(node["@graph"])];
 }
 
+/** 実在確認は HEAD 1 回だけ。本文は読まない。テストでは差し替える。 */
+const headOk = (url: string): Promise<boolean> =>
+  fetch(url, { method: "HEAD", cache: "no-store" })
+    .then(response => response.status === 200, () => false);
+
+/**
+ * カタログ URL は subdir を約束しない（`skills.sh/owner/repo/<名前>` の 3 番目は
+ * ディレクトリ名であってパスではない）。subdir が無いとアーカイブの中身を丸ごと
+ * 持ってから探すことになり、大きいリポジトリは上限に当たって取り出せない
+ * （実測: `github/awesome-copilot` は 105 MB あり、欲しいのは 10 KB）。
+ *
+ * 規約どおりの `skills/<名前>` に `SKILL.md` があるかだけ、HEAD 1 回で先に確かめる。
+ * **当たったときだけ** subdir を載せ、外れたら何も足さない（従来どおりアーカイブ全体から
+ * 探す）ので退行しない。カタログ名とディレクトリ名が違うことがあるため、外れは普通に起きる。
+ *
+ * 既定ブランチ名は推測しない。`HEAD` は raw でも解決する。
+ */
+export async function narrowToSkill(
+  source: GitHubSource, skill: string | undefined,
+  exists: (url: string) => Promise<boolean> = headOk,
+): Promise<GitHubSource> {
+  if (skill === undefined || source.subdir !== undefined) return source;
+  // パス要素として使えない名前は確かめもしない。`..` で置き場の外を指させない。
+  if (!/^[\w.-]+$/.test(skill) || skill.startsWith(".")) return source;
+  const subdir = `skills/${skill}`;
+  const at = `https://raw.githubusercontent.com/${source.repo}/`
+    + `${source.branch ?? "HEAD"}/${subdir}/SKILL.md`;
+  return await exists(at) ? { ...source, subdir } : source;
+}
+
 /** カタログ URL に含まれるスキル名。候補一覧の初期絞り込みに使う。 */
 export const skillHint = (raw: string): string | undefined => catalog(raw)?.skill;
