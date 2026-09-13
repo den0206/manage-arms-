@@ -61,6 +61,28 @@
         </div>
       </section>
 
+      <!-- Skill が並ぶディレクトリ。行ごとに 1 件ずつ入れる。まとめては入れない。 -->
+      <section id="index" hidden>
+        <div class="card">
+          <div class="found-head">
+            <span class="kind" data-i18n="kindSkill"></span>
+            <h2 id="index-title"></h2>
+          </div>
+          <code id="index-repo" class="repo" translate="no"></code>
+          <div class="choose">
+            <label for="index-target" data-i18n="tabTargetLabel"></label>
+            <select id="index-target"></select>
+          </div>
+          <code id="index-path" class="repo" translate="no"></code>
+          <p id="index-hint" class="hint"></p>
+          <p id="index-status" class="status" role="status"></p>
+          <ul id="index-list"></ul>
+          <div class="actions">
+            <button id="index-dismiss" type="button" data-i18n="tabDismiss"></button>
+          </div>
+        </div>
+      </section>
+
       <!--
         案内文は `label` にしない。中に「対応サイト」を開くボタンを差し込むので、
         `label` のままだと入力欄のアクセシブル名にボタン文言が混ざり、

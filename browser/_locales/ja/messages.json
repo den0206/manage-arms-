@@ -253,5 +253,29 @@
   },
   "settingsClear": {
     "message": "設定を取り消す"
+  },
+  "tabIndexTitle": {
+    "message": "このフォルダの Skill $COUNT$ 件",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "20"
+      }
+    }
+  },
+  "tabIndexLead": {
+    "message": "1 件ずつ入れられます。"
+  },
+  "tabInstalledShort": {
+    "message": "導入済み"
+  },
+  "tabIndexFiles": {
+    "message": "$COUNT$ ファイル",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "20"
+      }
+    }
   }
 }

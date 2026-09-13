@@ -115,7 +115,7 @@ This produces `vsix/browser/`. Open `chrome://extensions` (or the Brave/Edge equ
 
 ### Usage
 
-1. Browse to a supported page (a Skill or Subagent on GitHub, skills.sh, or Agents Directory). If detection finds one, the popup opens on its own:
+1. Browse to a supported page (a Skill or Subagent on GitHub, skills.sh, or Agents Directory). If detection finds one, the popup opens on its own. Open a folder that holds several skills — `github.com/<owner>/<repo>/tree/<branch>/skills`, or a repository page on a catalog — and the popup lists them so you can install one at a time:
 
    <p align="center">
      <img src="media/auto-detect-browser.png" width="720" alt="The popup opening automatically after Agent Tool detects a Skill on a GitHub page">

@@ -121,11 +121,13 @@ section + section { margin-top: 14px; padding-top: 14px; border-top: 1px solid v
 /* 画面は 3 つ。検知・通常・設定のどれか 1 つだけを出す。 */
 body.detected #url-section,
 body.settings #found,
+body.settings #index,
 body.settings #url-section,
 body.settings #done { display: none; }
 
 /* 画面が入れ替わったことを一度だけ示す。切り替えの向きは付けない。 */
-#found:not([hidden]), #settings-view:not([hidden]) { animation: rise 0.18s var(--ease) both; }
+#found:not([hidden]), #index:not([hidden]), #settings-view:not([hidden])
+  { animation: rise 0.18s var(--ease) both; }
 
 /* 戻るは設定のときだけ。歯車は設定と検知のときに引っ込める。 */
 #close-settings { display: none; }
@@ -409,6 +411,18 @@ input[type=url]:focus-visible {
 
 .error { margin: 6px 0 0; font-size: 12px; }
 #url-error:not([hidden]) { animation: fade 0.16s var(--ease) both; }
+
+/* --- Skill が並ぶディレクトリの一覧 ------------------------------------ */
+
+/* 件数が多いことがある（実測 20 件）。popup を伸ばさず、ここだけ送る。 */
+#index-list { max-height: 232px; overflow-y: auto; overscroll-behavior: contain; }
+
+#index-list li { padding: 7px 0; }
+#index-list li:first-child { border-top: 1px solid var(--line); }
+#index-list .name { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#index-list .count { flex: none; color: var(--muted); font-size: 11.5px; }
+#index-list button { flex: none; padding: 4px 10px; font-size: 11.5px; }
+#index-list button:disabled { border-color: transparent; color: var(--muted); }
 
 /* --- 導入したもの。設定の最下部に畳んで置く ---------------------------- */
 

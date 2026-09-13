@@ -1,4 +1,6 @@
-import { detectPage, proofUrls, ToolLead } from "../core/detect.js";
+import { detectPage, proofUrls, skillIndex, ToolLead } from "../core/detect.js";
+import { GitHubSource } from "../core/github.js";
+import { listSkills, SkillEntry } from "../core/tree.js";
 import { rootStateOf, splitRoot } from "../core/placement.js";
 import { MAX_BROWSER_COLLECTION_ENTRIES } from "../core/collection.js";
 import { autoOpenEnabled, knownRoots, loadCollection, loadHandle } from "./store.js";
@@ -37,6 +39,34 @@ async function extractable(found: ToolLead): Promise<boolean> {
     extracted.set(found.url, ok);
   }
   return ok === true;
+}
+
+/** そのタブで出している一覧。popup が開いたときにそのまま渡す。 */
+type Index = { source: GitHubSource; subdir: string; entries: SkillEntry[] };
+const shown = new Map<number, Index>();
+
+/**
+ * 列挙は GitHub API を 1 回使う（未認証は 60 req/時）。同じ置き場を見るたびに叩かない
+ * よう、この起動中のメモリにだけ覚える。件数上限は収集一覧と同じにする。
+ */
+const listed = new Map<string, SkillEntry[]>();
+
+const getJson = async (url: string): Promise<unknown | null> => {
+  const response = await fetch(url, { cache: "no-store" }).catch(() => null);
+  // 枠切れ（403）も通信失敗も同じ扱い。覚え込まず、次に開けばもう一度試す。
+  return response === null || !response.ok ? null : await response.json().catch(() => null);
+};
+
+async function enumerate(at: { source: GitHubSource; subdir: string }): Promise<SkillEntry[]> {
+  const key = `${at.source.repo}\n${at.source.branch ?? ""}\n${at.subdir}`;
+  const cached = listed.get(key);
+  if (cached !== undefined) return cached;
+  const entries = await listSkills(at.source, at.subdir, getJson);
+  if (entries.length === 0) return entries;    // 取れなかっただけのものを固定しない
+  const oldest = listed.keys().next().value;
+  if (listed.size >= MAX_BROWSER_COLLECTION_ENTRIES && oldest !== undefined) listed.delete(oldest);
+  listed.set(key, entries);
+  return entries;
 }
 
 /** 実在確認。**どれか 1 つでも 200 なら本物**。404 と通信失敗は黙る。 */
@@ -80,9 +110,20 @@ async function alreadyInstalled(found: ToolLead): Promise<boolean> {
 }
 
 const clear = async (tabId: number): Promise<void> => {
-  if (!candidates.delete(tabId)) return;
+  const had = candidates.delete(tabId);
+  if (!shown.delete(tabId) && !had) return;
   await chrome.action.setBadgeText({ text: "", tabId }).catch(() => { /* タブが閉じた */ });
 };
+
+/** バッジを出して popup を開く。開けない環境ではバッジだけにする。 */
+async function announce(tabId: number, text: string): Promise<void> {
+  await chrome.action.setBadgeText({ text, tabId }).catch(() => { /* タブが閉じた */ });
+  // popup の `--accent` と同じ紫。バッジはアイコンの上に出るので、そこで色がずれない。
+  await chrome.action.setBadgeBackgroundColor({ color: "#5b4bd6", tabId }).catch(() => { /* 同上 */ });
+  // 設定が ON なら popup を開く。開けない場合（Chrome の版や操作の文脈による）は
+  // バッジだけにする。**別ウィンドウは作らない** — 見ていたページが隠れる。
+  await chrome.action.openPopup().catch(() => { /* バッジで足りる */ });
+}
 
 async function visit(url: string, tabId: number | undefined, jsonLd?: string): Promise<void> {
   if (tabId === undefined) return;
@@ -93,24 +134,33 @@ async function visit(url: string, tabId: number | undefined, jsonLd?: string): P
   // 展開確認はアーカイブを 1 本丸ごと落とす（実測で数 MB）。ネットワークに触れない
   // 判定を全部先に通し、**出すと決まったものだけ**確かめる。導入済みのものを
   // 見るたびに落とし直さない。
+  // Skill が並ぶディレクトリなら、1 件ではなく一覧を出す。アーカイブは落とさない。
+  const at = skillIndex(url);
+  if (at !== null) {
+    const entries = await enumerate(at);
+    if (entries.length === 0) return;
+    shown.set(tabId, { ...at, entries });
+    await announce(tabId, String(entries.length));
+    return;
+  }
+
   const found = detectPage(url, jsonLd ?? "");
   if (found === null) return;
   if (!await exists(found) || await alreadyInstalled(found)) return;
   if (!await extractable(found)) return;
 
   candidates.set(tabId, found.url);
-  await chrome.action.setBadgeText({ text: "1", tabId }).catch(() => { /* タブが閉じた */ });
-  // popup の `--accent` と同じ紫。バッジはアイコンの上に出るので、そこで色がずれない。
-  await chrome.action.setBadgeBackgroundColor({ color: "#5b4bd6", tabId }).catch(() => { /* 同上 */ });
-  // 設定が ON なら popup を開く。開けない場合（Chrome の版や操作の文脈による）は
-  // バッジだけにする。**別ウィンドウは作らない** — 見ていたページが隠れる。
-  await chrome.action.openPopup().catch(() => { /* バッジで足りる */ });
+  await announce(tabId, "1");
 }
 
-/** 今見ているタブの候補。popup が開いたときに訊く。 */
-async function activeCandidate(): Promise<string> {
+/**
+ * 今見ているタブの候補。popup が開いたときに訊く。
+ * 一覧は列挙済みのものをそのまま渡す — popup がもう一度 API を叩かないため。
+ */
+async function activeCandidate(): Promise<{ url: string; index: Index | null }> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  return tab?.id === undefined ? "" : candidates.get(tab.id) ?? "";
+  if (tab?.id === undefined) return { url: "", index: null };
+  return { url: candidates.get(tab.id) ?? "", index: shown.get(tab.id) ?? null };
 }
 
 /** 今の表示をやめる。「今はしない」と導入後の両方が呼ぶ。次に開けばまた出る。 */
@@ -144,4 +194,7 @@ chrome.webNavigation.onHistoryStateUpdated.addListener(details => {
     .catch(() => { /* content script が入っていないページ */ });
 });
 
-chrome.tabs.onRemoved.addListener(tabId => { candidates.delete(tabId); });
+chrome.tabs.onRemoved.addListener(tabId => {
+  candidates.delete(tabId);
+  shown.delete(tabId);
+});
