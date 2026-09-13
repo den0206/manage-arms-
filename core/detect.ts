@@ -80,6 +80,39 @@ export function lead(raw: string): ToolLead | null {
   };
 }
 
+/** 既定の置き場。ここに並ぶものを一覧にする。 */
+export const SKILL_INDEX_DIR = "skills";
+
+/**
+ * **1 件ではなく一覧**を出すページか。Skill が並ぶディレクトリを指す URL を受ける。
+ *
+ *   github.com/<owner>/<repo>/tree/<branch>/skills   → その下を列挙する
+ *   skills.sh/<owner>/<repo>                         → 既定の `skills/` を列挙する
+ *
+ * 判定はここまでで、列挙は `core/tree.ts` が GitHub の tree API で行う。
+ * アーカイブを落とさないので、取得上限を超える大きいリポジトリからも 1 件ずつ入れられる。
+ */
+export function skillIndex(
+  raw: string,
+): { url: string; source: GitHubSource; subdir: string } | null {
+  const url = raw.trim();
+
+  // カタログのリポジトリページ。スキル名が無い = 1 件に決まらない。
+  const fromCatalog = catalog(url);
+  if (fromCatalog !== null) {
+    return fromCatalog.skill === undefined
+      ? { url, source: fromCatalog.source, subdir: SKILL_INDEX_DIR } : null;
+  }
+
+  const parts = components(url);
+  if (parts === null || parts.branch === undefined || parts.isFile) return null;
+  // 置き場そのものを指しているときだけ。`skills/pdf` は 1 件の Skill である。
+  const last = parts.path[parts.path.length - 1];
+  if (last === undefined || last.toLowerCase() !== SKILL_INDEX_DIR) return null;
+  const source = parseUrl(url);
+  return source === null ? null : { url, source, subdir: parts.path.join("/") };
+}
+
 /** content script が渡した URL と JSON-LD から、ブラウザ表示用の候補を作る。 */
 export function detectPage(url: string, jsonLd = ""): ToolLead | null {
   const resolved = needsPage(url) === null ? url : fromJsonLd(jsonLd);

@@ -268,6 +268,8 @@ test("リポジトリ直下の SKILL.md は候補にしない", () => {
 // --- カタログの予約パス -------------------------------------------------
 
 const { catalog, fromJsonLd, needsPage, SUPPORTED_SITES } = require("../out/core/github.js");
+const { skillIndex } = require("../out/core/detect.js");
+const { listSkills, listFiles, fetchFiles } = require("../out/core/tree.js");
 
 test("skills.sh の site は GitHub の取得元ではない", () => {
   // /site/<ドメイン>/<名前> は GitHub 以外が配っているもの。
@@ -314,6 +316,138 @@ test("対応サイト一覧は GitHub とカタログ宣言から作る", () => 
     { label: "skills.sh", url: "https://skills.sh/" },
     { label: "Agents Directory", url: "https://agentsdirectory.dev/" },
   ]);
+});
+
+// --- Skill が並ぶディレクトリ -------------------------------------------
+
+/**
+ * 置き場そのものを指されたら、1 件ではなく一覧を出す。
+ * 大きいリポジトリはアーカイブが取得上限を超えるので、ここが唯一の入口になる。
+ */
+test("置き場を指す URL は一覧の足がかりにする", () => {
+  assert.deepEqual(skillIndex("https://github.com/acme/tools/tree/main/skills"), {
+    url: "https://github.com/acme/tools/tree/main/skills",
+    source: { repo: "acme/tools", branch: "main", subdir: "skills", branchAmbiguous: true },
+    subdir: "skills",
+  });
+  // Plugin の中の置き場も同じ。実体は Skill である。
+  assert.equal(skillIndex("https://github.com/acme/tools/tree/main/plugins/x/skills").subdir,
+    "plugins/x/skills");
+  // カタログのリポジトリページは既定の置き場を見る。
+  assert.deepEqual(skillIndex("https://www.skills.sh/acme/tools"),
+    { url: "https://www.skills.sh/acme/tools", source: { repo: "acme/tools" }, subdir: "skills" });
+});
+
+test("1 件に決まる URL と対象外は一覧にしない", () => {
+  assert.equal(skillIndex("https://github.com/acme/tools/tree/main/skills/pdf"), null);
+  assert.equal(skillIndex("https://www.skills.sh/acme/tools/pdf"), null);
+  assert.equal(skillIndex("https://github.com/acme/tools/blob/main/skills"), null);
+  assert.equal(skillIndex("https://github.com/acme/tools"), null);
+  assert.equal(skillIndex("https://example.com/acme/tools/tree/main/skills"), null);
+});
+
+const tree = (paths, extra = {}) => ({
+  ...extra,
+  tree: paths.map(([path, size]) => size === undefined
+    ? { path, type: "tree", sha: "x" }
+    : { path, type: "blob", sha: "x", size }),
+});
+
+test("置き場の部分木だけを 1 回読んで列挙する", async () => {
+  const seen = [];
+  const got = await listSkills({ repo: "acme/tools", branch: "main" }, "skills", async url => {
+    seen.push(url);
+    return tree([["pdf/SKILL.md", 10], ["pdf/ref/a.md", 20], ["release/SKILL.md", 5]]);
+  });
+  // リポジトリ全体の tree は読まない。`<ref>:<パス>` で部分木を指す。
+  assert.deepEqual(seen,
+    ["https://api.github.com/repos/acme/tools/git/trees/main:skills?recursive=1"]);
+  assert.deepEqual(got, [
+    { name: "pdf", files: [{ path: "SKILL.md", size: 10 }, { path: "ref/a.md", size: 20 }] },
+    { name: "release", files: [{ path: "SKILL.md", size: 5 }] },
+  ]);
+});
+
+/** 押しても入らない行を並べない。 */
+test("SKILL.md を持たないディレクトリと直下のファイルは出さない", async () => {
+  const got = await listSkills({ repo: "acme/tools" }, "skills", async () =>
+    tree([["README.md", 3], ["docs/notes.md", 4], ["pdf/SKILL.md", 10]]));
+  assert.deepEqual(got.map(entry => entry.name), ["pdf"]);
+});
+
+test("切れた一覧と取れなかった応答は使わない", async () => {
+  const full = [["pdf/SKILL.md", 10]];
+  assert.deepEqual(await listSkills({ repo: "a/b" }, "skills", async () => tree(full, { truncated: true })), []);
+  assert.deepEqual(await listSkills({ repo: "a/b" }, "skills", async () => null), []);
+  assert.deepEqual(await listSkills({ repo: "a/b" }, "skills", async () => ({ message: "rate limited" })), []);
+});
+
+/**
+ * 置き場が分かっていれば 1 件だけを読める。アーカイブが取得上限を超えるリポジトリで、
+ * 単体ページからの導入がここを通る。
+ */
+test("置き場 1 つぶんのファイルを読む", async () => {
+  const seen = [];
+  const got = await listFiles({ repo: "acme/tools" }, "skills/pdf", async url => {
+    seen.push(url);
+    return tree([["SKILL.md", 10], ["ref/a.md", 20]]);
+  });
+  assert.deepEqual(seen,
+    ["https://api.github.com/repos/acme/tools/git/trees/HEAD:skills/pdf?recursive=1"]);
+  assert.deepEqual(got, [{ path: "SKILL.md", size: 10 }, { path: "ref/a.md", size: 20 }]);
+  // SKILL.md が無ければ Skill の実体ではない。
+  assert.equal(await listFiles({ repo: "a/b" }, "docs", async () => tree([["a.md", 1]])), null);
+});
+
+/** API の枠切れを「見つかりません」と言わない。利用者が直しようのない案内を出さない。 */
+test("読めなかったことと Skill でないことを混ぜない", async () => {
+  await assert.rejects(listFiles({ repo: "a/b" }, "skills/pdf", async () => null),
+    /could not be read/);
+  await assert.rejects(
+    listFiles({ repo: "a/b" }, "skills/pdf", async () => ({ message: "API rate limit exceeded" })),
+    /could not be read/);
+  await assert.rejects(
+    listFiles({ repo: "a/b" }, "skills/pdf", async () => tree([["SKILL.md", 1]], { truncated: true })),
+    /could not be read/);
+});
+
+test("実体は raw から取り、branch が無ければ HEAD を使う", async () => {
+  const seen = [];
+  const files = await fetchFiles({ repo: "acme/tools" }, "skills/pdf",
+    [{ path: "SKILL.md", size: 3 }, { path: "ref/a.md", size: 2 }], async url => {
+      seen.push(url);
+      return new Uint8Array([1, 2, 3]);
+    });
+  assert.deepEqual(seen, [
+    "https://raw.githubusercontent.com/acme/tools/HEAD/skills/pdf/SKILL.md",
+    "https://raw.githubusercontent.com/acme/tools/HEAD/skills/pdf/ref/a.md",
+  ]);
+  assert.deepEqual(files.map(file => file.path), ["SKILL.md", "ref/a.md"]);
+});
+
+/** 取り方が違うだけで、入ってくるものは同じ外部入力である。 */
+test("ファイル単位の取得にもアーカイブと同じ上限を当てる", async () => {
+  const nope = async () => assert.fail("上限を超えたら取りに行かない");
+  const huge = [{ path: "SKILL.md", size: 21 * 1024 * 1024 }];
+  await assert.rejects(fetchFiles({ repo: "a/b" }, "skills/pdf", huge, nope), /too large/);
+  const many = Array.from({ length: 10_001 }, (unused, at) => ({ path: `f${at}`, size: 1 }));
+  await assert.rejects(fetchFiles({ repo: "a/b" }, "skills/pdf", many, nope), /too many files/);
+});
+
+test("取れなかったファイルは黙って飛ばさない", async () => {
+  await assert.rejects(
+    fetchFiles({ repo: "a/b" }, "skills/pdf", [{ path: "SKILL.md", size: 3 }], async () => null),
+    /could not be fetched/);
+});
+
+test("本文が上限を超えたら取得側の打ち切りを通す", async () => {
+  await assert.rejects(
+    fetchFiles({ repo: "a/b" }, "skills/pdf", [{ path: "SKILL.md", size: 1 }], async (url, limit) => {
+      assert.equal(limit, 20 * 1024 * 1024);
+      return "tooLarge";
+    }),
+    /too large/,
+  );
 });
 
 // --- 設定されているフォルダの状態 ---------------------------------------

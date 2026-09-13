@@ -5,7 +5,7 @@ const { tmpdir } = require("node:os");
 const { test } = require("node:test");
 const { discard, extract, fetchPage, identify, safeJoin, singleTopLevel, stage } = require("../out/ide/fetcher.js");
 const { PAGE_LIMIT } = require("../out/core/limits.js");
-const { archiveUrl, catalog, fromJsonLd, needsPage, parseUrl, skillHint } = require("../out/core/github.js");
+const { archiveUrl, catalog, fromJsonLd, narrowToSkill, needsPage, parseUrl, skillHint } = require("../out/core/github.js");
 const { fakeEnv, makeDir, writeFileIn } = require("./helpers.js");
 const { writeZip } = require("./zipFixture.js");
 
@@ -99,6 +99,52 @@ test("Content-Length がなくても読み込み中にページ上限を打ち�
 test("zipball の URL を組み立てる", () => {
   assert.equal(archiveUrl({ repo: "o/r" }), "https://github.com/o/r/archive/refs/heads/main.zip");
   assert.equal(archiveUrl({ repo: "o/r" }, "main", "abc"), "https://github.com/o/r/archive/abc.zip");
+});
+
+// --- カタログの置き場を先に当てる ---
+
+/**
+ * カタログ URL は subdir を持たない。アーカイブを丸ごと持ってから探すと、
+ * 大きいリポジトリは上限に当たって取り出せない（実測 105 MB のリポジトリで、
+ * 欲しいのは 10 KB）。規約どおりの `skills/<名前>` を HEAD 1 回で先に確かめる。
+ */
+test("規約どおりの置き場に当たれば subdir を載せる", async () => {
+  const seen = [];
+  const source = await narrowToSkill({ repo: "o/r" }, "pdf", async url => {
+    seen.push(url);
+    return true;
+  });
+  assert.deepEqual(source, { repo: "o/r", subdir: "skills/pdf" });
+  // 既定ブランチ名は推測しない。`HEAD` は raw でも解決する。
+  assert.deepEqual(seen, ["https://raw.githubusercontent.com/o/r/HEAD/skills/pdf/SKILL.md"]);
+});
+
+/** カタログ名とディレクトリ名は一致しないことがある。外れは普通に起きる。 */
+test("外れたら取得元を変えない", async () => {
+  assert.deepEqual(await narrowToSkill({ repo: "o/r" }, "pdf", async () => false), { repo: "o/r" });
+});
+
+test("branch があればその ref で確かめる", async () => {
+  const seen = [];
+  await narrowToSkill({ repo: "o/r", branch: "dev" }, "pdf", async url => {
+    seen.push(url);
+    return false;
+  });
+  assert.deepEqual(seen, ["https://raw.githubusercontent.com/o/r/dev/skills/pdf/SKILL.md"]);
+});
+
+test("すでに subdir が分かっているなら確かめない", async () => {
+  const source = { repo: "o/r", subdir: "skills/a" };
+  const nope = async () => assert.fail("確認してはいけない");
+  assert.deepEqual(await narrowToSkill(source, "pdf", nope), source);
+});
+
+/** `..` や `/` を含む名前で置き場の外を指させない。確認そのものを行わない。 */
+test("スキル名が無い・パス要素に使えない名前は確かめない", async () => {
+  const nope = async () => assert.fail("確認してはいけない");
+  for (const skill of [undefined, "..", "a/b", "a\\b", ".hidden", "", "a b"]) {
+    assert.deepEqual(await narrowToSkill({ repo: "o/r" }, skill, nope), { repo: "o/r" }, String(skill));
+  }
 });
 
 // --- Zip Slip ---

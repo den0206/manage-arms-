@@ -6,7 +6,7 @@ import { Env, Run } from "./env";
 import { AgentToolError } from "../core/errors";
 import { run as runCommand } from "./exec";
 import { Candidate, discard, fetchPage, stage } from "./fetcher";
-import { fromJsonLd, GitHubSource, needsPage, parseUrl, skillHint } from "../core/github";
+import { fromJsonLd, GitHubSource, narrowToSkill, needsPage, parseUrl, skillHint } from "../core/github";
 import { install } from "./installer";
 import { inventory as buildInventory, InventoryItem } from "./inventory";
 import * as mcp from "./mcpScanner";
@@ -156,6 +156,18 @@ async function resolveUrl(url: string): Promise<string> {
   return target;
 }
 
+/**
+ * 取得元を組み立てる。カタログ URL は subdir を持たないので、規約どおりの置き場に
+ * あるかだけ HEAD 1 回で確かめる。当たれば zipball から要る分だけを取り出せる。
+ */
+async function sourceFor(url: string): Promise<GitHubSource> {
+  const source = parseUrl(url);
+  if (source === null) {
+    throw new AgentToolError("NOT_FOUND", "that URL is not a public GitHub repository");
+  }
+  return narrowToSkill(source, skillHint(url));
+}
+
 /** この URL を解析できるか。クリップボードの中身を提案してよいかの判定に使う。 */
 export const isSupportedUrl = (url: string): boolean =>
   parseUrl(url) !== null || needsPage(url) !== null;
@@ -167,11 +179,7 @@ export const isSupportedUrl = (url: string): boolean =>
 export async function preview(params: { url: string }):
   Promise<{ url: string; candidates: PreviewCandidate[] }> {
   const url = await resolveUrl(params.url);
-  const source = parseUrl(url);
-  if (source === null) {
-    throw new AgentToolError("NOT_FOUND", "that URL is not a public GitHub repository");
-  }
-  const staging = await stage(source);
+  const staging = await stage(await sourceFor(url));
   try {
     const hint = skillHint(url);
     const found = hint === undefined ? staging.candidates
@@ -200,11 +208,7 @@ export async function add(params: {
 }): Promise<void> {
   const place = placeFor(params.scope, params.projectPath);
   const url = await resolveUrl(params.url);
-  const source = parseUrl(url);
-  if (source === null) {
-    throw new AgentToolError("NOT_FOUND", "that URL is not a public GitHub repository");
-  }
-  const staging = await stage(source);
+  const staging = await stage(await sourceFor(url));
   try {
     const wanted = params.name ?? skillHint(url);
     const candidate = staging.candidates.find(item =>

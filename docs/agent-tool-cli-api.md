@@ -342,6 +342,9 @@ export function preview(params: {
 - 受ける URL は `core/github.ts` の `CATALOG_SITES` が宣言するサイトと GitHub。追加・削除は 1 エントリ
 - `owner/repo` を URL に含まないカタログはページを 1 回読み、schema.org の JSON-LD にある
   `codeRepository` / `url` だけを使って取得元を決める。HTML は走査しない（ページ上限 2 MB）
+- カタログ URL は subdir を約束しない。`narrowToSkill` が規約どおりの `skills/<名前>` に
+  `SKILL.md` があるかを HEAD 1 回で確かめ、**当たったときだけ** subdir を載せる。外れたら
+  何も足さず、従来どおりアーカイブ全体から `locateSkill` / `identify` で探す
 - 返す `url` は解決後のもの。`add` に渡すと同じページを読み直さない
 
 ---

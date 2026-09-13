@@ -25,6 +25,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Installing from a catalog link no longer holds the whole repository in memory while it looks for the skill. The conventional `skills/<name>` location is checked first with a single request, and when it matches only that folder is read (measured: 51.2 MB down to 2.7 KB for one entry). Catalogs whose name differs from the folder fall back to the previous behaviour.
+- A skill whose repository archive is over the download limit can now be installed from its own page: when the archive is refused, the files are fetched individually instead (measured: 104 KB taken from a repository whose archive is 116 MB). Repositories whose archive works are unaffected.
+- A repository listing that could not be read is no longer reported as "not found". Hitting GitHub's unauthenticated request limit now reads as a fetch failure, which is what it is.
 - Choosing a folder in Brave reported what went wrong instead of doing nothing: Brave turns the File System Access API off by default, and the extension now says so and walks through enabling it in brave://flags.
 - The "Installed here" list drops entries that were removed from the IDE extension. It could not read the folder to check, so it kept showing them.
 - The browser extension's dropdown menus and dialogs stay legible in dark mode; some text could render unreadable against the page's own dark styling before.
